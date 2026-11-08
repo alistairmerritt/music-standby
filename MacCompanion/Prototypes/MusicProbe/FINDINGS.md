@@ -24,14 +24,83 @@ Everything marked **written** has not been run anywhere.
 | 3 | Artist and album | **Executed** |
 | 4 | Track duration | **Executed.** Seconds, fractional |
 | 5 | Playback position | **Executed.** Seconds, fractional |
-| 6 | Playing / paused / stopped | **Executed.** Observed `paused` only |
-| 7 | Play, Pause, Next, Previous | **Written, not executed.** Guarded behind `--yes`; not run, per the brief |
-| 8 | Track-change detection | **Split.** Polling fallback **executed**; the distributed notification is **written, not observed** |
+| 6 | Playing / paused / stopped | **Executed.** `playing` and `paused` observed; `stopped` not reached |
+| 7 | Play, Pause, Next, Previous, PlayPause | **Executed and verified** — see below |
+| 8 | Track-change detection | **Executed.** Distributed notification observed for every change; polling also verified |
 
-Objective 8 is the gap. `com.apple.Music.playerInfo` is the long-standing public
-notification and `MusicProbe.swift` registers for it, but confirming it fires needs a
-playback change, which was out of bounds without approval. Two minutes to verify — README,
-last section.
+## Playback commands and notifications — verified
+
+Run with explicit permission to change playback. `selftest.sh --yes` reproduces it.
+Every command was followed by a fresh AppleScript read; nothing was taken on trust from a
+clean return.
+
+| Command | Result after re-reading Music.app |
+| --- | --- |
+| `play` | `paused` → `playing`, position advancing |
+| `pause` | `playing` → `paused`, position held |
+| `next track` | Track changed, new persistent ID, position reset to 0. **Stays paused if paused** |
+| `previous track` | Back to the earlier track, same persistent ID and database ID as before |
+| `playpause` | Toggled both ways |
+
+Both paths verified: raw `osascript` in `selftest.sh`, and `musicprobe.sh <cmd> --yes`,
+whose 0.4 s settle was enough — the snapshot it returns already shows the new state.
+
+Behaviour worth knowing:
+
+- **`previous track` at position 0 goes to the previous track**, not to the start of the
+  current one. Untested: what it does mid-track (likely restarts the track, as the UI does).
+- **Skipping while paused does not start playback.** The Lock Screen "next" should not
+  assume it implies play.
+
+### `com.apple.Music.playerInfo` — observed
+
+Observed through AppleScriptObjC (`notifywatch.applescript`), which runs under `osascript`
+with no compiler — the practical way round the broken Swift toolchain. It is the same
+`NSDistributedNotificationCenter` API `MusicProbe.swift` uses, so this verifies that path's
+mechanism, though not the Swift file itself.
+
+- **Fired on play, pause, and every track change.** Eleven notifications across eight
+  commands.
+- **Duplicates are normal.** A single play produced two `Playing` notifications. Debounce,
+  or compare against the last snapshot — `changeKey` already does.
+- The last pause in the run produced no notification inside the 30 s watch window; the run
+  overran the window, so this is most likely a test artefact, not a miss. `selftest.sh` now
+  listens for 45 s.
+- **The payload is not enough on its own.** Keys seen: `Name`, `Artist`, `Album`, `Genre`,
+  `Player State`, `Total Time`. **No persistent ID and no position.** `Total Time` (ms) also
+  wobbled for one track — 473162, 473000, 473114 — so it is not a reliable identity field.
+
+**Use the notification as a trigger, then re-read via AppleScript.** That is what
+`MusicProbe.swift` does already, and this test is why.
+
+## Track identity — verified
+
+| Track | persistent ID | database ID | class |
+| --- | --- | --- | --- |
+| Losing My Edge | `542CEB17C137B39E` | 86657 | URL track |
+| Idontknow | `542CEB17C137B3A5` | 132799 | URL track |
+| Dreamland | `542CEB17C137B3AC` | 132810 | URL track |
+
+- **Revisiting a track gives the same persistent ID and database ID.** Checked by going
+  next, next, previous, previous, and again through `musicprobe.sh`.
+- **Track change vs position change is unambiguous**: a track change alters the persistent
+  ID and resets position to 0; a seek or tick does neither.
+- The persistent IDs are near-sequential (`…B39E`, `…B3A5`, `…B3AC`). That suggests they
+  identify an entry in this queue or playlist rather than the catalogue song. **Untested:**
+  whether the same song reached from a different album, playlist or search gets the same ID,
+  and whether IDs survive a Music.app restart. Music was not restarted, per the brief.
+
+**Recommended identity strategy:**
+
+- **Song identity** = `persistent ID`. Fall back to `name|artist|album` if it is ever blank.
+  Never `database ID` alone, never `Total Time`.
+- **Playback-session identity** is a different thing and should not be derived from the
+  song. Mint it on the Mac (or in the relay, as the relay design proposes) when playback
+  starts after a stop or a disconnect, and keep it across track changes. A session is "this
+  run of listening"; a song is one item in it.
+- **Change detection** = `changeKey` (running, state, persistent ID, title, artist, album),
+  which excludes position. Position travels separately as `elapsedTime` + `capturedAt` and
+  the iOS side extrapolates it.
 
 ## Recorded output
 

@@ -13,6 +13,8 @@ relay.
 | --- | --- |
 | `musicprobe.sh` | **Runs.** Executed successfully on macOS 27.0.1 — see FINDINGS.md |
 | `artwork.sh` | **Runs.** Extracts the current track's artwork and hashes it |
+| `notifywatch.applescript` | **Runs.** Observes `com.apple.Music.playerInfo` via AppleScriptObjC: `osascript notifywatch.applescript 20` |
+| `selftest.sh` | **Runs, changes playback.** Exercises every command with verification and logs notifications: `./selftest.sh --yes` |
 | `MusicProbe.swift` | **Written, never compiled.** Same technique, ready to lift into a SwiftUI menu-bar app |
 | `FINDINGS.md` | What worked, what didn't, and the limitations found |
 
