@@ -1,0 +1,204 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+		AA0000000000000000000050 = {isa = PBXBuildFile; fileRef = AA0000000000000000000021; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AA0000000000000000000051 = {isa = PBXBuildFile; productRef = AA0000000000000000000071; };
+		AA0000000000000000000052 = {isa = PBXBuildFile; productRef = AA0000000000000000000072; };
+
+		AA0000000000000000000061 = { isa = PBXContainerItemProxy; containerPortal = AA0000000000000000000001; proxyType = 1; remoteGlobalIDString = AA0000000000000000000031; remoteInfo = MusicStandByNowPlaying; };
+
+		AA0000000000000000000043 = { isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = "$(EXTENSIONS_FOLDER_PATH)"; dstSubfolderSpec = 16; files = (AA0000000000000000000050, ); name = "Embed ExtensionKit Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+
+		AA0000000000000000000020 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicStandBy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000021 = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = MusicStandByNowPlaying.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+
+		AA0000000000000000000010 = {isa = PBXFileSystemSynchronizedRootGroup; path = App; sourceTree = "<group>"; };
+		AA0000000000000000000011 = {isa = PBXFileSystemSynchronizedRootGroup; path = NowPlayingExtension; sourceTree = "<group>"; };
+
+		AA0000000000000000000041 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (AA0000000000000000000051, ); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000000000000000000045 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (AA0000000000000000000052, ); runOnlyForDeploymentPostprocessing = 0; };
+
+		AA0000000000000000000002 = { isa = PBXGroup; children = (AA0000000000000000000010, AA0000000000000000000011, AA0000000000000000000003, ); sourceTree = "<group>"; };
+		AA0000000000000000000003 = { isa = PBXGroup; children = (AA0000000000000000000020, AA0000000000000000000021, ); name = Products; sourceTree = "<group>"; };
+
+		AA0000000000000000000030 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000081;
+			buildPhases = (AA0000000000000000000040, AA0000000000000000000041, AA0000000000000000000042, AA0000000000000000000043, );
+			buildRules = ();
+			dependencies = (AA0000000000000000000060, );
+			fileSystemSynchronizedGroups = (AA0000000000000000000010, );
+			name = MusicStandBy;
+			packageProductDependencies = (AA0000000000000000000071, );
+			productName = MusicStandBy;
+			productReference = AA0000000000000000000020;
+			productType = "com.apple.product-type.application";
+		};
+		AA0000000000000000000031 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000082;
+			buildPhases = (AA0000000000000000000044, AA0000000000000000000045, AA0000000000000000000046, );
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (AA0000000000000000000011, );
+			name = MusicStandByNowPlaying;
+			packageProductDependencies = (AA0000000000000000000072, );
+			productName = MusicStandByNowPlaying;
+			productReference = AA0000000000000000000021;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
+
+		AA0000000000000000000001 = {
+			isa = PBXProject;
+			attributes = { BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2700; LastUpgradeCheck = 2700; };
+			buildConfigurationList = AA0000000000000000000080;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base, );
+			mainGroup = AA0000000000000000000002;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (AA0000000000000000000070, );
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AA0000000000000000000003;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (AA0000000000000000000030, AA0000000000000000000031, );
+		};
+
+		AA0000000000000000000042 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000000000000000000046 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000000000000000000040 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000000000000000000044 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+
+		AA0000000000000000000060 = { isa = PBXTargetDependency; target = AA0000000000000000000031; targetProxy = AA0000000000000000000061; };
+
+		AA0000000000000000000090 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000091 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000092 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Signing/App.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Music StandBy";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alistairmerritt.MusicStandBy;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000093 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Signing/App.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Music StandBy";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alistairmerritt.MusicStandBy;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000094 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Signing/NowPlayingExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Signing/NowPlayingExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Music StandBy";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alistairmerritt.MusicStandBy.NowPlaying;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000095 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Signing/NowPlayingExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Signing/NowPlayingExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Music StandBy";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alistairmerritt.MusicStandBy.NowPlaying;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000080 = { isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000090, AA0000000000000000000091, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		AA0000000000000000000081 = { isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000092, AA0000000000000000000093, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		AA0000000000000000000082 = { isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000094, AA0000000000000000000095, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+
+		AA0000000000000000000070 = { isa = XCLocalSwiftPackageReference; relativePath = StandByKit; };
+		AA0000000000000000000071 = { isa = XCSwiftPackageProductDependency; productName = StandByKit; };
+		AA0000000000000000000072 = { isa = XCSwiftPackageProductDependency; productName = StandByKit; };
+	};
+	rootObject = AA0000000000000000000001;
+}
