@@ -100,22 +100,39 @@ stop, and it should be treated as an ordinary state change.
 
 ## Incorporating into the menu-bar app
 
-`MusicProbe.swift` already has the right shape: a serial queue for `NSAppleScript`, a
-compiled script reused across reads, a `playerInfo` observer, a 2 s timer and
-`changeKey`. Before it ships, port in what the shell probes learned after it was written:
+`MusicProbe.swift` has now been updated with everything the shell probes learned: both
+launch guards, the six states, NSWorkspace launch and terminate observers alongside
+`playerInfo` and the timer, a `fallbackKey` for identity across restarts, and
+`artwork()` using `NSAppleEventDescriptor.data` with a CryptoKit SHA-256. The public
+interface is kept (`snapshot()`, `onChange`, `start()`/`stop()`, the control methods,
+plus `playPause()`).
 
-1. The in-script `NOT_RUNNING` guard. It currently checks the process only.
-2. The `not_running` / `automation_denied` / `error` states. It currently logs and returns
-   "not running".
-3. NSWorkspace launch and terminate observers.
-4. Artwork bytes through `NSAppleEventDescriptor.data`, then a downscale, then a hash.
-5. A visible "Music access denied" state that sends the user to System Settings → Privacy
-   & Security → Automation.
+**It is uncompiled and unverified.** The only check it has passed is
+`swiftc -parse`, which tests syntax and nothing else: no imports were resolved and no
+types were checked. The shell probes working is not evidence that this file works.
+
+Still the app's job, not the probe's: downscaling artwork before upload, and a visible
+"Music access denied" state that sends the user to System Settings → Privacy & Security
+→ Automation.
 
 ## Outstanding — needs Xcode
 
 - **`MusicProbe.swift` has never been compiled.** The Command Line Tools on this Mac are
-  damaged (`redefinition of module 'SwiftBridging'`) and Xcode is not installed.
+  damaged (`redefinition of module 'SwiftBridging'`) and Xcode is not installed. It
+  passed `swiftc -parse`, which checks syntax only. On first build, verify these in order:
+  1. It compiles, and `MusicTrack`/`MusicSnapshot` decode the snapshot fields correctly
+     against `./musicprobe.sh json` for the same track.
+  2. **`artwork()` returns the same bytes as `./artwork.sh info`**: compare the SHA-256.
+     `NSAppleEventDescriptor.data` may hand back a typed descriptor (`'PNGf'`, `'JPEG'`,
+     `'tdta'`). If the hashes differ, coerce the descriptor before reading `.data`.
+  3. `isMusicRunning()` and the in-script guard leave a closed Music closed.
+  4. The NSWorkspace observers fire for Music's quit and relaunch (nothing else checks this).
+  5. `-1743` comes back as `NSAppleScript.errorNumber` and maps to `.automationDenied`.
+- **Not known: whether *compiling* a script containing `tell application "Music"` launches
+  Music.** Scripts are only compiled after the process check says Music is running, and the
+  snapshot script is compiled once and cached. But if the first compile happens in the
+  instant after Music quits, the in-script guard won't help, because the guard runs at
+  execute time, after the compile. Verify this on a machine where Music stays closed.
 - The app's `Info.plist` needs `NSAppleEventsUsageDescription`. If sandboxed, it needs
   `com.apple.security.automation.apple-events` plus a
   `temporary-exception.apple-events` entitlement for `com.apple.Music`.
