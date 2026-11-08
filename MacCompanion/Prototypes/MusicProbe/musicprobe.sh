@@ -20,7 +20,10 @@ US=$'\x1f'   # field separator; cannot occur in track metadata
 
 # Is Music.app running? Asked through System Events so we never launch it.
 music_running() {
-  [ "$(osascript -e 'tell application "System Events" to return (exists process "Music")' 2>/dev/null)" = "true" ]
+  # Process check only: no Apple Events, so it cannot launch Music and never
+  # waits on it. MUSICPROBE_FORCE_NOT_RUNNING=1 simulates Music being closed.
+  [ "${MUSICPROBE_FORCE_NOT_RUNNING:-0}" = "1" ] && return 1
+  pgrep -x Music >/dev/null 2>&1
 }
 
 # Emit the player snapshot as US-separated fields. Never launches Music.
@@ -28,6 +31,7 @@ music_running() {
 read_snapshot() {
   osascript <<'APPLESCRIPT'
 set US to (ASCII character 31)
+if not (application id "com.apple.Music" is running) then return "NOT_RUNNING"
 tell application "Music"
 	set playerState to (player state as text)
 	set pos to "0"
@@ -69,7 +73,7 @@ to_json() {
 import json, sys, time
 raw = sys.stdin.readline().rstrip("\n")
 if not raw:
-    print(json.dumps({"running": False, "state": "stopped", "capturedAt": time.time()}))
+    print(json.dumps({"running": False, "state": "not_running", "isPlaying": False, "position": 0.0, "capturedAt": time.time(), "track": None}))
     sys.exit(0)
 f = raw.split("\x1f")
 f += [""] * (11 - len(f))
@@ -111,14 +115,17 @@ snapshot_json() {
   errfile=$(mktemp -t musicprobe-err)
   raw=$(read_snapshot 2>"$errfile")
   rc=$?
+  if [ "$raw" = "NOT_RUNNING" ]; then
+    rm -f "$errfile"; printf '' | to_json; return
+  fi
   if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
     detail=$(head -c 300 "$errfile")
     rm -f "$errfile"
     /usr/bin/python3 -I -c '
 import json, sys, time
 detail = sys.argv[1]
-kind = "automation_denied" if "-1743" in detail else "applescript_failed"
-print(json.dumps({"running": True, "state": "unknown", "isPlaying": False,
+kind = "automation_denied" if "-1743" in detail else "error"
+print(json.dumps({"running": True, "state": kind, "isPlaying": False,
                   "error": kind, "detail": detail.strip(), "capturedAt": time.time(),
                   "track": None}))' "$detail"
     return
@@ -147,10 +154,13 @@ control() {
     return 2
   fi
   if ! music_running; then
-    echo "Music.app is not running" >&2
+    echo "Music.app is not running; not launching it" >&2
+    snapshot_json
     return 1
   fi
-  osascript -e "tell application \"Music\" to $verb" >/dev/null 2>&1
+  # Same in-script guard: a control command never launches Music either.
+  r=$(osascript -e "if application id \"com.apple.Music\" is running then tell application \"Music\" to $verb" -e "return \"ok\"" 2>&1)
+  [ "$r" = "ok" ] || { echo "control failed: $r" >&2; return 1; }
   sleep 0.4
   snapshot_json
 }

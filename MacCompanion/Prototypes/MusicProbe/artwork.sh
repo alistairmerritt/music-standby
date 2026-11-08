@@ -16,7 +16,10 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 
 music_running() {
-  [ "$(osascript -e 'tell application "System Events" to return (exists process "Music")' 2>/dev/null)" = "true" ]
+  # Process check only: no Apple Events, so it cannot launch Music and never
+  # waits on it. MUSICPROBE_FORCE_NOT_RUNNING=1 simulates Music being closed.
+  [ "${MUSICPROBE_FORCE_NOT_RUNNING:-0}" = "1" ] && return 1
+  pgrep -x Music >/dev/null 2>&1
 }
 
 fail_json() {
@@ -28,6 +31,7 @@ fail_json() {
 # nothing on failure.
 dump_artwork() {
   osascript 2>/dev/null <<APPLESCRIPT
+if not (application id "com.apple.Music" is running) then return "NOT_RUNNING"
 tell application "Music"
 	set t to current track
 	if (count of artworks of t) is 0 then error "no artwork"
@@ -50,6 +54,7 @@ APPLESCRIPT
 track_identity() {
   osascript 2>/dev/null <<'APPLESCRIPT'
 set US to (ASCII character 31)
+if not (application id "com.apple.Music" is running) then return "NOT_RUNNING"
 tell application "Music"
 	set t to current track
 	set pid to ""
