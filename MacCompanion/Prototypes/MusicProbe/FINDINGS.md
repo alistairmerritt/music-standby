@@ -176,6 +176,60 @@ anything unexpected rather than silently emitting blanks.
 5. **Never launch Music.app as a side effect.** Ask the running-application list first.
    `tell application "Music" to …` launches it, which would be a nasty surprise at login.
 
+## Music.app lifecycle — tested (`lifecycletest.sh --yes`)
+
+**A restart loses a streamed track completely.** Before the quit, Music was paused on
+"Losing My Edge" (`URL track`, pid `542CEB17C137B39E`, db 86657). After the relaunch it came
+back `stopped` with **no current track**, both immediately and 4 s later. Artwork was
+unavailable for the same reason. `play` did nothing, `set player position` failed with
+-10006, and the track could not be found again: it is not in the library
+(`every track of library playlist 1 whose name is …` returned nothing), and there is no
+public API that looks up a catalogue song.
+
+So **it is not known whether the persistent ID survives a restart** for streamed tracks.
+After a restart the track can't be reached to compare. In practice:
+
+- Treat `persistent ID` as stable **within one Music.app run only**. That was verified:
+  revisiting a track gave the same IDs.
+- For identity across restarts, use `title|artist|album|duration` as the fallback key.
+  Library tracks (`file track`) were not tested and may do better.
+- A Music restart ends the session. Music offers nothing that would let the Mac app resume
+  the same track, so the relay should send `end` for it.
+
+**Notifications at quit and relaunch:**
+- On quit, `playerInfo` fired twice with **only** `Player State = Stopped` and no track keys.
+  A listener can detect a quit this way, but the same notification also means "stopped
+  while running", so it can't tell the two apart.
+- **Relaunch produced no `playerInfo` at all.**
+- **Use `NSWorkspace.didLaunchApplicationNotification` and
+  `didTerminateApplicationNotification`** (filtered on `com.apple.Music`) for app
+  lifecycle, and `playerInfo` for player state. Neither covers the other.
+
+**AppleScript works straight after relaunch.** The first query after the process appeared
+answered at once with valid state (`stopped`, no track). There was no warm-up error.
+
+**Clean "not running" testing is blocked on this Mac.** Music relaunches itself about
+2 s after quitting, even when no probe is running. `music_to_ha.py`, the Home Assistant
+bridge, was running at the time (PID 1816). It is the likely cause, because any
+`tell application "Music"` launches Music. It was left alone, since it is not part of this
+project. The not-running path did execute once: it returned
+`{"running": false, "state": "stopped", …}` as valid JSON, but that call took 19.8 s, most
+likely contending with the relaunch. **The real app must expect Music to restart by
+itself.**
+
+**States now reported** (all four running states verified to produce valid JSON):
+
+| Situation | JSON |
+| --- | --- |
+| Not running | `running:false, state:"stopped"` (executed once, see above) |
+| Running, no track | `running:true, state:"stopped", track:null` (verified) |
+| Paused / playing | `state:"paused"` / `"playing"` (verified) |
+| AppleScript fails while running | `running:true, state:"unknown", error:"automation_denied"` (-1743) or `"applescript_failed"`, plus `detail`. **Written, not exercised.** Testing it would mean revoking Automation permission |
+
+**Bug fixed:** before this change, an AppleScript failure while Music was running was
+reported as `running:false`. That was wrong, and a permission problem would have looked
+exactly like Music being closed.
+
 ## Artwork extraction — works
 
 Added after the first commit. **Executed**, against the same streamed catalogue track.

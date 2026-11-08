@@ -26,7 +26,7 @@ music_running() {
 # Emit the player snapshot as US-separated fields. Never launches Music.
 # Order: state position name artist album albumArtist duration persistentID databaseID trackClass artworkCount
 read_snapshot() {
-  osascript 2>/dev/null <<'APPLESCRIPT'
+  osascript <<'APPLESCRIPT'
 set US to (ASCII character 31)
 tell application "Music"
 	set playerState to (player state as text)
@@ -106,7 +106,25 @@ snapshot_json() {
     printf '' | to_json
     return
   fi
-  read_snapshot | to_json
+  # Music is running, so an AppleScript failure is NOT "not running". Report it
+  # as its own state: -1743 means Automation permission was refused.
+  errfile=$(mktemp -t musicprobe-err)
+  raw=$(read_snapshot 2>"$errfile")
+  rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
+    detail=$(head -c 300 "$errfile")
+    rm -f "$errfile"
+    /usr/bin/python3 -I -c '
+import json, sys, time
+detail = sys.argv[1]
+kind = "automation_denied" if "-1743" in detail else "applescript_failed"
+print(json.dumps({"running": True, "state": "unknown", "isPlaying": False,
+                  "error": kind, "detail": detail.strip(), "capturedAt": time.time(),
+                  "track": None}))' "$detail"
+    return
+  fi
+  rm -f "$errfile"
+  printf '%s\n' "$raw" | to_json
 }
 
 # Change identity: everything a listener would care about, excluding position.
