@@ -12,6 +12,7 @@ relay.
 | File | State |
 | --- | --- |
 | `musicprobe.sh` | **Runs.** Executed successfully on macOS 27.0.1 — see FINDINGS.md |
+| `artwork.sh` | **Runs.** Extracts the current track's artwork and hashes it |
 | `MusicProbe.swift` | **Written, never compiled.** Same technique, ready to lift into a SwiftUI menu-bar app |
 | `FINDINGS.md` | What worked, what didn't, and the limitations found |
 
@@ -60,6 +61,51 @@ the snapshot taken 0.4 s later, so the caller sees real state rather than a gues
 
 `state` is one of `playing`, `paused`, `stopped`. When Music.app is not running the object
 is `{"running": false, "state": "stopped", "capturedAt": …}` and nothing is launched.
+
+## Artwork
+
+```bash
+./artwork.sh info                 # JSON only; the image is hashed and discarded
+./artwork.sh extract              # writes <sha256>.png into ./artwork-cache/
+./artwork.sh extract /some/dir    # or wherever
+```
+
+```json
+{"ok": true,
+ "artworkID": "70d7210ced944748a7993e51335d627d93bebede61315de62de3314c2413397d",
+ "sha256": "70d7210c…", "format": "png", "appleScriptFormat": "«class PNG »",
+ "width": 800, "height": 800, "bytes": 376049,
+ "track": {"title": "Losing My Edge", "artist": "LCD Soundsystem",
+           "album": "LCD Soundsystem", "persistentID": "542CEB17C137B39E"}}
+```
+
+Both commands are read-only. `artwork-cache/` and loose image files are gitignored —
+extracted album art is copyrighted and must not be committed.
+
+Failure is reported as `{"ok": false, "error": "…"}` with exit 1: no current track, no
+artwork, Music.app not running, or Automation permission denied.
+
+### Incorporating it into the Mac app
+
+The shape is content-addressing, and it maps straight onto the relay design (§2, §4):
+
+1. On a track change, read the artwork bytes once.
+2. SHA-256 them. That hash **is** the `artworkID` — verified byte-stable across repeated
+   extractions of the same track, so the same album always produces the same key.
+3. If the relay has already seen that hash, send nothing. Otherwise
+   `PUT /v1/artwork/{sha256}` and let the relay serve it to the iOS extension.
+4. Put the hash in `TrackMetadata.artworkID`, as the existing protocol already expects.
+
+Two things to decide before building it:
+
+- **Downscale first.** 800 × 800 PNG is 376 KB. Roughly 600 px JPEG would be about a tenth
+  of that and is plenty for a Lock Screen. Hash whatever you actually upload, so the key
+  and the bytes never disagree.
+- **In Swift, skip the file round trip.** `NSAppleEventDescriptor.data` gives the bytes
+  directly from the same `raw data of artwork 1` call, so there is no temporary file and no
+  shelling out. `MusicProbe.swift` does not implement this yet — it is a small addition to
+  the same `NSAppleScript` path, and like the rest of that file it would be unverified
+  until someone with a working toolchain builds it.
 
 ## Permissions
 

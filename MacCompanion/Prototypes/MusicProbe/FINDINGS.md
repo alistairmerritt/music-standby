@@ -107,12 +107,49 @@ anything unexpected rather than silently emitting blanks.
 5. **Never launch Music.app as a side effect.** Ask the running-application list first.
    `tell application "Music" to …` launches it, which would be a nasty surprise at login.
 
+## Artwork extraction — works
+
+Added after the first commit. **Executed**, against the same streamed catalogue track.
+
+`raw data of artwork 1 of current track` returns the real image bytes. AppleScript writes
+them with `open for access` / `write`, which is byte-exact — no re-encoding, no PICT
+wrapper, no clipboard round trip.
+
+| | |
+| --- | --- |
+| Format | PNG (`format of artwork 1` returns `«class PNG »`; `sips` agrees) |
+| Dimensions | 800 × 800 |
+| File size | 376,049 bytes |
+| SHA-256 | `70d7210ced944748a7993e51335d627d93bebede61315de62de3314c2413397d` |
+| Byte-stable across calls | **Yes.** Two extractions, `cmp` identical, same hash |
+| `downloaded of artwork 1` | `false` |
+
+Points worth carrying forward:
+
+- **The hash is a usable cache key.** Repeated extraction of the same track gave
+  byte-identical files. That is what makes `sha256` viable as the relay's `artworkID` and
+  as a content-addressed filename.
+- **`downloaded` is `false` and the bytes still arrive.** Music served full-size artwork
+  for a streamed catalogue track that is not in the library — the case the brief flagged as
+  historically unreliable. It did not fail here.
+- **PNG at 800 × 800 is larger than it needs to be.** 376 KB per track over a push-driven
+  relay is wasteful; the relay design's cap is 5 MB, so it fits, but downscaling to ~600 px
+  JPEG before upload would cut it by roughly an order of magnitude. Do that in the Mac app,
+  after hashing the original — or hash the downscaled bytes instead, and be consistent.
+- **A list of live references cannot be coerced to text inside a `tell` block** (error
+  -1700). Pull each property into a local first. Both scripts here do.
+- One oddity, unexplained: an AppleScript error message once referenced the current track
+  as `id 86663` while `database ID` read `86657` before and after. The persistent ID was
+  stable throughout. Probably an internal object id rather than the database id, but worth
+  watching, since the iOS side keys on track identity.
+
+Not tested: tracks with no artwork (the utility reports an error, that path is written but
+unexercised), multiple artworks, local files, or whether the format is ever JPEG.
+
 ## Not investigated
 
 Out of scope for this spike, and all relevant to the real app:
 
-- Extracting artwork bytes (`raw data of artwork 1`) and a stable hash for the relay's
-  artwork store.
 - Behaviour while `playing`, and how far `player position` drifts between polls.
 - AirPlay and multi-output, `shuffle`/`repeat` state, the play queue.
 - What happens when Music.app quits or restarts mid-session, and how `database ID`

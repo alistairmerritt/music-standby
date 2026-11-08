@@ -1,0 +1,5 @@
+# Extracted album artwork is copyrighted. Never commit it.
+artwork-cache/
+*.png
+*.jpg
+*.jpeg
