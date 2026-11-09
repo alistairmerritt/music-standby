@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "mac_unreachable",
+    "message": "No acknowledgement from the Mac within 1.2 s."
+  }
+}
