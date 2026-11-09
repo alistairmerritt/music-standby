@@ -10,6 +10,10 @@ public enum MockArtwork {
     }
 
     public static func png(id: String, pixelSize: Int = 600) -> Data? {
+        image(id: id, pixelSize: pixelSize).flatMap(pngData)
+    }
+
+    public static func image(id: String, pixelSize: Int = 600) -> CGImage? {
         let palette: [(CGFloat, CGFloat, CGFloat)] = [(0.95, 0.42, 0.33), (0.25, 0.47, 0.87), (0.20, 0.68, 0.55), (0.62, 0.36, 0.82)]
         let seed = id.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
         let a = palette[seed % palette.count]
@@ -22,8 +26,7 @@ public enum MockArtwork {
         context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size, y: size), options: [])
         context.setFillColor(CGColor(gray: 1, alpha: 0.22))
         context.fillEllipse(in: CGRect(x: size * 0.25, y: size * 0.25, width: size * 0.5, height: size * 0.5))
-        guard let image = context.makeImage() else { return nil }
-        return pngData(image)
+        return context.makeImage()
     }
 
     private static func pngData(_ image: CGImage) -> Data? {

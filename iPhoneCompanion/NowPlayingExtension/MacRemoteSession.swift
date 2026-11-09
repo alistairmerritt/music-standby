@@ -45,7 +45,12 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             type: .audio,
             duration: .finite(track.duration),
             artwork: Artwork(id: artworkID) { _ in
-                try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
+                // PNG encoding never finished inside this extension on iOS 27.2 and the
+                // system kept relaunching it, so generated art skips the encoder.
+                if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {
+                    return try ArtworkRepresentation(cgImage: image)
+                }
+                return try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
             }
         )
     }

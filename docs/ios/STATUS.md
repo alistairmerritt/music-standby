@@ -2,7 +2,7 @@
 
 Last updated 9 November 2026, branch `feature/ios`.
 
-**A remote media session appears in landscape StandBy on a real iPhone.** Tested by hand on 9 November 2026 on an iPhone 15 Pro running iOS 27.2, using the mock transport and a free-team build without the App Group. Album artwork isn't showing yet, and the remaining tests in [DEVICE-TESTING.md](DEVICE-TESTING.md) haven't been run.
+**A remote media session appears in landscape StandBy on a real iPhone.** Tested by hand on 9 November 2026 on an iPhone 15 Pro running iOS 27.2, using the mock transport and a free-team build without the App Group. The remaining tests in [DEVICE-TESTING.md](DEVICE-TESTING.md) haven't been run.
 
 ## What exists
 
@@ -27,8 +27,10 @@ Last updated 9 November 2026, branch `feature/ios`.
 | Install and launch on a device | Done | Free-team build on iPhone 15 Pro, iOS 27.2 |
 | Now Playing metadata and controls | Working | Song and artist shown with skip and pause buttons; observed by hand |
 | Landscape StandBy (test 6) | Working | Observed by hand with the mock transport |
-| Album artwork | **Not showing** | Cause unknown. The extension generates placeholder art without the App Group, so that isn't the explanation by itself |
-| Control Centre (test 3), primary slot (test 5) | **Not tested** | Requires a device |
+| Generated placeholder artwork | Working | Observed by hand. PNG encoding never finished in the extension and it kept relaunching, so generated art now reaches the system as a `CGImage` |
+| Real artwork passed as image data | **Not tested** | The route `ArtworkStore.resolve` uses for cached or downloaded art |
+| System Primary (test 5) | Reads No | Diagnostics showed No while the session was still displayed. Cause unknown |
+| Control Centre (test 3) | **Not tested** | Requires a device |
 | Survival when locked for 10 minutes, or after a force-quit | **Not tested** | Requires a device |
 | System-issued commands reaching the extension | Working on the phone | Tapping skip changes the track. Nothing reaches a Mac yet (audit B1) |
 | Push tokens and APNs delivery | **Not tested** | Requires a device, paid team and APNs key |
