@@ -77,6 +77,7 @@ struct HomeView: View {
         case .disconnected: "Not Connected"
         case .connecting: "Connecting…"
         case .connected: "Connected"
+        case .reconnecting: "Reconnecting…"
         case .failed(let reason): reason
         }
     }

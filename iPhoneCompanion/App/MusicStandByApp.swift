@@ -1,8 +1,9 @@
+import StandByKit
 import SwiftUI
 
 @main
 struct MusicStandByApp: App {
-    @State private var model = AppModel()
+    @State private var model = AppEnvironment.makeModel()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -13,8 +14,6 @@ struct MusicStandByApp: App {
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     if phase == .active {
                         Task { await model.sceneDidBecomeActive() }
-                    } else {
-                        model.sceneDidLeaveActive()
                     }
                 }
         }

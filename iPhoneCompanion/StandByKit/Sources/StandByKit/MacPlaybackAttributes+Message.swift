@@ -2,9 +2,10 @@ import Foundation
 
 extension MacPlaybackAttributes {
     /// The only bridge from the shared wire models to the attributes type.
-    public init(mac: PairedMac, message: PlaybackMessage) {
+    /// `sessionID` is the relay's identifier when it has issued one.
+    public init(mac: PairedMac, message: PlaybackMessage, sessionID: String? = nil) {
         self.init(
-            id: "mac-\(mac.id)",
+            id: sessionID ?? "mac-\(mac.id)",
             macName: mac.name,
             revision: message.revision,
             isPlaying: message.isPlaying,

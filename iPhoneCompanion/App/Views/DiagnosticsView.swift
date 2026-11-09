@@ -15,6 +15,9 @@ struct DiagnosticsView: View {
                 if let error = model.sessionController.lastError {
                     Text(error).font(.footnote).foregroundStyle(.red).textSelection(.enabled)
                 }
+                if let error = model.sessionController.lastPrimaryError {
+                    Text("Primary refused: \(error)").font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
+                }
             }
 
             Section("Push Tokens") {

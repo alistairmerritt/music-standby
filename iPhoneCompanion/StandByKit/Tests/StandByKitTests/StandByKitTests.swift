@@ -127,9 +127,9 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
 }
 
 @Suite struct MockTransportTests {
-    private func playbackEvents(_ transport: MockTransport, count: Int) async -> [PlaybackMessage] {
+    private func playbackEvents(_ stream: AsyncStream<TransportEvent>, count: Int) async -> [PlaybackMessage] {
         var messages: [PlaybackMessage] = []
-        for await event in transport.events {
+        for await event in stream {
             if case .playback(let message) = event { messages.append(message) }
             if messages.count == count { break }
         }
@@ -138,21 +138,23 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
 
     @Test func connectEmitsFirstTrack() async {
         let transport = MockTransport()
+        let stream = await transport.subscribe()
         await transport.connect()
-        let messages = await playbackEvents(transport, count: 1)
+        let messages = await playbackEvents(stream, count: 1)
         #expect(messages[0].track?.id == "mock-1")
         #expect(messages[0].revision == 1)
     }
 
     @Test func nextCommandIsAcknowledgedAndAdvances() async throws {
         let transport = MockTransport()
+        let stream = await transport.subscribe()
         await transport.connect()
         let command = RemoteCommand(kind: .next)
         let ack = try await transport.send(command)
         #expect(ack.commandID == command.id)
         #expect(ack.accepted)
         #expect(ack.revision == 2)
-        let messages = await playbackEvents(transport, count: 2)
+        let messages = await playbackEvents(stream, count: 2)
         #expect(messages[1].track?.id == "mock-2")
         #expect(messages[1].revision > messages[0].revision)
     }
@@ -160,12 +162,13 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
     @Test func pausePlayKeepsPosition() async throws {
         let clock = TestClock(Date(timeIntervalSince1970: 0))
         let transport = MockTransport(now: { clock.now })
+        let stream = await transport.subscribe()
         await transport.connect()
         clock.advance(30)
         _ = try await transport.send(RemoteCommand(kind: .pause))
         clock.advance(100)
         _ = try await transport.send(RemoteCommand(kind: .play))
-        let messages = await playbackEvents(transport, count: 3)
+        let messages = await playbackEvents(stream, count: 3)
         #expect(messages[1].elapsedTime == 30)
         #expect(!messages[1].isPlaying)
         #expect(messages[2].elapsedTime == 30)

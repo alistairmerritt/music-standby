@@ -20,6 +20,10 @@ public struct PushTokens: Codable, Equatable, Sendable {
 public protocol PushTokenRegistrar: Sendable {
     func registerStartToken(_ hex: String) async throws
     func registerUpdateToken(_ hex: String, forSessionID id: String) async throws
+    /// Apple asks that a session's token be invalidated promptly once it ends.
+    func invalidate(sessionID id: String) async throws
+    /// What is held locally, for Diagnostics.
+    func current() -> PushTokens
 }
 
 /// Stores tokens in the shared container so Diagnostics can show them.
@@ -44,6 +48,12 @@ public struct MockPushTokenRegistrar: PushTokenRegistrar {
     public func registerUpdateToken(_ hex: String, forSessionID id: String) async throws {
         var tokens = current()
         tokens.sessions[id] = hex
+        try JSONEncoder().encode(tokens).write(to: url, options: .atomic)
+    }
+
+    public func invalidate(sessionID id: String) async throws {
+        var tokens = current()
+        tokens.sessions[id] = nil
         try JSONEncoder().encode(tokens).write(to: url, options: .atomic)
     }
 }

@@ -4,8 +4,7 @@ import Foundation
 public actor MockTransport: PlaybackTransport {
     public static let rejectedCode = "000000"
 
-    public nonisolated let events: AsyncStream<TransportEvent>
-    private let continuation: AsyncStream<TransportEvent>.Continuation
+    private var hub = TransportEventHub()
     private let library: MockLibrary
     private let now: @Sendable () -> Date
     private let mac: PairedMac
@@ -18,23 +17,39 @@ public actor MockTransport: PlaybackTransport {
     private var revision: UInt64 = 0
 
     public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"), now: @escaping @Sendable () -> Date = { Date() }) {
-        (events, continuation) = AsyncStream.makeStream(of: TransportEvent.self, bufferingPolicy: .bufferingNewest(32))
         self.library = library
         self.mac = mac
         self.now = now
         anchor = now()
     }
 
+    public func subscribe() -> AsyncStream<TransportEvent> {
+        hub.subscribe()
+    }
+
     public func connect() async {
-        continuation.yield(.connection(.connecting))
+        guard !isConnected else { return }
+        hub.send(.connection(.connecting))
         isConnected = true
-        continuation.yield(.connection(.connected(macName: mac.name)))
+        hub.send(.connection(.connected(macName: mac.name)))
+        emitPlayback()
+    }
+
+    public func reconnect() async {
+        hub.send(.connection(.connecting))
+        isConnected = true
+        hub.send(.connection(.connected(macName: mac.name)))
         emitPlayback()
     }
 
     public func disconnect() async {
         isConnected = false
-        continuation.yield(.connection(.disconnected))
+        hub.send(.connection(.disconnected))
+    }
+
+    public func unpair() async {
+        await disconnect()
+        hub.reset()
     }
 
     public func pair(code: PairingCode) async throws -> PairedMac {
@@ -73,7 +88,7 @@ public actor MockTransport: PlaybackTransport {
 
     private func emitPlayback() {
         revision += 1
-        continuation.yield(.playback(PlaybackMessage(
+        hub.send(.playback(PlaybackMessage(
             revision: revision,
             isPlaying: isPlaying,
             elapsedTime: elapsed,
