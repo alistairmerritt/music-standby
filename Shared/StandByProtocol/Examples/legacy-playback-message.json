@@ -1,0 +1,16 @@
+{
+  "revision": 42,
+  "isPlaying": false,
+  "elapsedTime": 12.5,
+  "capturedAt": "2026-11-08T08:00:00Z",
+  "canGoNext": true,
+  "canGoPrevious": true,
+  "track": {
+    "id": "track-1",
+    "title": "Song",
+    "artist": "Artist",
+    "album": "Album",
+    "duration": 200,
+    "artworkID": "a1"
+  }
+}

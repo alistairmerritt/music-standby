@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "error": {
+    "code": "unsupported_protocol_version",
+    "message": "This relay speaks protocol 1 only."
+  }
+}
