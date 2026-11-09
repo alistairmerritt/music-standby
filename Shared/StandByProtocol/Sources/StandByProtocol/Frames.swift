@@ -28,6 +28,8 @@ public enum MacFrame: Equatable, Sendable {
     /// The companion app is quitting on purpose. Unlike a dropped socket, the
     /// relay needn't wait out a reconnect grace period.
     case goodbye(reason: String)
+    /// The person at the Mac allowed or refused a `pair-request`.
+    case pairDecision(claimID: String, approved: Bool)
     case error(ProtocolError)
     case unknown(type: String)
 }
@@ -41,6 +43,8 @@ public enum RelayFrame: Equatable, Sendable {
     /// dropped so the Mac can still reject it by id.
     case unsupportedCommand(id: UUID, kind: String)
     case artworkRequest(artworkID: String)
+    /// A phone typed this Mac's code. Nothing is granted until `pair-decision`.
+    case pairRequest(PairRequest)
     case paired(phone: DeviceIdentity)
     case revoked(reason: String)
     case error(ProtocolError)
@@ -50,7 +54,7 @@ public enum RelayFrame: Equatable, Sendable {
 // MARK: - Coding
 
 private enum FrameKeys: String, CodingKey {
-    case type, protocolVersion, device, message, ack, artwork, reason, error, command, artworkID, phone
+    case type, protocolVersion, device, message, ack, artwork, reason, error, command, artworkID, phone, claimID, approved, request
 }
 
 private struct RawCommand: Decodable {
@@ -70,6 +74,8 @@ extension MacFrame: Codable {
         case "ack": self = .ack(try c.decode(CommandAck.self, forKey: .ack))
         case "artwork": self = .artwork(try c.decode(ArtworkDescriptor.self, forKey: .artwork))
         case "goodbye": self = .goodbye(reason: try c.decode(String.self, forKey: .reason))
+        case "pair-decision":
+            self = .pairDecision(claimID: try c.decode(String.self, forKey: .claimID), approved: try c.decode(Bool.self, forKey: .approved))
         case "error": self = .error(try c.decode(ProtocolError.self, forKey: .error))
         default: self = .unknown(type: type)
         }
@@ -94,6 +100,10 @@ extension MacFrame: Codable {
         case .goodbye(let reason):
             try c.encode("goodbye", forKey: .type)
             try c.encode(reason, forKey: .reason)
+        case .pairDecision(let claimID, let approved):
+            try c.encode("pair-decision", forKey: .type)
+            try c.encode(claimID, forKey: .claimID)
+            try c.encode(approved, forKey: .approved)
         case .error(let error):
             try c.encode("error", forKey: .type)
             try c.encode(error, forKey: .error)
@@ -118,6 +128,7 @@ extension RelayFrame: Codable {
                 self = .unsupportedCommand(id: raw.id, kind: raw.kind)
             }
         case "artwork-request": self = .artworkRequest(artworkID: try c.decode(String.self, forKey: .artworkID))
+        case "pair-request": self = .pairRequest(try c.decode(PairRequest.self, forKey: .request))
         case "paired": self = .paired(phone: try c.decode(DeviceIdentity.self, forKey: .phone))
         case "revoked": self = .revoked(reason: try c.decode(String.self, forKey: .reason))
         case "error": self = .error(try c.decode(ProtocolError.self, forKey: .error))
@@ -142,6 +153,9 @@ extension RelayFrame: Codable {
         case .artworkRequest(let artworkID):
             try c.encode("artwork-request", forKey: .type)
             try c.encode(artworkID, forKey: .artworkID)
+        case .pairRequest(let request):
+            try c.encode("pair-request", forKey: .type)
+            try c.encode(request, forKey: .request)
         case .paired(let phone):
             try c.encode("paired", forKey: .type)
             try c.encode(phone, forKey: .phone)
