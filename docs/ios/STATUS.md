@@ -2,7 +2,7 @@
 
 Last updated 9 November 2026, branch `feature/ios`.
 
-**A remote media session appears in landscape StandBy on a real iPhone.** That was shown with the mock transport. The reliability fixes and relay client below pass automated tests but have **not yet been run on a phone**. No part of this has talked to a real Mac or relay.
+**A remote media session appears in landscape StandBy on a real iPhone, and the new extension sends HTTPS requests and reads a shared Keychain item when its controls are tapped.** All of this used the built-in mock transport. Nothing has talked to a real Mac or relay.
 
 ## What exists
 
@@ -18,52 +18,70 @@ Last updated 9 November 2026, branch `feature/ios`.
 
 ## Observed on a physical iPhone
 
-iPhone 15 Pro, iOS 27.2, free Personal Team, mock transport. All from the build at commit `a824478` and earlier debug builds of it, so these predate the reliability and relay work.
+iPhone 15 Pro, iOS 27.2, free Personal Team, mock transport, connected by USB. "Hand" means reported by the person holding the phone. "Log" means read from the phone.
 
 | Behaviour | Result | Evidence |
 | --- | --- | --- |
-| Installs and launches | Works | Hand test |
-| Song details on the Lock Screen | Works | Hand test |
-| Skip and pause buttons | Appear and respond | Hand test; the extension logged each tap |
-| Landscape StandBy (test 6) | Works | Hand test |
-| Generated placeholder artwork | Shows | Hand test, after a fix |
-| PNG encoding inside the extension | **Never finishes** | Log: it stopped at `CGImageDestinationFinalize` and the process was relaunched. Avoid it there |
-| Image data handed to the system | Accepted without error | Extension log only. Whether it looked right is unconfirmed |
-| System Primary | Read No while the session was showing | Hand test. Cause unknown |
+| Landscape StandBy | Works | Hand |
+| Song details, skip and pause on the Lock Screen | Work | Hand |
+| Placeholder artwork | Shows | Hand |
+| Control Centre | Works | Hand |
+| Locked for 10 minutes | Session stays, progress moves | Hand |
+| Force-quit the app | Session stays, Next still works | Hand |
+| Lock Screen Next with the new code | Track changes, time moves | Hand, at `4b306d5` plus temporary test logging |
+| Shared Keychain, free team | App wrote an item, extension read it, including at each tap | Log |
+| HTTPS from a command handler | 120 to 250 ms, status 200, on each tap | Log |
+| Extension memory | **Hard 6 MB limit** | Log |
+| Extension network | iOS marks it "network restriction applied". HTTPS still worked. What it restricts is unknown | Log |
+| PNG encoding in the extension | Never finished, and the process was replaced. Likely the memory limit; not confirmed | Log |
+| Artwork sizes iOS requests | 88, 156, 171 and 807 points or pixels | Log |
 
-Other device tests are in [DEVICE-TESTING.md](DEVICE-TESTING.md).
+**Another app playing audio**
+
+| Situation | Result |
+| --- | --- |
+| Our session off, Music plays | Music appears |
+| Music playing, then Show in Now Playing | Our session takes over |
+| Our session showing, then Music starts | Music takes over |
+| Music stops | Music's last track stays. Our session does not return by itself |
+
+Once, on an older build, neither app appeared when audio started. That wasn't reproduced with the newer build.
+
+**System Primary** read No once while the session was on screen. A later check reported no errors, but the value wasn't recorded. It hasn't affected StandBy or the Lock Screen.
+
+**Installing over a live session leaves a broken extension.** iOS relaunched the extension from the outgoing copy of the app at the moment of install. That process had its file writes denied, failed every command, and survived ending and restarting the session. Separately, a launch 5 s after an install failed, while one about 50 s later worked. Could affect real app updates. Not yet tested whether a phone restart clears it.
+
+## Still to test on a device
+
+- Real-sized artwork as image data. Only a 100-pixel image has run through that route with logging, and the 600 and 1200-pixel test was blocked by the stale process above.
+- Everything committed after `4b306d5`.
+- HTTPS and Keychain without USB, and over cellular.
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **120 tests**, macOS, Xcode 27.2. `Shared/StandByProtocol`: 49 tests. Nine deliberately reintroduced bugs were each caught.
+`swift test` from `iPhoneCompanion/StandByKit`: **134 tests**, macOS, Xcode 27.2. `Shared/StandByProtocol`: 49 tests.
 
 | Area | Covers |
 | --- | --- |
 | Session lifecycle (audit B3) | Ends on stop, Music quit, refused Automation, unpair, deliberate disconnect, and a drop past 60 s. Pause, read errors and brief drops keep it. Push tokens go with it |
 | Event loop (audit C3) | Survives cancellation and restart, and reports the true connection state afterwards |
 | Failed activation (audit C4) | Retries on the next update and on foreground, with the newest state |
-| Relay client | Pairing, commands, acks and failures, tokens, reconnection, revocation, revision ordering, against scripted HTTP |
+| Relay client | Pairing, commands, acks and failures, tokens, reconnection, revocation, revision ordering |
+| Real networking | Against a loopback server: round trip, redirects refused, response size cap, timeouts |
 | Extension command path (audit B1, B2) | Sends directly; no optimistic change; mock only on the Debug route; an unreadable Keychain never falls back to the mock |
 | Artwork (audit C1) | PNG and JPEG, size limits, HTTPS and relay-host only, missing artwork |
 
-These cover logic, on macOS. They do not exercise `NowPlaying` or the Keychain.
+Deliberately reintroducing 14 of these bugs made the tests fail. One further change, removing an early check that the size cap also covers, did not. These tests run on macOS and don't exercise `NowPlaying`.
 
 ## Compiles only
 
-App and extension build for the iOS 27.2 device SDK, Debug and Release. They sign with the free team once the App Group and push entitlements are removed. `RemoteSessionController` and the views have no tests.
-
-## Assumptions still to check on a device
-
-- The extension can make an HTTPS call from a locked phone, and the system waits for it.
-- `KeychainCredentialStore` works, and the extension can read what the app wrote. The free team's profile allows the shared group, and the app signs with it, but it hasn't run.
-- Real album-art data, at real sizes, renders.
-- The new lifecycle behaves as tested once it talks to the real `NowPlaying` framework.
+App and extension build for the iOS 27.2 device SDK, Debug and Release. `RemoteSessionController` and the views have no automated tests.
 
 ## Blocked
 
 **Solely by Apple Developer Program membership**
 
-- APNs: start, update and end pushes, and whether tokens are issued at all.
+- APNs: start, update and end pushes, and token delivery.
 - Updating a locked phone. A session can only change while the app is open until then.
 - App Group. Only the mock route's command log and Diagnostics use it, so the relay path doesn't need it.
 - Builds lasting more than 7 days, TestFlight and distribution.
@@ -79,5 +97,6 @@ App and extension build for the iOS 27.2 device SDK, Debug and Release. They sig
 - App and extension use the Swift 5 language mode. `StandByKit` is Swift 6.
 - The relay route never changes the screen optimistically. Only the Debug mock does.
 - Debug builds use the mock unless a relay credential exists. Release builds never use it.
-- 60 s reconnect grace, 1.5 s command timeout and 5 s foreground polling are judgement calls from the relay proposal. None are measured.
+- 60 s reconnect grace, 1.5 s command timeout, 5 s foreground polling and the extension's 1 MB and 800-pixel artwork limits are judgement calls. None are measured.
 - A paused session is not ended on the phone. The proposal gives the 15-minute timeout to the relay.
+- The session doesn't try to reclaim the Lock Screen when local audio stops. Apple only honours that request from the foreground, so the app re-requests it each time it opens.

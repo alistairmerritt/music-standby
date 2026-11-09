@@ -66,7 +66,7 @@ An `end` event needs only `id` in `attributes`. `artworkURL` is needed for songs
 - Whether the extension needs its own `aps-environment` entitlement. Apple's docs list no extension entitlements.
 - Whether the system decodes dates as ISO-8601. Apple's sample payload implies it, and a unit test covers that shape.
 - Any push budget or rate limit. None is documented for `nowplaying`.
-- Whether the system waits for an HTTPS call made inside a command handler on a locked phone. Commands go to the relay directly from the extension; see [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md).
+- How long the system waits for an HTTPS call made inside a command handler. Calls of up to 250 ms worked on a real iPhone; no limit is documented. Commands go to the relay directly from the extension; see [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md).
 
 ## ActivityKit fallback
 

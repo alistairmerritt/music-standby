@@ -58,4 +58,19 @@ The push `attributes` decode as `MacPlaybackAttributes`: `id`, `macName`, `revis
 
 ## Artwork limits
 
-PNG or JPEG only, decided from the bytes. At most `ArtworkDescriptor.maximumByteCount` (5 MB) and 4096 pixels per side. Anything else is treated as no artwork.
+PNG or JPEG only, decided from the bytes. Anything over the limit is treated as no artwork.
+
+| Where | Maximum |
+| --- | --- |
+| The extension, which is what fills the Lock Screen and StandBy | **1 MB and 800 pixels per side** |
+| The foreground app | `ArtworkDescriptor.maximumByteCount` (5 MB) and 4096 pixels per side |
+
+**Please serve artwork at about 600×600.** iOS holds the extension to a hard 6 MB of memory, seen in the system log on an iPhone running iOS 27.2. A 1200-pixel image is about 5.8 MB once decoded. The 800-pixel figure is a judgement from that limit, and real sizes haven't yet been measured on a phone.
+
+## Confirmed on an iPhone
+
+With the mock transport on an iPhone 15 Pro, iOS 27.2, connected by USB. No relay was involved.
+
+- The extension made HTTPS requests from command handlers in 120 to 250 ms, and iOS waited for them.
+- The extension read a Keychain item the app had written, on a free developer team.
+- iOS logs a "network restriction" for the extension. HTTPS to a public host still worked. Its scope is unknown, so a relay on an unusual port or host type should be tried early.
