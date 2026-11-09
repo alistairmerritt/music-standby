@@ -2,8 +2,9 @@
 
 The server between the Mac companion and the iPhone. It implements
 **[docs/relay/API-v1.md](../docs/relay/API-v1.md)**. It is a Cloudflare Worker with one Durable Object per
-pairing, but nothing here is deployed: it runs locally under `wrangler dev`, the same
-`workerd` runtime Cloudflare uses.
+pairing. It runs locally under `wrangler dev`, the same `workerd` runtime Cloudflare uses,
+and is deployed to a `workers.dev` hostname with pushes still mocked (see
+[Deployment](#deployment)).
 
 | File | What |
 | --- | --- |
@@ -56,6 +57,9 @@ With `--playback`, Music must already be playing. The harness then sends real ne
 play and a duplicated next, and leaves Music paused. It never changes the volume or launches
 Music.
 
+With `--relay URL` the same checks run against a deployed relay instead; see
+[Deployment](#deployment).
+
 To drive it by hand, run `npm run dev`, then
 `msbctl watch 600 --relay http://127.0.0.1:8787 --pair`, then
 `node tools/mock-phone.mjs pair <code>` (type `approve` into `msbctl`), then
@@ -69,9 +73,36 @@ To drive it by hand, run `npm run dev`, then
 | `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID` | — | Secrets (`wrangler secret put`). Never in `wrangler.toml` |
 | `APNS_ENVIRONMENT` | `development` | `production` uses `api.push.apple.com` |
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
-| `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it; a deployment shouldn't |
+| `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
 | `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 900000 | |
+
+## Deployment
+
+Deployed on 10 November 2026 to a `workers.dev` hostname on the owner's free Cloudflare
+account. The hostname is left out of this public repository; ask for it. SQLite-backed
+Durable Objects are on Cloudflare's free plan.
+
+```bash
+npm run deploy
+```
+
+That deploys `wrangler.toml` as it stands: `PUSH_MODE=mock`, `DEV_ENDPOINTS=0`. Against the
+deployment, the harness skips the relay restart and unpairs its test Mac when it finishes:
+
+```bash
+node tools/e2e-local.mjs --msbctl ../MacCompanion/.build/swiftc/msbctl --relay https://HOST
+```
+
+On 10 November it passed 19/19 read-only (no `--playback`, nothing playing, so no artwork).
+
+To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
+
+```bash
+npx wrangler deploy --var DEV_ENDPOINTS:1
+curl https://HOST/v1/dev/apns-probe
+npx wrangler deploy
+```
 
 ## Security
 
@@ -92,9 +123,11 @@ To drive it by hand, run `npm run dev`, then
 - **Locally, `workerd` can't reach APNs.** `GET /v1/dev/apns-probe` gets "Network connection
   lost". `curl --http2` from the same Mac gets APNs' `403 InvalidProviderToken`; `curl
   --http1.1` fails just as `workerd` does. That fits `workerd` having no HTTP/2 client.
-- **Whether a deployed Worker reaches APNs is untested.** It needs a Cloudflare account to
-  deploy the probe, but no Apple credentials. Real pushes need an APNs key from the paid Apple
-  Developer Program.
+- **A deployed Worker does reach APNs.** On 10 November the probe from the deployment got
+  APNs' own `403 InvalidProviderToken`, with an `apns-id`, three times out of three: 687 ms
+  cold, then about 170 ms. APNs answers only over HTTP/2, so the Worker can send pushes
+  itself, with no separate push service. Real pushes still need an APNs key from the paid
+  Apple Developer Program.
 
 ## Known limits
 
@@ -109,5 +142,3 @@ Deliberate for version 1, and fine for one Mac and one phone:
   its session.
 - **Pairing claims are polled** every 2 s rather than pushed.
 - **A session the phone ends** stays ended until the Mac's next listening session.
-- **Never deployed.** Everything here ran under `wrangler dev`. Deploying needs a Cloudflare
-  account (free tier) and `DEV_ENDPOINTS` left at `0`.

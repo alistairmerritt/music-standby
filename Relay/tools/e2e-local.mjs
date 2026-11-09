@@ -2,7 +2,11 @@
 // End-to-end test on one Mac: the real Mac companion (msbctl) ↔ a local relay
 // (wrangler dev) ↔ a simulated iPhone (this script, over HTTPS-shaped calls).
 //
-//   node tools/e2e-local.mjs --msbctl PATH [--playback]
+//   node tools/e2e-local.mjs --msbctl PATH [--playback] [--relay URL]
+//
+// --relay runs the same checks against a deployed relay instead of starting
+// one, skips the relay-restart step, and unpairs the Mac it registered when it
+// finishes, so it leaves nothing behind on the relay.
 //
 // Without --playback nothing changes Music: only reads, pairing, auth,
 // sessions, artwork and connection loss. With --playback it also sends
@@ -10,7 +14,7 @@
 // and leaves it paused. It never changes the volume and never launches Music.
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,14 +25,15 @@ const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : unde
 const msbctl = opt("--msbctl");
 const playback = args.includes("--playback");
 const port = Number(opt("--port") ?? 8791);
+const remote = opt("--relay")?.replace(/\/+$/, "");
 if (!msbctl) {
-  console.error("usage: node tools/e2e-local.mjs --msbctl PATH [--playback] [--port N]");
+  console.error("usage: node tools/e2e-local.mjs --msbctl PATH [--playback] [--port N | --relay URL]");
   process.exit(2);
 }
 
 const relayDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const work = mkdtempSync(join(tmpdir(), "msb-e2e-"));
-const base = `http://127.0.0.1:${port}`;
+const base = remote ?? `http://127.0.0.1:${port}`;
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let relay, mac, macLog = "";
@@ -62,6 +67,7 @@ async function api(method, path, { token, body, headers = {} } = {}) {
 }
 
 function startRelay() {
+  if (remote) return until(async () => (await fetch(`${base}/v1/health`)).ok, 15000, 500);
   relay = spawn("npx", ["wrangler", "dev", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", join(work, "relay-state"), "--var", "DEV_ENDPOINTS:1"], {
     cwd: relayDir, env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"],
   });
@@ -92,7 +98,7 @@ const command = (kind, { id = randomUUID().toUpperCase(), session = sessionID } 
 
 try {
   // 1. Relay and Mac
-  check("relay starts under wrangler dev", !!(await startRelay()));
+  check(remote ? `deployed relay answers at ${base}` : "relay starts under wrangler dev", !!(await startRelay()));
   startMac(["--pair"]);
   const code = await until(async () => macLog.match(/PAIRING CODE (\d{6})/)?.[1], 15000);
   check("Mac registers, connects and gets a pairing code", !!code, code ? `code ${code}` : macLog.slice(-300));
@@ -194,12 +200,16 @@ try {
   check("the Mac reconnects with its saved credential", !!back);
   if (sessionID) check("the session survives a companion restart", back?.sessionID === sessionID, `${sessionID?.slice(0, 8)} → ${back?.sessionID?.slice(0, 8)}`);
 
-  // 8. Relay restart
-  await stopRelay();
-  check("relay stopped", !(await fetch(`${base}/v1/health`).then(() => true).catch(() => false)));
-  await startRelay();
-  const resumed = await until(async () => ((await session())?.macConnected ? true : undefined), 40000, 500);
-  check("the Mac reconnects after the relay restarts", !!resumed);
+  // 8. Relay restart (local only: a deployed relay isn't ours to stop)
+  if (remote) {
+    console.log("skip  relay restart (deployed relay)");
+  } else {
+    await stopRelay();
+    check("relay stopped", !(await fetch(`${base}/v1/health`).then(() => true).catch(() => false)));
+    await startRelay();
+    const resumed = await until(async () => ((await session())?.macConnected ? true : undefined), 40000, 500);
+    check("the Mac reconnects after the relay restarts", !!resumed);
+  }
 
   // 9. Session termination and revocation
   const end = sessionID ? await api("POST", "/v1/session/end", { token: phoneToken, body: { sessionID } }) : undefined;
@@ -232,7 +242,19 @@ try {
     spawn(msbctl, ["control", "pause"], { stdio: "ignore" });
     await sleep(1500);
   }
-  mac?.kill("SIGINT");
+  if (mac && mac.exitCode === null) {
+    await new Promise((resolve) => { mac.once("exit", resolve); mac.kill("SIGINT"); setTimeout(resolve, 3000); });
+  }
+  if (remote) {
+    // Unpair whatever pairing the Mac holds now, so the run leaves nothing behind.
+    try {
+      const { macToken } = JSON.parse(readFileSync(join(work, "mac.json"), "utf8"));
+      const r = await api("DELETE", "/v1/pairing", { token: macToken });
+      console.log(`cleanup  unpaired the test Mac on the relay (HTTP ${r.status})`);
+    } catch (e) {
+      console.log(`cleanup  nothing to unpair (${e.message})`);
+    }
+  }
   await stopRelay();
   rmSync(work, { recursive: true, force: true });
   const failed = results.filter((r) => !r.ok).length;
