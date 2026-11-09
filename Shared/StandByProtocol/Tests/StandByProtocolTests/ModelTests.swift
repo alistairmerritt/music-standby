@@ -26,6 +26,19 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
         #expect(throws: DecodingError.self) { try StandByWire.makeDecoder().decode(RemoteCommand.self, from: Data(json.utf8)) }
     }
 
+    /// A clock reading has sub-millisecond precision that the wire drops.
+    @Test func wirePrecisionMakesAMessageSurviveARoundTrip() throws {
+        let raw = Date(timeIntervalSince1970: 1_794_207_600.123_456_7)
+        var m = PlaybackMessage(revision: 1, state: .playing, elapsedTime: 3, capturedAt: raw, track: nil, canGoNext: false, canGoPrevious: false)
+        let decoder = StandByWire.makeDecoder()
+        let encoder = StandByWire.makeEncoder()
+        #expect(try decoder.decode(PlaybackMessage.self, from: encoder.encode(m)) != m)
+        m.capturedAt = StandByWire.wirePrecision(raw)
+        #expect(try decoder.decode(PlaybackMessage.self, from: encoder.encode(m)) == m)
+        #expect(abs(m.capturedAt.timeIntervalSince(raw)) < 0.001)
+        #expect(StandByWire.wirePrecision(m.capturedAt) == m.capturedAt)
+    }
+
     @Test func messageRoundTripsThroughWireCoders() throws {
         var original = message()
         original.capturedAt = Date(timeIntervalSince1970: 1_794_207_600.125)
