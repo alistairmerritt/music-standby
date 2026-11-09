@@ -35,7 +35,7 @@ public enum MusicScript: Hashable, Sendable {
         case .command(let command):
             """
             \(Self.guardLine)
-            with timeout of 5 seconds
+            with timeout of 3 seconds
             \ttell application "Music" to \(command.verb)
             end timeout
             return "ok"
@@ -43,13 +43,17 @@ public enum MusicScript: Hashable, Sendable {
         }
     }
 
-    /// The tested `musicprobe.sh` script, plus a timeout: without one a hung
-    /// Music blocks for AppleScript's default two minutes. The spike saw one
-    /// 19.8 s call while Music was relaunching.
+    /// The tested `musicprobe.sh` fields and order, with two changes measured
+    /// on macOS 27.0.1. `properties of current track` fetches every track field
+    /// in one Apple Event, where reading each property was eleven events and
+    /// 100–430 ms on the main thread; and a timeout, because without one a
+    /// hung Music blocks for AppleScript's default two minutes (the spike saw a
+    /// 19.8 s call while Music relaunched). Field order must match
+    /// `SnapshotParser`.
     private static let snapshotSource = """
     \(guardLine)
     set US to (ASCII character 31)
-    with timeout of 5 seconds
+    with timeout of 3 seconds
     \ttell application "Music"
     \t\tset playerState to (player state as text)
     \t\tset pos to "0"
@@ -58,23 +62,23 @@ public enum MusicScript: Hashable, Sendable {
     \t\tend try
     \t\tset f to {playerState, pos, "", "", "", "", "0", "", "0", "", "0"}
     \t\ttry
-    \t\t\tset t to current track
-    \t\t\tset item 3 of f to (name of t)
-    \t\t\tset item 4 of f to (artist of t)
-    \t\t\tset item 5 of f to (album of t)
+    \t\t\tset p to properties of current track
+    \t\t\tset item 3 of f to (name of p)
+    \t\t\tset item 4 of f to (artist of p)
+    \t\t\tset item 5 of f to (album of p)
     \t\t\ttry
-    \t\t\t\tset item 6 of f to (album artist of t)
+    \t\t\t\tset item 6 of f to (album artist of p)
     \t\t\tend try
-    \t\t\tset item 7 of f to (duration of t as text)
+    \t\t\tset item 7 of f to (duration of p as text)
     \t\t\ttry
-    \t\t\t\tset item 8 of f to (persistent ID of t)
+    \t\t\t\tset item 8 of f to (persistent ID of p)
     \t\t\tend try
     \t\t\ttry
-    \t\t\t\tset item 9 of f to (database ID of t as text)
+    \t\t\t\tset item 9 of f to (database ID of p as text)
     \t\t\tend try
-    \t\t\tset item 10 of f to (class of t as text)
+    \t\t\tset item 10 of f to (class of p as text)
     \t\t\ttry
-    \t\t\t\tset item 11 of f to (count of artworks of t as text)
+    \t\t\t\tset item 11 of f to (count of artworks of current track as text)
     \t\t\tend try
     \t\tend try
     \t\tset AppleScript's text item delimiters to US
@@ -92,7 +96,7 @@ public enum MusicScript: Hashable, Sendable {
     /// be coerced inside a tell block (-1700, found in the spike).
     private static let artworkSource = """
     \(guardLine)
-    with timeout of 10 seconds
+    with timeout of 5 seconds
     \ttell application "Music"
     \t\ttry
     \t\t\tset t to current track
@@ -132,14 +136,20 @@ public protocol MusicScriptRunning: Sendable {
     func run(_ script: MusicScript) -> ScriptOutput
 }
 
-/// NSAppleScript is not thread-safe. `MusicController` only ever calls this
-/// from its own serial queue, which is why `@unchecked Sendable` holds.
+/// Runs scripts with NSAppleScript, **on the main thread only**.
+///
+/// Apple documents NSAppleScript as main-thread only, and on macOS 27.0.1 it
+/// means it: measured against Music, a one-event script took 5–30 ms on the
+/// main thread and 8–158 s on a background queue or thread, and an actor on a
+/// serial-queue executor hung. `MusicController` is `@MainActor`, and `run`
+/// checks, which is why `@unchecked Sendable` holds.
 public final class AppleScriptRunner: MusicScriptRunning, @unchecked Sendable {
     private var compiled: [MusicScript: NSAppleScript] = [:]
 
     public init() {}
 
     public func run(_ script: MusicScript) -> ScriptOutput {
+        dispatchPrecondition(condition: .onQueue(.main))
         var info: NSDictionary?
         let apple: NSAppleScript
         if let cached = compiled[script] {

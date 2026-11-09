@@ -8,17 +8,17 @@ import StandByProtocol
 /// (no events sent, so it cannot launch Music or block on it), then an
 /// in-script `is running` check for the moment between that and the event.
 ///
-/// Every script runs on one serial queue, the actor's executor, because
-/// NSAppleScript is not thread-safe. Calls block that queue, not the main thread.
-public actor MusicController {
-    public static let bundleID = "com.apple.Music"
-
-    private let queue = DispatchSerialQueue(label: "com.alistairmerritt.MusicStandBy.music")
-    public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+/// Main-actor bound, because NSAppleScript only works properly on the main
+/// thread (see `AppleScriptRunner`). Each call blocks the main thread for its
+/// Apple Events: a snapshot is four events, typically 30–100 ms; a command is
+/// one. Timeouts cap a hung Music at 3 s (5 s for artwork).
+@MainActor
+public final class MusicController {
+    public nonisolated static let bundleID = "com.apple.Music"
 
     private let runner: any MusicScriptRunning
-    private let isRunning: @Sendable () -> Bool
-    private let now: @Sendable () -> Date
+    private let isRunning: () -> Bool
+    private let now: () -> Date
 
     /// Scripts actually executed. Stays put while Music is closed.
     public private(set) var scriptsRun = 0
@@ -26,15 +26,15 @@ public actor MusicController {
     public private(set) var skippedWhileClosed = 0
 
     public init(runner: any MusicScriptRunning = AppleScriptRunner(),
-                isRunning: @escaping @Sendable () -> Bool = MusicController.isMusicRunning,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                isRunning: @escaping () -> Bool = MusicController.isMusicRunning,
+                now: @escaping () -> Date = { Date() }) {
         self.runner = runner
         self.isRunning = isRunning
         self.now = now
     }
 
     /// Guard 1 of 2. Sends no Apple Events.
-    public static func isMusicRunning() -> Bool {
+    public nonisolated static func isMusicRunning() -> Bool {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains { !$0.isTerminated }
     }
 

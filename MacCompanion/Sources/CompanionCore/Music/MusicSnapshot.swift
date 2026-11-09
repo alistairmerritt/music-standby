@@ -96,9 +96,10 @@ public enum SnapshotParser {
     }
 
     /// AppleScript writes reals with the user's decimal separator in some
-    /// locales, so accept a comma.
+    /// locales, so accept a comma. Rounded to milliseconds: `properties` gives
+    /// durations like 205.307006835938, which only add noise on the wire.
     static func number(_ text: String) -> Double? {
         guard let value = Double(text.replacingOccurrences(of: ",", with: ".")), value.isFinite else { return nil }
-        return value
+        return (value * 1000).rounded() / 1000
     }
 }

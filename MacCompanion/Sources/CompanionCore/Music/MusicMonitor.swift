@@ -100,7 +100,7 @@ public final class MusicMonitor {
 
     /// One read, outside the coalescing. For callers that need the result.
     public func read(_ trigger: Trigger) async -> MusicSnapshot {
-        let snapshot = await controller.snapshot()
+        let snapshot = controller.snapshot()
         lastState = snapshot.state
         return snapshot
     }

@@ -186,3 +186,17 @@ import StandByProtocol
         #expect(r.companion.lastAck == nil)   // no ack for a local command
     }
 }
+
+extension CompanionTests {
+    /// Found against real Music: a read from before a command, applied after it.
+    @Test func olderReadArrivingLateIsDropped() async throws {
+        let r = await rig()
+        let latest = try #require(await states(r.relay).last)
+        let stale = MusicSnapshot(state: .paused, position: 1, capturedAt: latest.capturedAt.addingTimeInterval(-1),
+                                  track: MusicTrack(title: "Old", artist: "A", album: "B", duration: 100, persistentID: "OLD"))
+        r.companion.monitor.onSnapshot?(stale, .notification)
+        await r.companion.settle()
+        #expect(await states(r.relay).last == latest)
+        #expect(r.companion.snapshot?.track?.title == "Losing My Edge")
+    }
+}

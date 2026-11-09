@@ -56,9 +56,9 @@ case "snapshot":
     run {
         let controller = MusicController()
         let started = Date()
-        let snapshot = await controller.snapshot()
+        let snapshot = controller.snapshot()
         print(describe(snapshot))
-        print("read took \(Int(Date().timeIntervalSince(started) * 1000)) ms; scripts run: \(await controller.scriptsRun), answered by process check: \(await controller.skippedWhileClosed)")
+        print("read took \(Int(Date().timeIntervalSince(started) * 1000)) ms; scripts run: \(controller.scriptsRun), answered by process check: \(controller.skippedWhileClosed)")
         var publisher = PlaybackPublisher(revisions: RevisionCounter(lastPersisted: nil))
         if let message = publisher.ingest(snapshot, artworkID: nil) { print(json(.state(message))) }
         return 0
@@ -68,7 +68,7 @@ case "artwork":
     run {
         let controller = MusicController()
         let started = Date()
-        let result = await controller.artwork()
+        let result = controller.artwork()
         let ms = Int(Date().timeIntervalSince(started) * 1000)
         guard case .image(let bytes, let pid, let type) = result else {
             print("no artwork: \(result) (\(ms) ms)")
@@ -102,12 +102,12 @@ case "control":
     }
     run {
         let controller = MusicController()
-        let before = await controller.snapshot()
+        let before = controller.snapshot()
         print("before: \(before.state.rawValue) \(before.track?.title ?? "-") @ \(String(format: "%.1f", before.position))")
-        let outcome = await controller.perform(command)
+        let outcome = controller.perform(command)
         print("\(word): \(outcome)")
         try? await Task.sleep(for: .milliseconds(400))
-        let after = await controller.snapshot()
+        let after = controller.snapshot()
         print("after:  \(after.state.rawValue) \(after.track?.title ?? "-") @ \(String(format: "%.1f", after.position)) pid \(after.track?.persistentID ?? "-")")
         return outcome == .performed ? 0 : 1
     }
@@ -155,7 +155,7 @@ case "watch":
         print("""
         \(stamp()) done.
           playerInfo notifications: \(companion.monitor.notificationsReceived)
-          scripts run: \(await companion.controller.scriptsRun), reads answered by process check: \(await companion.controller.skippedWhileClosed)
+          scripts run: \(companion.controller.scriptsRun), reads answered by process check: \(companion.controller.skippedWhileClosed)
           frames sent: \(sent.count) (\(sent.filter { if case .state = $0 { true } else { false } }.count) state)
         """)
         return 0

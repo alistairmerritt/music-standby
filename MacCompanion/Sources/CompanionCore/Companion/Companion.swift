@@ -119,7 +119,7 @@ public final class Companion {
     public func perform(_ command: MusicCommand) {
         enqueue { [weak self] in
             guard let self else { return }
-            let outcome = await controller.perform(command)
+            let outcome = controller.perform(command)
             record("menu \(command.rawValue): \(outcome)")
             if outcome == .performed { await settleAndRead() } else { await ingest(await monitor.read(.command), trigger: .command) }
         }
@@ -191,7 +191,7 @@ public final class Companion {
                   snapshot.state == .stopped, snapshot.track == nil {
             ack = reject(command, .noCurrentTrack, "nothing is loaded in Music")
         } else {
-            switch await controller.perform(MusicCommand(command.kind)) {
+            switch controller.perform(MusicCommand(command.kind)) {
             case .notRunning:
                 ack = reject(command, .musicNotRunning, "Music.app is not running. The companion does not launch it.")
             case .automationDenied(let detail):
@@ -225,6 +225,14 @@ public final class Companion {
     }
 
     private func ingest(_ snapshot: MusicSnapshot, trigger: MusicMonitor.Trigger) async {
+        // Reads queue behind commands, so one taken before a command's own
+        // re-read can arrive after it. Seen against real Music: a notification
+        // read from before a pause landed after the pause and briefly said
+        // "playing" again. Reads never overlap, so read time is read order.
+        if let latest = self.snapshot, snapshot.capturedAt < latest.capturedAt {
+            record("dropped a stale \(snapshot.state.rawValue) read [\(trigger.rawValue)]")
+            return
+        }
         if self.snapshot?.state != snapshot.state || self.snapshot?.track != snapshot.track {
             record("music \(snapshot.state.rawValue)\(snapshot.track.map { ": \($0.title) — \($0.artist)" } ?? "") [\(trigger.rawValue)]")
         }
@@ -261,7 +269,7 @@ public final class Companion {
             return nil
         }
         let started = now()
-        let result = await controller.artwork()
+        let result = controller.artwork()
         guard case .image(let bytes, let pid, let type) = result else {
             if case .noArtwork = result {
                 artworkByTrack[key] = ArtworkEntry(artworkCount: track.artworkCount)

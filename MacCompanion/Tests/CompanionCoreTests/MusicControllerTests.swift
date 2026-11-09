@@ -3,17 +3,18 @@ import Testing
 import StandByProtocol
 @testable import CompanionCore
 
+@MainActor
 @Suite struct MusicControllerTests {
     @Test func closedMusicGetsNoAppleEvents() async {
         let music = FakeMusic()
         music.running = false
         let controller = MusicController(runner: music, isRunning: music.processCheck)
-        #expect(await controller.snapshot().state == .notRunning)
-        #expect(await controller.artwork() == .notRunning)
-        #expect(await controller.perform(.play) == .notRunning)
+        #expect(controller.snapshot().state == .notRunning)
+        #expect(controller.artwork() == .notRunning)
+        #expect(controller.perform(.play) == .notRunning)
         #expect(music.scripts.isEmpty)
-        #expect(await controller.scriptsRun == 0)
-        #expect(await controller.skippedWhileClosed == 3)
+        #expect(controller.scriptsRun == 0)
+        #expect(controller.skippedWhileClosed == 3)
     }
 
     @Test func inScriptGuardCatchesAQuitAfterTheProcessCheck() async {
@@ -21,35 +22,35 @@ import StandByProtocol
         music.running = false
         // The process check still says running; the script's own guard says not.
         let controller = MusicController(runner: music, isRunning: { true })
-        #expect(await controller.snapshot().state == .notRunning)
-        #expect(await controller.perform(.next) == .notRunning)
+        #expect(controller.snapshot().state == .notRunning)
+        #expect(controller.perform(.next) == .notRunning)
     }
 
     @Test func refusedPermissionIsNeverReportedAsClosed() async {
         let music = FakeMusic()
         music.denied = true
         let controller = MusicController(runner: music, isRunning: music.processCheck)
-        let snapshot = await controller.snapshot()
+        let snapshot = controller.snapshot()
         #expect(snapshot.state == .automationDenied)
         #expect(snapshot.detail?.contains("-1743") == true)
-        guard case .automationDenied = await controller.perform(.play) else { Issue.record("expected automationDenied"); return }
-        guard case .failed(.automationDenied, _) = await controller.artwork() else { Issue.record("expected failed(.automationDenied)"); return }
+        guard case .automationDenied = controller.perform(.play) else { Issue.record("expected automationDenied"); return }
+        guard case .failed(.automationDenied, _) = controller.artwork() else { Issue.record("expected failed(.automationDenied)"); return }
     }
 
     @Test func procNotFoundCountsAsClosedOnlyIfTheProcessIsGone() async {
         let music = FakeMusic()
         let controller = MusicController(runner: music, isRunning: music.processCheck)
         music.failNext(code: -600, message: "Application isn’t running.")
-        #expect(await controller.snapshot().state == .error)
+        #expect(controller.snapshot().state == .error)
         music.quitDuringNextScript()
-        #expect(await controller.snapshot().state == .notRunning)
+        #expect(controller.snapshot().state == .notRunning)
     }
 
     @Test func timeoutIsAnError() async {
         let music = FakeMusic()
         let controller = MusicController(runner: music, isRunning: music.processCheck)
         music.failNext(code: -1712, message: "AppleEvent timed out.")
-        let snapshot = await controller.snapshot()
+        let snapshot = controller.snapshot()
         #expect(snapshot.state == .error)
         #expect(snapshot.detail?.contains("-1712") == true)
     }
@@ -57,7 +58,7 @@ import StandByProtocol
     @Test func readsTheCurrentTrack() async throws {
         let music = FakeMusic(state: "playing")
         let controller = MusicController(runner: music, isRunning: music.processCheck)
-        let snapshot = await controller.snapshot()
+        let snapshot = controller.snapshot()
         #expect(snapshot.state == .playing)
         #expect(snapshot.position == 10)
         let track = try #require(snapshot.track)
@@ -71,11 +72,11 @@ import StandByProtocol
     @Test func artworkComesBackWithItsTrack() async {
         let music = FakeMusic()
         let controller = MusicController(runner: music, isRunning: music.processCheck)
-        #expect(await controller.artwork() == .image(music.current.artwork!, persistentID: "542CEB17C137B39E", descriptorType: "PNGf"))
-        _ = await controller.perform(.next)
-        #expect(await controller.artwork() == .noArtwork(persistentID: "542CEB17C137B3A5"))
+        #expect(controller.artwork() == .image(music.current.artwork!, persistentID: "542CEB17C137B39E", descriptorType: "PNGf"))
+        _ = controller.perform(.next)
+        #expect(controller.artwork() == .noArtwork(persistentID: "542CEB17C137B3A5"))
         music.state = "stopped"
-        #expect(await controller.artwork() == .noTrack)
+        #expect(controller.artwork() == .noTrack)
     }
 }
 
@@ -139,5 +140,12 @@ import StandByProtocol
 
     @Test func undecodableBytesGiveNil() {
         #expect(ArtworkProcessor.process(Data("not an image".utf8)) == nil)
+    }
+}
+
+@Suite struct SnapshotNumberTests {
+    @Test func roundsToMilliseconds() {
+        #expect(SnapshotParser.number("205.307006835938") == 205.307)
+        #expect(SnapshotParser.number("nan") == nil)
     }
 }
