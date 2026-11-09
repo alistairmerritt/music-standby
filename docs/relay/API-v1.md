@@ -146,7 +146,7 @@ the Mac's `listeningSessionID`, although that drives it.
 | `paused` for 15 minutes | End the session |
 | Mac sends `goodbye` | End the session at once |
 | Mac socket drops without `goodbye` | Wait 60 s for a reconnect, then end the session |
-| `POST /v1/session/end` from the phone | End the session |
+| `POST /v1/session/end` from the phone | End the session, and start no new one for the same `listeningSessionID`. The next listening session, after a stop or quit, starts as usual |
 | `DELETE /v1/pairing` | End the session, revoke both tokens |
 | APNs answers `410` or `BadDeviceToken` | Forget that token; if it was the session's, end the session |
 
