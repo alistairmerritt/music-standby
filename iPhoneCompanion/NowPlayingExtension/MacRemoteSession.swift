@@ -35,7 +35,6 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
     var content: (any MediaContentRepresentable)? {
         guard let track = attributes.track else { return nil }
         let store = ArtworkStore(container: container)
-        let artworkID = track.artworkID
         let artworkURL = track.artworkURL
         return MusicContent(
             id: track.id,
@@ -44,13 +43,15 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             albumName: track.album,
             type: .audio,
             duration: .finite(track.duration),
-            artwork: Artwork(id: artworkID) { _ in
-                // PNG encoding never finished inside this extension on iOS 27.2 and the
-                // system kept relaunching it, so generated art skips the encoder.
-                if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {
-                    return try ArtworkRepresentation(cgImage: image)
+            artwork: track.artworkID.map { artworkID in
+                Artwork(id: artworkID) { _ in
+                    // PNG encoding never finished inside this extension on iOS 27.2 and the
+                    // system kept relaunching it, so generated art skips the encoder.
+                    if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {
+                        return try ArtworkRepresentation(cgImage: image)
+                    }
+                    return try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
                 }
-                return try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
             }
         )
     }

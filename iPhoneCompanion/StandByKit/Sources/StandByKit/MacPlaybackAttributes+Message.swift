@@ -1,7 +1,7 @@
 import Foundation
 
 extension MacPlaybackAttributes {
-    /// The only bridge from the temporary wire models to the attributes type.
+    /// The only bridge from the shared wire models to the attributes type.
     public init(mac: PairedMac, message: PlaybackMessage) {
         self.init(
             id: "mac-\(mac.id)",

@@ -7,8 +7,9 @@ let package = Package(
     name: "StandByKit",
     platforms: [.iOS("27.0"), .macOS(.v14)],
     products: [.library(name: "StandByKit", targets: ["StandByKit"])],
+    dependencies: [.package(path: "../../Shared/StandByProtocol")],
     targets: [
-        .target(name: "StandByKit"),
+        .target(name: "StandByKit", dependencies: [.product(name: "StandByProtocol", package: "StandByProtocol")]),
         .testTarget(name: "StandByKitTests", dependencies: ["StandByKit"]),
     ]
 )

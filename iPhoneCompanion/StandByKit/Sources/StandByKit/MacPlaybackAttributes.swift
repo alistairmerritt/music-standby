@@ -9,10 +9,10 @@ public struct SessionTrack: Codable, Equatable, Sendable {
     public var artist: String
     public var album: String
     public var duration: TimeInterval
-    public var artworkID: String
+    public var artworkID: String?
     public var artworkURL: URL?
 
-    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, artworkID: String, artworkURL: URL? = nil) {
+    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, artworkID: String?, artworkURL: URL? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
