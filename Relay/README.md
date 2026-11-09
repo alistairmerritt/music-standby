@@ -94,7 +94,9 @@ deployment, the harness skips the relay restart and unpairs its test Mac when it
 node tools/e2e-local.mjs --msbctl ../MacCompanion/.build/swiftc/msbctl --relay https://HOST
 ```
 
-On 10 November it passed 19/19 read-only (no `--playback`, nothing playing, so no artwork).
+On 10 November it passed 19/19 read-only, then 29/29 with `--playback`: Next, Pause and Play
+from the simulated iPhone changed the real Music.app through Cloudflare, acknowledged in
+62–156 ms round trip, and the artwork came through its signed URL.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
