@@ -95,3 +95,19 @@ To drive it by hand, run `npm run dev`, then
 - **Whether a deployed Worker reaches APNs is untested.** It needs a Cloudflare account to
   deploy the probe, but no Apple credentials. Real pushes need an APNs key from the paid Apple
   Developer Program.
+
+## Known limits
+
+Deliberate for version 1, and fine for one Mac and one phone:
+
+- **Push pacing.** There's no one-per-second cap. The Mac already sends only visible changes,
+  and the relay pushes once per accepted state. `apns-collapse-id` isn't set. Revisit after
+  real APNs testing.
+- **Artwork** lives in Durable Object storage: up to 1 MB each, the 64 most recent per
+  pairing. R2 is the move if that's ever too small.
+- **One phone per Mac.** Approving a new phone revokes the old phone's credential and ends
+  its session.
+- **Pairing claims are polled** every 2 s rather than pushed.
+- **A session the phone ends** stays ended until the Mac's next listening session.
+- **Never deployed.** Everything here ran under `wrangler dev`. Deploying needs a Cloudflare
+  account (free tier) and `DEV_ENDPOINTS` left at `0`.
