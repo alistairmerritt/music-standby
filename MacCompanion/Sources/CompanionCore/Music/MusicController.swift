@@ -38,6 +38,14 @@ public final class MusicController {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains { !$0.isTerminated }
     }
 
+    /// Running but not yet finished launching. Apple Events sent then wait for
+    /// Music to come up: a read straight after a relaunch blocked for about
+    /// 4 s on macOS 27.0.1. Sends no Apple Events.
+    public nonisolated static func isMusicLaunching() -> Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .contains { !$0.isTerminated && !$0.isFinishedLaunching }
+    }
+
     // MARK: Reading
 
     public func snapshot() -> MusicSnapshot {

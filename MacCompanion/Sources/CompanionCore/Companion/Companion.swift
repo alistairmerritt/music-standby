@@ -55,9 +55,10 @@ public final class Companion {
     }
 
     public init(controller: MusicController, transport: any CompanionTransport, store: CompanionStore,
-                device: DeviceIdentity, now: @escaping @Sendable () -> Date = { Date() }) {
+                device: DeviceIdentity, now: @escaping @Sendable () -> Date = { Date() },
+                isMusicLaunching: @escaping () -> Bool = MusicController.isMusicLaunching) {
         self.controller = controller
-        self.monitor = MusicMonitor(controller: controller)
+        self.monitor = MusicMonitor(controller: controller, isLaunching: isMusicLaunching)
         self.transport = transport
         self.store = store
         self.device = device
@@ -119,6 +120,7 @@ public final class Companion {
     public func perform(_ command: MusicCommand) {
         enqueue { [weak self] in
             guard let self else { return }
+            await monitor.waitOutQuitWindow()
             let outcome = controller.perform(command)
             record("menu \(command.rawValue): \(outcome)")
             if outcome == .performed { await settleAndRead() } else { await ingest(await monitor.read(.command), trigger: .command) }
@@ -185,12 +187,15 @@ public final class Companion {
             return previous
         }
         let ack: CommandAck
+        let skip = command.kind == .next || command.kind == .previous
         if command.isExpired(at: now()) {
             ack = reject(command, .commandExpired, "issued more than \(Int(RemoteCommand.maximumAge)) s ago")
-        } else if command.kind == .next || command.kind == .previous, let snapshot,
-                  snapshot.state == .stopped, snapshot.track == nil {
+        } else if skip, await currentTrackIsMissing() {
+            // Music answers "next track" with nothing loaded as a success that
+            // does nothing (seen right after a relaunch), so check first.
             ack = reject(command, .noCurrentTrack, "nothing is loaded in Music")
         } else {
+            await monitor.waitOutQuitWindow()
             switch controller.perform(MusicCommand(command.kind)) {
             case .notRunning:
                 ack = reject(command, .musicNotRunning, "Music.app is not running. The companion does not launch it.")
@@ -207,6 +212,16 @@ public final class Companion {
         lastAck = ack
         record("command \(command.kind.rawValue) → \(ack.accepted ? "accepted" : "rejected \(ack.error?.code.rawValue ?? "")") r\(ack.revision)")
         return ack
+    }
+
+    /// True when Music is running with nothing loaded. Re-reads first if the
+    /// last snapshot can't say, e.g. Music was closed or relaunching.
+    private func currentTrackIsMissing() async -> Bool {
+        guard snapshot?.track == nil else { return false }
+        if snapshot?.state != .stopped {
+            await ingest(await monitor.read(.command), trigger: .command)
+        }
+        return snapshot?.state == .stopped && snapshot?.track == nil
     }
 
     private func reject(_ command: RemoteCommand, _ code: ErrorCode, _ message: String) -> CommandAck {
@@ -232,6 +247,9 @@ public final class Companion {
         if let latest = self.snapshot, snapshot.capturedAt < latest.capturedAt {
             record("dropped a stale \(snapshot.state.rawValue) read [\(trigger.rawValue)]")
             return
+        }
+        if trigger == .launch || trigger == .terminate {
+            record("Music \(trigger == .launch ? "launched" : "quit") (NSWorkspace)")
         }
         if self.snapshot?.state != snapshot.state || self.snapshot?.track != snapshot.track {
             record("music \(snapshot.state.rawValue)\(snapshot.track.map { ": \($0.title) — \($0.artist)" } ?? "") [\(trigger.rawValue)]")

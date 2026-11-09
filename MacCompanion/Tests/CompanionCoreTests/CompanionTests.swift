@@ -20,7 +20,8 @@ import StandByProtocol
         let relay = MockRelayTransport()
         let defaults = defaults ?? UserDefaults(suiteName: "CompanionTests-\(UUID().uuidString)")!
         let companion = Companion(controller: MusicController(runner: music, isRunning: music.processCheck),
-                                  transport: relay, store: CompanionStore(defaults: defaults), device: Self.device, now: now)
+                                  transport: relay, store: CompanionStore(defaults: defaults), device: Self.device, now: now,
+                                  isMusicLaunching: { false })
         companion.settleDelay = .zero
         for state in PlaybackState.allCases { companion.monitor.pollIntervals[state] = .seconds(3600) }
         companion.start()
@@ -198,5 +199,23 @@ extension CompanionTests {
         await r.companion.settle()
         #expect(await states(r.relay).last == latest)
         #expect(r.companion.snapshot?.track?.title == "Losing My Edge")
+    }
+}
+
+extension CompanionTests {
+    /// Seen live: after a relaunch Music is stopped with nothing loaded, and
+    /// takes "next track" as a success that does nothing.
+    @Test func skipWithNothingLoadedIsRefused() async throws {
+        let r = await rig()
+        r.music.running = false
+        r.companion.refresh()
+        await eventually { await states(r.relay).last?.state == .notRunning }
+        r.music.running = true
+        r.music.state = "stopped"   // relaunched, nothing loaded
+        let id = await r.relay.simulateCommand(.next)
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.error?.code == .noCurrentTrack)
+        #expect(r.music.commands.isEmpty)
+        #expect(await states(r.relay).last?.state == .stopped)
     }
 }
