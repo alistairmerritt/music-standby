@@ -211,7 +211,10 @@ again only when that process has gone.
 - **Local files, radio, podcasts, AirPlay, tracks with several artworks.** The raw-event
   compare ran on a "shared track"; the afternoon's AppleScript checks were on "URL track".
 - **A real iPhone on the relay.** Only the simulated iPhone (`Relay/tools/mock-phone.mjs`) has
-  talked to it. The relay ran under `wrangler dev` on this Mac; it has never been deployed.
+  talked to it, first under `wrangler dev` on this Mac and, on 10 November, on the deployed
+  relay (19/19 read-only: pairing, auth, state, disconnect, unpairing, re-pairing).
+- **Playback commands through the deployed relay.** Next, pause and play were verified only
+  against the local relay; the deployed run was read-only, with Music paused.
 - **The pairing controls clicked in the running app.** Rendered offscreen in all four states
   against the live relay; the approval itself was given through `msbctl`.
 - **Reading Music from inside the app with raw events.** The relay-build app was launched
@@ -260,7 +263,8 @@ Two changes came out of this:
 
 1. At the Mac: launch the menu-bar app with `relayURL` set, allow the Automation prompt, and
    pair from the menu. That covers the prompt, the menu by hand, and the app's own reads.
-2. Deploy the relay to a `workers.dev` hostname, which needs a Cloudflare account, and run
-   `/v1/dev/apns-probe` there. That settles the HTTP/2 question with no Apple credentials.
+2. Done on 10 November: the relay is deployed to `workers.dev`, and its APNs probe got
+   APNs' own `403 InvalidProviderToken`, so Cloudflare reaches APNs over HTTP/2. Still to do
+   there: the `--playback` run against the deployment, while Music is playing.
 3. The iOS side adopts the contract (docs/relay/API-v1.md §13). Then a real phone can
    replace the mock.
