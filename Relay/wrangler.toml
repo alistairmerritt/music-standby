@@ -21,5 +21,7 @@ new_sqlite_classes = ["Pairing", "Directory"]
 PUSH_MODE = "mock"
 APNS_ENVIRONMENT = "development"
 APNS_TOPIC = "com.alistairmerritt.MusicStandBy.push-type.nowplaying"
-# Dev-only endpoints under /v1/dev/. Set to "0" for any public deployment.
-DEV_ENDPOINTS = "1"
+# Dev-only endpoints under /v1/dev/ (recorded pushes, the APNs probe). Off by
+# default so a deployment can't expose them by accident; `npm run dev` and the
+# tests turn them on.
+DEV_ENDPOINTS = "0"

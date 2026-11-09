@@ -69,7 +69,7 @@ To drive it by hand, run `npm run dev`, then
 | `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID` | — | Secrets (`wrangler secret put`). Never in `wrangler.toml` |
 | `APNS_ENVIRONMENT` | `development` | `production` uses `api.push.apple.com` |
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
-| `DEV_ENDPOINTS` | `1` | `/v1/dev/pushes` and `/v1/dev/apns-probe`. **Set `0` for any public deployment** |
+| `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it; a deployment shouldn't |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
 | `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 900000 | |
 

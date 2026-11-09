@@ -6,7 +6,7 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.toml" },
       // Short timings so the tests don't wait out real deadlines.
-      miniflare: { bindings: { ACK_TIMEOUT_MS: "400", PUBLIC_BASE_URL: "https://relay.test" } },
+      miniflare: { bindings: { ACK_TIMEOUT_MS: "400", PUBLIC_BASE_URL: "https://relay.test", DEV_ENDPOINTS: "1" } },
     }),
   ],
 });

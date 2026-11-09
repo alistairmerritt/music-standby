@@ -62,7 +62,7 @@ async function api(method, path, { token, body, headers = {} } = {}) {
 }
 
 function startRelay() {
-  relay = spawn("npx", ["wrangler", "dev", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", join(work, "relay-state")], {
+  relay = spawn("npx", ["wrangler", "dev", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", join(work, "relay-state"), "--var", "DEV_ENDPOINTS:1"], {
     cwd: relayDir, env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"],
   });
   relay.stdout.resume();
