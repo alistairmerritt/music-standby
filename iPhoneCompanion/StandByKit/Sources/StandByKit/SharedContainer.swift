@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum AppGroup {
@@ -70,13 +71,20 @@ public struct CommandLog: Sendable {
 
 public struct ArtworkStore: Sendable {
     private let container: SharedContainer
+    private let fetcher: (any ArtworkFetching)?
 
-    public init(container: SharedContainer) {
+    /// With no fetcher, only cached and generated artwork is available.
+    public init(container: SharedContainer, fetcher: (any ArtworkFetching)? = nil) {
         self.container = container
+        self.fetcher = fetcher
     }
 
     private func url(for id: String) -> URL {
-        let safe = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "artwork"
+        var safe = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "artwork"
+        // A long id would overflow the 255-byte filename limit and the write would fail.
+        if safe.utf8.count > 200 {
+            safe = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
         return container.file("art-\(safe)")
     }
 
@@ -88,16 +96,22 @@ public struct ArtworkStore: Sendable {
         try? Data(contentsOf: url(for: id))
     }
 
-    /// Cached file, then the track's URL, then generated placeholder art.
+    /// Cached file, then generated placeholder art, then the relay. Without a
+    /// fetcher a URL is ignored: there is no trusted host to allow it against.
     public func resolve(id: String, remoteURL: URL?) async throws -> Data {
         if let cached = load(id: id) { return cached }
-        if let remoteURL {
-            let (data, _) = try await URLSession.shared.data(from: remoteURL)
-            try? save(data, id: id)
-            return data
-        }
         if MockArtwork.isMockID(id), let generated = MockArtwork.png(id: id) { return generated }
-        throw TransportError.artworkUnavailable
+        guard let fetcher else { throw TransportError.artworkUnavailable }
+        let data: Data
+        if let remoteURL {
+            data = try await fetcher.fetch(url: remoteURL)
+        } else if ArtworkID.isValid(id) {
+            data = try await fetcher.fetch(id: id)
+        } else {
+            throw TransportError.artworkUnavailable
+        }
+        try? save(data, id: id)
+        return data
     }
 }
 
