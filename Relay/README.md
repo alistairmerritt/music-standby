@@ -1,0 +1,68 @@
+# Relay
+
+The server between the Mac companion and the iPhone. It implements
+**[docs/relay/API-v1.md](../docs/relay/API-v1.md)**. It is a Cloudflare Worker with one Durable Object per
+pairing, but nothing here is deployed: it runs locally under `wrangler dev`, the same
+`workerd` runtime Cloudflare uses.
+
+| File | What |
+| --- | --- |
+| `src/index.ts` | Routing, pairing creation and claims, the APNs connectivity probe |
+| `src/pairing.ts` | `Pairing` Durable Object: credentials, the Mac WebSocket, sessions, commands and acks, push tokens, artwork |
+| `src/directory.ts` | `Directory` Durable Object: live pairing codes (hashed, one-time) and rate limits |
+| `src/push.ts` | `PushSender`: `MockPushSender` (records pushes) and `APNsPushSender` (ES256 JWT, `nowplaying` pushes) |
+| `src/crypto.ts` | Tokens, codes, hashing, constant-time comparison, artwork URL signatures |
+| `src/protocol.ts` | The shared protocol's JSON shapes, mirrored from `Shared/StandByProtocol` |
+| `tools/mock-phone.mjs` | A command-line iPhone: pairs, reads the session, sends commands |
+
+## Run
+
+```bash
+npm install
+```
+
+```bash
+npm test
+```
+
+```bash
+npm run dev
+```
+
+`npm test` runs the suites inside `workerd` through `@cloudflare/vitest-plugin`. `npm run dev`
+serves `http://127.0.0.1:8787` with local Durable Object storage.
+
+## Configuration
+
+| Variable | Default | |
+| --- | --- | --- |
+| `PUSH_MODE` | `mock` | `apns` sends real pushes; needs the three secrets below |
+| `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID` | — | Secrets (`wrangler secret put`). Never in `wrangler.toml` |
+| `APNS_ENVIRONMENT` | `development` | `production` uses `api.push.apple.com` |
+| `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
+| `DEV_ENDPOINTS` | `1` | `/v1/dev/pushes` and `/v1/dev/apns-probe`. **Set `0` for any public deployment** |
+| `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
+| `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 900000 | |
+
+## Security
+
+- **Credentials:** 256-bit random bearer tokens, stored only as SHA-256 hashes, compared in
+  constant time. Mac and phone credentials are separate, and unpairing revokes both.
+- **Pairing:** a code is six CSPRNG digits, valid for five minutes, used once, stored hashed,
+  and grants nothing until the Mac approves.
+- **Rate limits:** ten claims a minute and five pairings an hour per address. Five wrong codes
+  clear every live code.
+- **Logs:** tokens, codes and push tokens are never logged; ids are logged truncated.
+
+## APNs status
+
+- **Mocked by default.** `/v1/dev/pushes` shows what would have been sent. The `start`,
+  `update` and `end` payloads, headers and ES256 provider token are unit-tested against
+  Apple's documented format, including verifying the JWT signature, but have never reached
+  APNs.
+- **Locally, `workerd` can't reach APNs.** `GET /v1/dev/apns-probe` gets "Network connection
+  lost". `curl --http2` from the same Mac gets APNs' `403 InvalidProviderToken`; `curl
+  --http1.1` fails just as `workerd` does. That fits `workerd` having no HTTP/2 client.
+- **Whether a deployed Worker reaches APNs is untested.** It needs a Cloudflare account to
+  deploy the probe, but no Apple credentials. Real pushes need an APNs key from the paid Apple
+  Developer Program.
