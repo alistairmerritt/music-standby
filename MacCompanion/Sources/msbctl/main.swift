@@ -227,6 +227,16 @@ case "watch":
         let companion = Companion(controller: MusicController(), transport: transport, store: store, device: device)
         companion.onEvent = { print("\(stamp($0.date)) • \($0.text)") }
         companion.autoApprovePairing = arguments.contains("--auto-approve")
+        if let account {
+            let transport = companion.transport
+            companion.onCredentialsRejected = {
+                Task { @MainActor in
+                    await account.reregister(device: device)
+                    print("\(stamp()) re-registered as pairing \(account.credentials?.pairingID.prefix(8) ?? "?")…")
+                    await transport.connect(hello: Hello(device: device))
+                }
+            }
+        }
         companion.start()
         print("\(stamp()) watching for \(Int(seconds)) s")
 

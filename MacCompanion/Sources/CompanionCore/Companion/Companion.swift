@@ -37,6 +37,9 @@ public final class Companion {
     @ObservationIgnored public var settleDelay: Duration = .milliseconds(400)
     /// Called for every event as well as appending it to `events`.
     @ObservationIgnored public var onEvent: ((CompanionEvent) -> Void)?
+    /// Called once when the relay refuses or revokes this Mac's credential, so
+    /// the owner can register afresh and reconnect.
+    @ObservationIgnored public var onCredentialsRejected: (() -> Void)?
     /// Allows every pair request without asking. For scripted local tests
     /// only (`msbctl watch --auto-approve`); the app never sets it.
     @ObservationIgnored public var autoApprovePairing = false
@@ -367,6 +370,12 @@ public final class Companion {
 
     private func connectionChanged(_ status: ConnectionStatus) {
         connection = status
+        if status.phase == .failed, let code = status.error?.code, code == .unauthorized || code == .pairingRevoked {
+            pairedPhone = nil
+            pairRequests.removeAll()
+            record("relay refused this Mac's credential (\(code)); registering again")
+            onCredentialsRejected?()
+        }
         record("connection \(status.phase.rawValue)\(status.peerName.map { " to \($0)" } ?? "")")
     }
 

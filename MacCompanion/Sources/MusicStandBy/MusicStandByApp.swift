@@ -1,5 +1,6 @@
 import AppKit
 import CompanionCore
+import StandByProtocol
 import SwiftUI
 
 @main
@@ -19,7 +20,15 @@ struct MusicStandByApp: App {
         let companion = Companion.live(transport: transport)
         if let relay {
             let device = companion.device
+            let transport = companion.transport
             Task { await relay.register(device: device) }
+            // Unpaired from the phone, or the relay was reset: start over.
+            companion.onCredentialsRejected = {
+                Task { @MainActor in
+                    await relay.reregister(device: device)
+                    await transport.connect(hello: Hello(device: device))
+                }
+            }
         }
         companion.start()
         AppDelegate.companion = companion

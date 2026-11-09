@@ -234,3 +234,18 @@ extension CompanionTests {
         #expect(await states(r.relay).last?.state == .stopped)
     }
 }
+
+extension CompanionTests {
+    /// Unpaired from the phone, or the relay was reset: the owner re-registers.
+    @Test func aRejectedCredentialIsReportedOnce() async throws {
+        let r = await rig()
+        var calls = 0
+        r.companion.onCredentialsRejected = { calls += 1 }
+        await r.relay.simulateStatus(.failed(ProtocolError(.pairingRevoked)))
+        await eventually { calls == 1 }
+        await r.relay.simulateStatus(.reconnecting(at: Date(), after: ProtocolError(.notConnected)))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(calls == 1)
+        #expect(r.companion.pairedPhone == nil)
+    }
+}

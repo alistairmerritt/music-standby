@@ -107,6 +107,10 @@ public actor MockRelayTransport: CompanionTransport {
         statusContinuation.yield(.reconnecting(at: retryAt, after: ProtocolError(.notConnected, message: "simulated drop")))
     }
 
+    public func simulateStatus(_ status: ConnectionStatus) {
+        statusContinuation.yield(status)
+    }
+
     /// The acknowledgement sent for a command, if any.
     public func ack(for commandID: UUID) -> CommandAck? {
         for case .ack(let ack) in sent.reversed() where ack.commandID == commandID { return ack }

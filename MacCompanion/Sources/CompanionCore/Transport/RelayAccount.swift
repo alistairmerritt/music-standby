@@ -140,6 +140,16 @@ public final class RelayAccount {
         pairingCode = nil
     }
 
+    /// The relay rejected or revoked this Mac's credential (unpaired from the
+    /// phone, or the relay's data was reset): forget it and register afresh.
+    public func reregister(device: DeviceIdentity) async {
+        try? store.delete()
+        credentials = nil
+        tokenBox.value = nil
+        pairingCode = nil
+        await register(device: device)
+    }
+
     /// Revokes both sides' credentials. The Mac registers afresh next time.
     public func unpair() async {
         guard let credentials else { return }

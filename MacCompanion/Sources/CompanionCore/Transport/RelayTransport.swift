@@ -71,6 +71,7 @@ public actor RelayTransport: CompanionTransport {
     // MARK: Connection loop
 
     private func run() async {
+        defer { runner = nil }   // so a later connect() can start again
         while wanted, !Task.isCancelled {
             guard let token = token() else {
                 // Not registered yet; RelayAccount is creating the pairing.
@@ -82,6 +83,7 @@ public actor RelayTransport: CompanionTransport {
             let outcome = await runOnce(token: token)
             isOpen = false
             socket = nil
+            guard wanted, !Task.isCancelled else { return }   // disconnect() was called
             switch outcome {
             case .stop(let error):
                 wanted = false
