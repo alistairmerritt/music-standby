@@ -1,0 +1,9 @@
+{
+  "claimID": "c7b2e4f1a0d94b3e8c6f5a2d1e0b9c8a",
+  "claimSecret": "msb1.claim.c7b2e4f1a0d94b3e8c6f5a2d1e0b9c8a.Zt4WkP8nL2qR6vB0xY3mC9dF1gH5jK7aS2eU4iO6pQ0",
+  "expiresAt": "2026-11-09T09:05:00.000Z",
+  "mac": {
+    "id": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+    "name": "Studio Mac"
+  }
+}

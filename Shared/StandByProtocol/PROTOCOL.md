@@ -110,8 +110,9 @@ Receivers apply a message unless its revision is lower than the one they hold
 reconnect, and is harmless. No restart heuristic is needed: the iOS app's "accept a lower
 revision if it is 5 s newer" rule becomes unnecessary, though it does no harm.
 
-`CommandAck.revision` is the Mac's revision after handling the command. The `state`
-frame that shows the result carries that revision or a later one.
+`CommandAck.revision` is the Mac's latest revision when it acknowledges. The Mac
+acknowledges as soon as Music takes the command, then re-reads Music, so the `state` frame
+that shows the result carries a later revision.
 
 ---
 
@@ -127,6 +128,8 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 
 `CommandAck` keeps `commandID`, `accepted`, `revision` and adds an optional `error`.
 `accepted: true` means Music took the command. The resulting state follows separately.
+Over the relay, a command also names its Now Playing session (`CommandRequest.sessionID`);
+see [docs/relay/API-v1.md](../../docs/relay/API-v1.md) §7.
 
 Mac-side rejections:
 
@@ -158,6 +161,7 @@ for them; small frame-specific fields sit beside `type`.
 | `ack` | `ack`: `CommandAck` | [accepted](Examples/mac-ack-accepted.json), [rejected](Examples/mac-ack-rejected.json) |
 | `artwork` | `artwork`: `ArtworkDescriptor` | [mac-artwork](Examples/mac-artwork.json) |
 | `goodbye` | `reason` | [mac-goodbye](Examples/mac-goodbye.json) |
+| `pair-decision` | `claimID`, `approved` | [mac-pair-decision](Examples/mac-pair-decision.json) |
 | `error` | `error`: `ProtocolError` | |
 
 **Relay → Mac** (`RelayFrame`)
@@ -167,6 +171,7 @@ for them; small frame-specific fields sit beside `type`.
 | `welcome` | `protocolVersion` | [relay-welcome](Examples/relay-welcome.json) |
 | `command` | `command`: `RemoteCommand` | [relay-command](Examples/relay-command.json) |
 | `artwork-request` | `artworkID` | [relay-artwork-request](Examples/relay-artwork-request.json) |
+| `pair-request` | `request`: `PairRequest` | [relay-pair-request](Examples/relay-pair-request.json) |
 | `paired` | `phone`: `DeviceIdentity` | [relay-paired](Examples/relay-paired.json) |
 | `revoked` | `reason` | [relay-revoked](Examples/relay-revoked.json) |
 | `error` | `error`: `ProtocolError` | [relay-error](Examples/relay-error.json) |
@@ -212,6 +217,7 @@ Codable so either app can persist or log it.
 | `hello` carries `device` instead of `macName` | The relay needs a stable id as well as a name |
 | `artwork` frame nests an `ArtworkDescriptor` | The proposal's flat `sha256` duplicated `artworkID` and lacked content type and size |
 | `welcome` and `goodbye` frames added | Version negotiation; telling an app quit from a dropped socket |
+| `pair-request` and `pair-decision` frames added (relay API v1) | A code alone grants nothing; the person at the Mac allows the phone |
 | Error bodies are `{"error":{"code":…}}` | The proposal's `{"error":"mac_unreachable"}` had nowhere to put a message or retry time |
 
 Every other temporary type — `CommandKind`, `RemoteCommand`, `CommandAck`, `PairedMac` —
@@ -246,9 +252,14 @@ on purpose, so both can be imported together.
 
 ---
 
-## 9. Not in version 1
+## 9. The relay API
 
-- Pairing and token endpoints (relay §4–5). They remain the relay proposal's, and get
-  Swift types once the relay design is agreed.
+Endpoints, pairing, push tokens, sessions and artwork URLs are specified in
+[docs/relay/API-v1.md](../../docs/relay/API-v1.md). Their bodies are the types in
+`Relay.swift`, plus the `pair-request` and `pair-decision` frames above, all additive to
+version 1.
+
+## 10. Not in version 1
+
 - Volume, seek, shuffle and repeat.
 - The artwork upload itself (`PUT /v1/artwork/{id}`), which is HTTP, not a frame.
