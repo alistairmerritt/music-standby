@@ -68,14 +68,29 @@ import StandByProtocol
         let ack = try #require(await r.relay.ack(for: id))
         #expect(ack.accepted)
         #expect(r.music.state == "paused")
+        // The ack leaves as soon as Music takes the command; the state showing
+        // the result follows it, with a later revision (PROTOCOL.md §5).
+        await eventually { await states(r.relay).last?.isPlaying == false }
         let last = try #require(await states(r.relay).last)
-        #expect(!last.isPlaying)
-        #expect(ack.revision == last.revision)
-        // The state showing the result leaves before the ack.
+        #expect(last.revision > ack.revision)
         let sent = await r.relay.sent
-        let stateIndex = sent.lastIndex { if case .state(let m) = $0 { m.revision == ack.revision } else { false } }
+        let stateIndex = sent.lastIndex { if case .state(let m) = $0 { m.revision == last.revision } else { false } }
         let ackIndex = sent.lastIndex { if case .ack = $0 { true } else { false } }
-        #expect(stateIndex! < ackIndex!)
+        #expect(ackIndex! < stateIndex!)
+    }
+
+    @Test func pairRequestsWaitForTheMac() async throws {
+        let r = await rig()
+        let phone = DeviceIdentity(id: "p", name: "Test iPhone", kind: .iPhone)
+        let request = PairRequest(claimID: "c1", phone: phone, expiresAt: Date().addingTimeInterval(300))
+        await r.relay.simulate(.pairRequest(request))
+        await eventually { r.companion.pairRequests == [request] }
+        #expect(await !r.relay.sent.contains { if case .pairDecision = $0 { true } else { false } })
+        r.companion.decidePairing("c1", approved: true)
+        await eventually { await r.relay.sent.contains(.pairDecision(claimID: "c1", approved: true)) }
+        #expect(r.companion.pairRequests.isEmpty)
+        await r.relay.simulate(.paired(phone: phone))
+        await eventually { r.companion.pairedPhone == phone }
     }
 
     @Test func nextChangesTrackButNotSession() async throws {

@@ -12,6 +12,8 @@ public final class CompanionStore: @unchecked Sendable {
 
     private enum Key {
         static let lastRevision = "lastRevision"
+        static let listeningSession = "listeningSession"
+        static let listeningSessionSavedAt = "listeningSessionSavedAt"
         static let deviceID = "deviceID"
     }
 
@@ -21,6 +23,26 @@ public final class CompanionStore: @unchecked Sendable {
         set {
             if let newValue { defaults.set(NSNumber(value: newValue), forKey: Key.lastRevision) }
             else { defaults.removeObject(forKey: Key.lastRevision) }
+        }
+    }
+
+    /// The listening session open when last seen, so a companion restart in
+    /// the middle of playback continues it instead of starting a new one.
+    /// Only returned if saved within `maximumAge`.
+    public func listeningSession(maximumAge: TimeInterval = 600, now: Date = Date()) -> UUID? {
+        guard let text = defaults.string(forKey: Key.listeningSession),
+              let savedAt = defaults.object(forKey: Key.listeningSessionSavedAt) as? Date,
+              now.timeIntervalSince(savedAt) < maximumAge else { return nil }
+        return UUID(uuidString: text)
+    }
+
+    public func saveListeningSession(_ id: UUID?, now: Date = Date()) {
+        if let id {
+            defaults.set(id.uuidString, forKey: Key.listeningSession)
+            defaults.set(now, forKey: Key.listeningSessionSavedAt)
+        } else {
+            defaults.removeObject(forKey: Key.listeningSession)
+            defaults.removeObject(forKey: Key.listeningSessionSavedAt)
         }
     }
 

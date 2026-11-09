@@ -116,3 +116,38 @@ import StandByProtocol
 private func must<T>(_ value: T?, sourceLocation: SourceLocation = #_sourceLocation) throws -> T {
     try #require(value, sourceLocation: sourceLocation)
 }
+
+@Suite struct ListeningSessionResumeTests {
+    private let track = MusicTrack(title: "T", artist: "A", album: "B", duration: 100, persistentID: "X")
+    private let saved = UUID()
+
+    private func publisher() -> PlaybackPublisher {
+        PlaybackPublisher(revisions: RevisionCounter(lastPersisted: nil, now: Date(timeIntervalSince1970: 1000)), resuming: saved)
+    }
+
+    /// Found end to end: a companion restart mid-song gave the phone a new session.
+    @Test func restartDuringPlaybackKeepsTheSession() throws {
+        var p = publisher()
+        let m = try must(p.ingest(MusicSnapshot(state: .playing, position: 5, capturedAt: Date(), track: track), artworkID: nil))
+        #expect(m.listeningSessionID == saved)
+        var paused = publisher()
+        #expect(paused.ingest(MusicSnapshot(state: .paused, capturedAt: Date(), track: track), artworkID: nil)?.listeningSessionID == saved)
+    }
+
+    @Test func aStopWhileTheCompanionWasDownStillEndsIt() throws {
+        var p = publisher()
+        #expect(p.ingest(MusicSnapshot(state: .stopped, capturedAt: Date()), artworkID: nil)?.listeningSessionID == nil)
+        let next = try must(p.ingest(MusicSnapshot(state: .playing, capturedAt: Date(), track: track), artworkID: nil))
+        #expect(next.listeningSessionID != saved)
+    }
+
+    @Test func storeForgetsOldSessions() {
+        let store = CompanionStore(defaults: UserDefaults(suiteName: "resume-\(UUID().uuidString)")!)
+        let id = UUID()
+        store.saveListeningSession(id, now: Date(timeIntervalSince1970: 1000))
+        #expect(store.listeningSession(now: Date(timeIntervalSince1970: 1300)) == id)
+        #expect(store.listeningSession(now: Date(timeIntervalSince1970: 2000)) == nil)
+        store.saveListeningSession(nil)
+        #expect(store.listeningSession(now: Date(timeIntervalSince1970: 1001)) == nil)
+    }
+}

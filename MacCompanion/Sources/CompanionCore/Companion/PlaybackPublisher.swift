@@ -13,8 +13,12 @@ public struct PlaybackPublisher: Sendable {
     public var errorsToHold = 1
     private var heldErrors = 0
 
-    public init(revisions: RevisionCounter) {
+    /// `resuming` is a listening session from before a restart. The first
+    /// state keeps it only if Music is still playing, paused or briefly
+    /// unreadable; a stop or quit in between ends it as usual.
+    public init(revisions: RevisionCounter, resuming session: UUID? = nil) {
         self.revisions = revisions
+        sessions = ListeningSessionTracker(current: session)
     }
 
     /// The newest revision handed out, or the seed before the first message.

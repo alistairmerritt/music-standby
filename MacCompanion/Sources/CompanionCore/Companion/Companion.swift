@@ -6,8 +6,9 @@ import StandByProtocol
 /// through a `CompanionTransport`, and applies the phone's `RemoteCommand`s.
 ///
 /// Everything that reads Music or sends frames runs through one serial chain,
-/// so state frames leave in revision order and an ack always follows the state
-/// it describes. The UI observes the published properties.
+/// so state frames leave in revision order. A phone command is acknowledged as
+/// soon as Music takes it; the state showing its result follows, with a later
+/// revision (PROTOCOL.md §5). The UI observes the published properties.
 @MainActor
 @Observable
 public final class Companion {
@@ -19,8 +20,10 @@ public final class Companion {
     /// Album art for the current track, when it has any.
     public private(set) var artwork: ProcessedArtwork?
     public private(set) var connection: ConnectionStatus = .disconnected
-    /// Placeholder until the relay exists: set by a `paired` frame.
+    /// Set by the relay's `paired` frame, cleared by `revoked`.
     public private(set) var pairedPhone: DeviceIdentity?
+    /// Phones waiting for the person at the Mac to allow them.
+    public private(set) var pairRequests: [PairRequest] = []
     public private(set) var lastAck: CommandAck?
     public private(set) var events: [CompanionEvent] = []
 
@@ -34,6 +37,9 @@ public final class Companion {
     @ObservationIgnored public var settleDelay: Duration = .milliseconds(400)
     /// Called for every event as well as appending it to `events`.
     @ObservationIgnored public var onEvent: ((CompanionEvent) -> Void)?
+    /// Allows every pair request without asking. For scripted local tests
+    /// only (`msbctl watch --auto-approve`); the app never sets it.
+    @ObservationIgnored public var autoApprovePairing = false
 
     @ObservationIgnored private let store: CompanionStore
     @ObservationIgnored private let now: @Sendable () -> Date
@@ -63,7 +69,8 @@ public final class Companion {
         self.store = store
         self.device = device
         self.now = now
-        publisher = PlaybackPublisher(revisions: RevisionCounter(lastPersisted: store.lastRevision, now: now()))
+        publisher = PlaybackPublisher(revisions: RevisionCounter(lastPersisted: store.lastRevision, now: now()),
+                                      resuming: store.listeningSession(now: now()))
     }
 
     /// The app's companion: real Music.app, mock relay.
@@ -154,11 +161,18 @@ public final class Companion {
             }
         case .artworkRequest(let id):
             await serial { [weak self] in await self?.serveArtwork(id) }
+        case .pairRequest(let request):
+            pairRequests.removeAll { $0.claimID == request.claimID }
+            pairRequests.append(request)
+            record("\(request.phone.name) asks to pair")
+            if autoApprovePairing { decidePairing(request.claimID, approved: true) }
         case .paired(let phone):
             pairedPhone = phone
+            pairRequests.removeAll()
             record("paired with \(phone.name)")
         case .revoked(let reason):
             pairedPhone = nil
+            pairRequests.removeAll()
             record("pairing revoked: \(reason)")
         case .error(let error):
             record("relay error \(error.code): \(error.message ?? "")")
@@ -168,24 +182,34 @@ public final class Companion {
     }
 
     /// Applies a phone command, sends its ack, and returns it. A repeated id
-    /// gets the original ack back and does not act twice.
+    /// gets the original ack back and does not act twice. When Music took the
+    /// command, a re-read is queued straight after the ack.
     @discardableResult
     public func handle(_ command: RemoteCommand) async -> CommandAck {
         await serial { [weak self] in
             guard let self else { return .rejected(command.id, revision: 0, ProtocolError(.internal)) }
-            let ack = await apply(command)
+            let (ack, performed) = await apply(command)
             await send(.ack(ack))
+            if performed { enqueue { [weak self] in await self?.settleAndRead() } }
             return ack
         }
     }
 
+    /// Answers a `pair-request`. Only the person at the Mac should call this.
+    public func decidePairing(_ claimID: String, approved: Bool) {
+        pairRequests.removeAll { $0.claimID == claimID }
+        record("pairing \(approved ? "allowed" : "refused")")
+        enqueue { [weak self] in await self?.send(.pairDecision(claimID: claimID, approved: approved)) }
+    }
+
     // MARK: Work on the serial chain
 
-    private func apply(_ command: RemoteCommand) async -> CommandAck {
+    private func apply(_ command: RemoteCommand) async -> (CommandAck, performed: Bool) {
         if let previous = acks[command.id] {
             record("command \(command.id) repeated; resending its ack")
-            return previous
+            return (previous, false)
         }
+        var performed = false
         let ack: CommandAck
         let skip = command.kind == .next || command.kind == .previous
         if command.isExpired(at: now()) {
@@ -204,14 +228,14 @@ public final class Companion {
             case .failed(let detail):
                 ack = reject(command, .commandFailed, detail)
             case .performed:
-                await settleAndRead()
+                performed = true
                 ack = .accepted(command.id, revision: publisher.latestRevision)
             }
         }
         remember(ack)
         lastAck = ack
         record("command \(command.kind.rawValue) → \(ack.accepted ? "accepted" : "rejected \(ack.error?.code.rawValue ?? "")") r\(ack.revision)")
-        return ack
+        return (ack, performed)
     }
 
     /// True when Music is running with nothing loaded. Re-reads first if the
@@ -258,6 +282,7 @@ public final class Companion {
         let artworkID = await artworkID(for: snapshot)
         guard let message = publisher.ingest(snapshot, artworkID: artworkID) else { return }
         store.lastRevision = message.revision
+        store.saveListeningSession(message.listeningSessionID, now: now())
         self.message = message
         await send(.state(message))
     }
@@ -394,6 +419,7 @@ extension MacFrame {
         case .ack(let a): "ack \(a.commandID) \(a.accepted)"
         case .artwork(let a): "artwork \(a.artworkID.prefix(12))…"
         case .goodbye(let reason): "goodbye \(reason)"
+        case .pairDecision(_, let approved): "pair-decision \(approved)"
         case .error(let e): "error \(e.code)"
         case .unknown(let type): "unknown \(type)"
         }

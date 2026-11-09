@@ -10,6 +10,11 @@
 //                                  phone commands from stdin: play, pause, next, previous,
 //                                  stale, dup, seek, drop; and `read`, which asks the
 //                                  monitor for a read as a notification would
+//   msbctl watch … --relay URL     the same against a real relay over its WebSocket.
+//                                  --credentials FILE (default in $TMPDIR) keeps the Mac's
+//                                  token out of the Keychain; --pair prints a pairing code;
+//                                  stdin also takes code, approve, deny and unpair;
+//                                  --auto-approve allows every pairing (scripted tests only)
 //
 // None of these launch Music: every read is guarded by a process check first, and
 // raw events are addressed to Music's process id. `compare` also runs the
@@ -193,16 +198,46 @@ case "compare":
     }
 
 case "watch":
-    let seconds = Double(arguments.dropFirst().first ?? "") ?? 60
+    let seconds = arguments.dropFirst().compactMap(Double.init).first ?? 60
+    let relayURL = option("--relay").flatMap(URL.init(string:))
+    let credentialsPath = option("--credentials") ?? NSTemporaryDirectory() + "msbctl-relay-credentials.json"
     run {
         let defaults = UserDefaults(suiteName: "com.alistairmerritt.MusicStandBy.msbctl")!
         let store = CompanionStore(defaults: defaults)
-        let mock = MockRelayTransport(log: { print("\(stamp()) \($0)") })
         let device = store.deviceIdentity(name: (Host.current().localizedName ?? "Mac") + " (msbctl)", appVersion: "msbctl")
-        let companion = Companion(controller: MusicController(), transport: mock, store: store, device: device)
+
+        // Mock relay by default; the real one with --relay.
+        let mock = MockRelayTransport(log: { print("\(stamp()) \($0)") })
+        var account: RelayAccount?
+        let transport: any CompanionTransport
+        if let relayURL {
+            let relayAccount = RelayAccount(baseURL: relayURL, store: FileCredentialStore(url: URL(fileURLWithPath: credentialsPath)))
+            await relayAccount.register(device: device)
+            guard let credentials = relayAccount.credentials else {
+                print("could not register with \(relayURL): \(relayAccount.lastError ?? "unknown error")")
+                return 1
+            }
+            print("\(stamp()) relay \(relayURL.absoluteString), pairing \(credentials.pairingID.prefix(8))…, credentials in \(credentialsPath)")
+            account = relayAccount
+            transport = RelayTransport(client: relayAccount.client, token: relayAccount.token)
+        } else {
+            transport = mock
+        }
+
+        let companion = Companion(controller: MusicController(), transport: transport, store: store, device: device)
         companion.onEvent = { print("\(stamp($0.date)) • \($0.text)") }
+        companion.autoApprovePairing = arguments.contains("--auto-approve")
         companion.start()
         print("\(stamp()) watching for \(Int(seconds)) s")
+
+        if let account, arguments.contains("--pair") {
+            await account.requestPairingCode()
+            if let code = account.pairingCode {
+                print("PAIRING CODE \(code.code) (expires \(StandByWire.formatDate(code.expiresAt)))")
+            } else {
+                print("no pairing code: \(account.lastError ?? "unknown error")")
+            }
+        }
 
         Task.detached {
             while let line = readLine() {
@@ -224,6 +259,18 @@ case "watch":
                     await mock.simulateDrop(retryAt: Date().addingTimeInterval(1))
                     try? await Task.sleep(for: .seconds(1))
                     await mock.connect(hello: Hello(device: device))
+                case "code":
+                    await account?.requestPairingCode()
+                    if let code = await account?.pairingCode { print("PAIRING CODE \(code.code)") }
+                case "approve", "deny":
+                    if let request = await companion.pairRequests.first {
+                        await companion.decidePairing(request.claimID, approved: word == "approve")
+                    } else {
+                        print("no pair request waiting")
+                    }
+                case "unpair":
+                    await account?.unpair()
+                    print("unpaired")
                 default:
                     print("unknown input: \(word)")
                 }
@@ -233,14 +280,14 @@ case "watch":
         try? await Task.sleep(for: .seconds(seconds))
         await companion.stop()
         await companion.settle()
-        let sent = await mock.sent
         let scripts = await companion.controller.scriptsRun
         let skipped = await companion.controller.skippedWhileClosed
+        let sent = await mock.sent
         print("""
         \(stamp()) done.
           playerInfo notifications: \(companion.monitor.notificationsReceived)
           scripts run: \(scripts), reads answered by process check: \(skipped)
-          frames sent: \(sent.count) (\(sent.filter { if case .state = $0 { true } else { false } }.count) state)
+          \(relayURL == nil ? "frames sent to the mock relay: \(sent.count)" : "connection: \(companion.connection.phase.rawValue)")
         """)
         return 0
     }
@@ -251,7 +298,7 @@ default:
            msbctl artwork [--out DIR]
            msbctl compare [ROUNDS]
            msbctl control play|pause|playpause|next|previous
-           msbctl watch [SECONDS]
+           msbctl watch [SECONDS] [--relay URL [--credentials FILE] [--pair] [--auto-approve]]
     """)
     exit(arguments.isEmpty ? 0 : 2)
 }
