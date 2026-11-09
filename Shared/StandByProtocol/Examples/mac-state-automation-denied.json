@@ -1,0 +1,13 @@
+{
+  "type": "state",
+  "message": {
+    "revision": 1794207600003,
+    "state": "automation_denied",
+    "isPlaying": false,
+    "elapsedTime": 0,
+    "capturedAt": "2026-11-09T07:00:06.000Z",
+    "canGoNext": false,
+    "canGoPrevious": false,
+    "detail": "Not authorized to send Apple events to Music. (-1743)"
+  }
+}

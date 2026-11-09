@@ -1,0 +1,12 @@
+{
+  "type": "state",
+  "message": {
+    "revision": 1794207600002,
+    "state": "not_running",
+    "isPlaying": false,
+    "elapsedTime": 0,
+    "capturedAt": "2026-11-09T07:00:05.000Z",
+    "canGoNext": false,
+    "canGoPrevious": false
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "type": "ack",
+  "ack": {
+    "commandID": "5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F",
+    "accepted": false,
+    "revision": 1794207600003,
+    "error": {
+      "code": "music_not_running",
+      "message": "Music.app is not running. The companion does not launch it."
+    }
+  }
+}
