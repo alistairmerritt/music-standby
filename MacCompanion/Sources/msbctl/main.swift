@@ -3,12 +3,17 @@
 //
 //   msbctl snapshot                one read, plus the PlaybackMessage it makes
 //   msbctl artwork [--out DIR]     artwork id (SHA-256 of Music's bytes) and the JPEG served
+//   msbctl compare [ROUNDS]        snapshot and artwork through both runners, raw Apple
+//                                  Events and AppleScript: same output, and how long each took
 //   msbctl control VERB            play | pause | playpause | next | previous (changes playback)
 //   msbctl watch [SECONDS]         the full companion against the mock relay. Reads
 //                                  phone commands from stdin: play, pause, next, previous,
-//                                  stale, dup, seek, drop
+//                                  stale, dup, seek, drop; and `read`, which asks the
+//                                  monitor for a read as a notification would
 //
-// None of these launch Music: every read is guarded by a process check first.
+// None of these launch Music: every read is guarded by a process check first, and
+// raw events are addressed to Music's process id. `compare` also runs the
+// AppleScript reference, which addresses Music by name; it checks first.
 
 import CompanionCore
 import Foundation
@@ -45,6 +50,44 @@ func option(_ name: String) -> String? {
     return arguments[i + 1]
 }
 
+/// The longest the main thread went without running while `body` ran: how
+/// much a read blocks the UI.
+@MainActor
+func mainThreadStall<T: Sendable>(during body: () async -> T) async -> (T, Double) {
+    let probe = Task { @MainActor in
+        var last = Date()
+        var worst = 0.0
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(2))
+            let now = Date()
+            worst = max(worst, now.timeIntervalSince(last))
+            last = now
+        }
+        return worst
+    }
+    await Task.yield()
+    let value = await body()
+    probe.cancel()
+    return (value, await probe.value * 1000)
+}
+
+func ms(since start: Date) -> Int { Int(Date().timeIntervalSince(start) * 1000) }
+
+func summary(_ output: ScriptOutput) -> String {
+    func value(_ v: ScriptValue) -> String {
+        switch v {
+        case .text(let t): "\"\(t.replacingOccurrences(of: SnapshotParser.separator, with: "␟"))\""
+        case .data(let d, let type): "<\(d.count) bytes '\(type)' sha256 \(ArtworkID.make(sourceBytes: d))>"
+        case .list(let items): "[" + items.map(value).joined(separator: ", ") + "]"
+        }
+    }
+    switch output {
+    case .notRunning: return "notRunning"
+    case .failure(let code, let message): return "failure \(code) \(message)"
+    case .value(let v): return value(v)
+    }
+}
+
 func run(_ body: @escaping @MainActor () async -> Int32) -> Never {
     Task { @MainActor in exit(await body()) }
     RunLoop.main.run()
@@ -56,9 +99,9 @@ case "snapshot":
     run {
         let controller = MusicController()
         let started = Date()
-        let snapshot = controller.snapshot()
+        let (snapshot, stall) = await mainThreadStall { await controller.snapshot() }
         print(describe(snapshot))
-        print("read took \(Int(Date().timeIntervalSince(started) * 1000)) ms; scripts run: \(controller.scriptsRun), answered by process check: \(controller.skippedWhileClosed)")
+        print("read took \(ms(since: started)) ms, longest main-thread stall \(Int(stall)) ms; scripts run: \(await controller.scriptsRun), answered by process check: \(await controller.skippedWhileClosed)")
         var publisher = PlaybackPublisher(revisions: RevisionCounter(lastPersisted: nil))
         if let message = publisher.ingest(snapshot, artworkID: nil) { print(json(.state(message))) }
         return 0
@@ -68,8 +111,8 @@ case "artwork":
     run {
         let controller = MusicController()
         let started = Date()
-        let result = controller.artwork()
-        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        let result = await controller.artwork()
+        let ms = ms(since: started)
         guard case .image(let bytes, let pid, let type) = result else {
             print("no artwork: \(result) (\(ms) ms)")
             return 1
@@ -102,14 +145,51 @@ case "control":
     }
     run {
         let controller = MusicController()
-        let before = controller.snapshot()
+        let before = await controller.snapshot()
         print("before: \(before.state.rawValue) \(before.track?.title ?? "-") @ \(String(format: "%.1f", before.position))")
-        let outcome = controller.perform(command)
+        let outcome = await controller.perform(command)
         print("\(word): \(outcome)")
         try? await Task.sleep(for: .milliseconds(400))
-        let after = controller.snapshot()
+        let after = await controller.snapshot()
         print("after:  \(after.state.rawValue) \(after.track?.title ?? "-") @ \(String(format: "%.1f", after.position)) pid \(after.track?.persistentID ?? "-")")
         return outcome == .performed ? 0 : 1
+    }
+
+case "compare":
+    // Read-only. The AppleScript side runs on the main thread, as it must; the
+    // raw side runs on a background thread, as the controller runs it.
+    let rounds = Int(arguments.dropFirst().first ?? "") ?? 3
+    run {
+        let raw = RawEventRunner()
+        let apple = AppleScriptRunner()
+        var identical = true
+        for script in [MusicScript.snapshot, .artwork] {
+            var appleTimes: [Int] = [], rawTimes: [Int] = []
+            for round in 1...rounds {
+                // Checked before each AppleScript run: it addresses Music by name.
+                guard MusicController.isMusicRunning() else {
+                    print("Music is not running; nothing compared")
+                    return 1
+                }
+                var started = Date()
+                let a = apple.run(script)
+                appleTimes.append(ms(since: started))
+                started = Date()
+                let r = await Task.detached { raw.run(script) }.value
+                rawTimes.append(ms(since: started))
+                if a == r {
+                    if round == 1 { print("\(script): identical: \(summary(r).prefix(400))") }
+                } else {
+                    identical = false
+                    print("\(script) round \(round): DIFFERENT")
+                    print("  AppleScript: \(summary(a).prefix(600))")
+                    print("  raw events:  \(summary(r).prefix(600))")
+                }
+            }
+            print("  \(script) ms — AppleScript (main): \(appleTimes), raw events (background): \(rawTimes)")
+        }
+        print(identical ? "all identical" : "differences found (a playing track's position moves between the two reads)")
+        return identical ? 0 : 1
     }
 
 case "watch":
@@ -138,6 +218,8 @@ case "watch":
                     await mock.simulateCommand(.play, id: id)
                 case "seek":
                     await mock.simulateJSON(Data(#"{"type":"command","command":{"id":"\#(UUID().uuidString)","kind":"seek"}}"#.utf8))
+                case "read":
+                    await companion.refresh()
                 case "drop":
                     await mock.simulateDrop(retryAt: Date().addingTimeInterval(1))
                     try? await Task.sleep(for: .seconds(1))
@@ -152,10 +234,12 @@ case "watch":
         await companion.stop()
         await companion.settle()
         let sent = await mock.sent
+        let scripts = await companion.controller.scriptsRun
+        let skipped = await companion.controller.skippedWhileClosed
         print("""
         \(stamp()) done.
           playerInfo notifications: \(companion.monitor.notificationsReceived)
-          scripts run: \(companion.controller.scriptsRun), reads answered by process check: \(companion.controller.skippedWhileClosed)
+          scripts run: \(scripts), reads answered by process check: \(skipped)
           frames sent: \(sent.count) (\(sent.filter { if case .state = $0 { true } else { false } }.count) state)
         """)
         return 0
@@ -165,6 +249,7 @@ default:
     print("""
     usage: msbctl snapshot
            msbctl artwork [--out DIR]
+           msbctl compare [ROUNDS]
            msbctl control play|pause|playpause|next|previous
            msbctl watch [SECONDS]
     """)

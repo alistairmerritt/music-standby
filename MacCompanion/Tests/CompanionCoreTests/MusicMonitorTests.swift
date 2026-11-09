@@ -3,13 +3,12 @@ import Testing
 import StandByProtocol
 @testable import CompanionCore
 
-/// The quit window: after "Stopped", leave Music alone long enough to exit.
+/// No quit window since events go by PID; a launch still settles first.
 @MainActor
 @Suite(.serialized) struct MusicMonitorTests {
     private func monitor(_ music: FakeMusic) -> (MusicMonitor, Box) {
         let monitor = MusicMonitor(controller: MusicController(runner: music, isRunning: music.processCheck), isLaunching: { false })
         monitor.debounce = .milliseconds(20)
-        monitor.quitWindow = .milliseconds(300)
         monitor.launchSettle = .milliseconds(100)
         let box = Box()
         monitor.onSnapshot = { snapshot, trigger in box.reads.append((snapshot.state, trigger)) }
@@ -18,30 +17,27 @@ import StandByProtocol
 
     final class Box { var reads: [(PlaybackState, MusicMonitor.Trigger)] = [] }
 
-    @Test func stoppedHoldsEveryReadUntilTheWindowEnds() async throws {
-        let music = FakeMusic(state: "playing")
-        let (monitor, box) = monitor(music)
-        monitor.playerInfoArrived(playerState: "Stopped")
-        monitor.requestRead(.poll)
-        #expect(monitor.isHolding)
-        try await Task.sleep(for: .milliseconds(150))
-        #expect(music.scripts.isEmpty)
-        #expect(box.reads.isEmpty)
-        // Music exits inside the window: the held read must not send it anything.
-        music.running = false
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(music.scripts.isEmpty)
-        #expect(box.reads.map(\.0) == [.notRunning])
-        #expect(!monitor.isHolding)
-    }
-
-    @Test func stoppedWithoutQuittingIsReadAfterTheWindow() async throws {
+    /// The AppleScript version held every read for 2 s after "Stopped".
+    @Test func stoppedIsReadPromptly() async throws {
         let music = FakeMusic(state: "stopped")
         let (monitor, box) = monitor(music)
         monitor.playerInfoArrived(playerState: "Stopped")
-        try await Task.sleep(for: .milliseconds(450))
+        #expect(!monitor.isHolding)
+        try await Task.sleep(for: .milliseconds(120))
         #expect(box.reads.map(\.0) == [.stopped])
         #expect(music.scripts == [.snapshot])
+    }
+
+    /// Music quitting between the notification and the read: the process
+    /// check answers, with no Apple Event.
+    @Test func aQuitAfterTheNotificationIsNotRunning() async throws {
+        let music = FakeMusic(state: "playing")
+        let (monitor, box) = monitor(music)
+        monitor.playerInfoArrived(playerState: "Paused")
+        music.running = false
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(box.reads.map(\.0) == [.notRunning])
+        #expect(music.scripts.isEmpty)
     }
 
     @Test func otherNotificationsAreReadPromptly() async throws {
@@ -56,8 +52,8 @@ import StandByProtocol
     @Test func aRelaunchIsReadOnceMusicHasSettled() async throws {
         let music = FakeMusic(state: "stopped")
         let (monitor, box) = monitor(music)
-        monitor.playerInfoArrived(playerState: "Stopped")
         monitor.requestRead(.launch)
+        #expect(monitor.isHolding)
         monitor.requestRead(.poll)
         try await Task.sleep(for: .milliseconds(50))
         #expect(music.scripts.isEmpty)
@@ -66,13 +62,14 @@ import StandByProtocol
         #expect(!monitor.isHolding)
     }
 
-    @Test func commandsWaitOutTheWindow() async throws {
-        let music = FakeMusic(state: "playing")
+    @Test func commandsWaitOutALaunch() async throws {
+        let music = FakeMusic(state: "stopped")
         let (monitor, _) = monitor(music)
-        monitor.playerInfoArrived(playerState: "Stopped")
+        monitor.requestRead(.launch)
         let started = ContinuousClock.now
-        await monitor.waitOutQuitWindow()
-        #expect(ContinuousClock.now - started >= .milliseconds(250))
+        await monitor.waitOutLaunch()
+        #expect(ContinuousClock.now - started >= .milliseconds(80))
+        #expect(!monitor.isHolding)
     }
 
     @Test func noAppleEventsUntilMusicHasFinishedLaunching() async throws {

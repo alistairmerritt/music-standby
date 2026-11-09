@@ -6,8 +6,8 @@ import StandByProtocol
 ///
 /// Three signals, because each misses something (spike FINDINGS.md):
 /// - `com.apple.Music.playerInfo`: play, pause, track change. Often arrives
-///   twice, carries no persistent ID or position, and fires with only
-///   "Stopped" on quit. Used as a trigger, debounced, then Music is re-read.
+///   twice, carries no persistent ID or position, and fires "Stopped" or
+///   "Paused" on quit. Used as a trigger, debounced, then Music is re-read.
 /// - NSWorkspace launch and terminate, filtered to Music: the only reliable
 ///   app-lifecycle signal. `playerInfo` says nothing at all on launch.
 /// - A slow poll, to keep position honest and catch anything missed. While
@@ -15,13 +15,22 @@ import StandByProtocol
 ///
 /// Reads never overlap. A trigger that arrives mid-read causes one more read.
 ///
-/// **Quit window.** Quitting Music sends `playerInfo` "Stopped", then Music
-/// takes about a second to exit, and both launch guards still say "running"
-/// throughout. An Apple Event sent then makes macOS relaunch Music: measured
-/// on macOS 27.0.1, the companion's own debounced read did exactly that
-/// (LaunchServices named it as the new Music's parent). So after any "Stopped"
-/// notification nothing touches Music for `quitWindow`; if Music has exited
-/// by then, the process check answers without an Apple Event.
+/// **No quit window.** Quitting Music sends `playerInfo`, then Music takes
+/// about a second to exit. The AppleScript version had to leave Music alone
+/// for 2 s after "Stopped", because an event addressed by name in that second
+/// made LaunchServices relaunch Music. `RawEventRunner` addresses Music by
+/// PID. Measured on macOS 27.0.1 while Music quit: such events are answered
+/// normally until Music exits, then fail with -609 or -600, and nothing is
+/// launched. So a read during a quit reports what Music answers, or
+/// `notRunning` once it has gone.
+///
+/// **Launch settle.** NSWorkspace reports a launch, with
+/// `isFinishedLaunching` true, about 3 s before Music answers events: a read
+/// sent at once timed out after 3 s, and Music first answered 2.9 s after
+/// `didLaunch`. So reads and commands wait `launchSettle` after a launch.
+/// The process exists about 0.85 s before that notification, so reads also
+/// wait while `isLaunching` says the process is young (`MusicProcess`).
+/// A relaunched Music has nothing loaded, so nothing is lost.
 @MainActor
 public final class MusicMonitor {
     public enum Trigger: String, Sendable {
@@ -31,8 +40,6 @@ public final class MusicMonitor {
     public var onSnapshot: ((MusicSnapshot, Trigger) -> Void)?
 
     public var debounce: Duration = .milliseconds(150)
-    /// How long to leave Music alone after it reports "Stopped".
-    public var quitWindow: Duration = .seconds(2)
     /// How long to leave Music alone after NSWorkspace reports it launched.
     public var launchSettle: Duration = .seconds(3)
     /// Poll interval by the last state seen.
@@ -111,20 +118,20 @@ public final class MusicMonitor {
         launchRetry = nil
     }
 
-    /// True while Music may be quitting. Callers about to send it a command
-    /// should `waitOutQuitWindow()` first.
+    /// True while Music is settling after a launch. Callers about to send it
+    /// a command should `waitOutLaunch()` first.
     public var isHolding: Bool {
         holdUntil.map { ContinuousClock.now < $0 } ?? false
     }
 
-    public func waitOutQuitWindow() async {
+    public func waitOutLaunch() async {
         while let until = holdUntil, ContinuousClock.now < until {
             try? await Task.sleep(until: until, clock: .continuous)
         }
     }
 
-    /// Reads now, or as soon as the read in progress finishes, or once a quit
-    /// or launch window has passed.
+    /// Reads now, or as soon as the read in progress finishes, or once a
+    /// launch has settled.
     public func requestRead(_ trigger: Trigger) {
         switch trigger {
         case .terminate:
@@ -166,8 +173,8 @@ public final class MusicMonitor {
 
     /// One read, outside the coalescing. For callers that need the result.
     public func read(_ trigger: Trigger) async -> MusicSnapshot {
-        if trigger != .launch, trigger != .terminate { await waitOutQuitWindow() }
-        let snapshot = controller.snapshot()
+        if trigger != .launch, trigger != .terminate { await waitOutLaunch() }
+        let snapshot = await controller.snapshot()
         lastState = snapshot.state
         return snapshot
     }
@@ -180,7 +187,6 @@ public final class MusicMonitor {
     /// notification that other Music listeners would also receive.
     func playerInfoArrived(playerState: String?) {
         notificationsReceived += 1
-        if playerState == "Stopped" { startHold(for: quitWindow, trigger: nil) }
         debounceTask?.cancel()
         let delay = debounce
         debounceTask = Task { [weak self] in
@@ -190,10 +196,10 @@ public final class MusicMonitor {
         }
     }
 
-    private func startHold(for duration: Duration, trigger: Trigger?) {
+    private func startHold(for duration: Duration, trigger: Trigger) {
         let until = ContinuousClock.now.advanced(by: duration)
         holdUntil = until
-        if let trigger { heldTrigger = trigger }
+        heldTrigger = trigger
         holdTask?.cancel()
         holdTask = Task { [weak self] in
             try? await Task.sleep(until: until, clock: .continuous)
@@ -218,6 +224,13 @@ public final class MusicMonitor {
             let snapshot = await read(trigger)
             onSnapshot?(snapshot, trigger)
             next = pending
+            // Music can quit and be relaunched by another app during one read.
+            // A follow-up read must not reach the new one before it can answer.
+            if let trigger = next, isLaunching() {
+                reading = false
+                beginRead(trigger)
+                return
+            }
         }
         reading = false
     }

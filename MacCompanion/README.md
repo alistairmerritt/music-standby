@@ -10,7 +10,7 @@ What is verified, and how, is in **[STATUS.md](STATUS.md)**.
 
 | Path | What |
 | --- | --- |
-| `Sources/CompanionCore/Music/` | `MusicController` (AppleScript, main thread), `MusicMonitor` (notifications, lifecycle, poll), `MusicScripts`, `ArtworkProcessor` |
+| `Sources/CompanionCore/Music/` | `MusicController` (an actor on its own queue), `RawEventRunner` (raw Apple Events by PID), `MusicProcess` (finding Music without events), `MusicMonitor` (notifications, lifecycle, poll), `MusicScripts` (the AppleScript reference), `ArtworkProcessor` |
 | `Sources/CompanionCore/Companion/` | `Companion` (the engine), `PlaybackPublisher` (snapshots → `PlaybackMessage`), `CompanionStore` |
 | `Sources/CompanionCore/Transport/` | `CompanionTransport` and `MockRelayTransport` |
 | `Sources/MusicStandBy/` | The menu-bar app: `MenuBarExtra`, menu content, Launch at Login |
@@ -50,19 +50,32 @@ Launch at Login needs the app in `/Applications`.
 ```
 
 ```bash
+.build/swiftc/msbctl compare
+```
+
+```bash
 .build/swiftc/msbctl watch 60
 ```
 
-`watch` runs the whole companion against the mock relay and prints every frame as wire
-JSON. Type `play`, `pause`, `next`, `previous`, `stale`, `dup`, `seek` or `drop` to
-simulate the phone. `control` changes playback directly. None of these launch Music.
+`compare` reads through raw Apple Events and through the AppleScript reference and checks
+the two return the same output. `watch` runs the whole companion against the mock relay
+and prints every frame as wire JSON. Type `play`, `pause`, `next`, `previous`, `stale`,
+`dup`, `seek` or `drop` to simulate the phone, or `read` to ask for a read. `control`
+changes playback directly. None of these launch Music.
 
 ## Rules the code depends on
 
-- **NSAppleScript runs on the main thread only.** Off it, scripts took 8–158 s or hung
-  (STATUS.md). `MusicController` is `@MainActor`; `AppleScriptRunner` asserts it.
-- **Never launch Music.** A process check, then an in-script `is running` guard, then a
-  2 s hold after any "Stopped" notification and a 3 s hold after a launch, because Apple
-  Events sent while Music is quitting relaunch it.
+- **Apple Events go to Music's process id, off the main thread.** `RawEventRunner` sends
+  raw events with `NSAppleEventDescriptor.sendEvent` from `MusicController`'s own serial
+  queue. NSAppleScript is main-thread only (off it, scripts took 8–158 s or hung) and
+  addresses Music by name, which relaunches a quitting Music. `AppleScriptRunner` stays
+  as the reference that `msbctl compare` checks against.
+- **Never launch Music.** A process check (`MusicProcess`: a remembered PID checked with
+  the kernel, because NSRunningApplication briefly lists no Music every few seconds),
+  then every event addressed by PID. An event that reaches a Music that has quit fails;
+  it can't start a new one. No hold after "Stopped" is needed any more.
+- **Don't read a Music that isn't up yet.** It answers about 4 s after its process
+  starts. Reads wait while the process is younger than that, and 3 s after NSWorkspace's
+  launch notification.
 - **`playerInfo` is a trigger only.** Every change is re-read through AppleScript.
 - **Revisions only rise**, across restarts: seeded from `max(persisted, Unix ms)`.

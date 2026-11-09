@@ -120,8 +120,8 @@ public final class Companion {
     public func perform(_ command: MusicCommand) {
         enqueue { [weak self] in
             guard let self else { return }
-            await monitor.waitOutQuitWindow()
-            let outcome = controller.perform(command)
+            await monitor.waitOutLaunch()
+            let outcome = await controller.perform(command)
             record("menu \(command.rawValue): \(outcome)")
             if outcome == .performed { await settleAndRead() } else { await ingest(await monitor.read(.command), trigger: .command) }
         }
@@ -195,8 +195,8 @@ public final class Companion {
             // does nothing (seen right after a relaunch), so check first.
             ack = reject(command, .noCurrentTrack, "nothing is loaded in Music")
         } else {
-            await monitor.waitOutQuitWindow()
-            switch controller.perform(MusicCommand(command.kind)) {
+            await monitor.waitOutLaunch()
+            switch await controller.perform(MusicCommand(command.kind)) {
             case .notRunning:
                 ack = reject(command, .musicNotRunning, "Music.app is not running. The companion does not launch it.")
             case .automationDenied(let detail):
@@ -287,7 +287,7 @@ public final class Companion {
             return nil
         }
         let started = now()
-        let result = controller.artwork()
+        let result = await controller.artwork()
         guard case .image(let bytes, let pid, let type) = result else {
             if case .noArtwork = result {
                 artworkByTrack[key] = ArtworkEntry(artworkCount: track.artworkCount)

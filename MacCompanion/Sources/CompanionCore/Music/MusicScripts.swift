@@ -17,7 +17,8 @@ public enum MusicCommand: String, Sendable, CaseIterable {
     }
 }
 
-/// The only scripts the companion ever runs.
+/// The only scripts the companion ever runs. `RawEventRunner` sends each as
+/// raw Apple Events; the AppleScript source is the reference they match.
 public enum MusicScript: Hashable, Sendable {
     case snapshot
     case artwork
@@ -124,25 +125,32 @@ public indirect enum ScriptValue: Equatable, Sendable {
 }
 
 public enum ScriptOutput: Equatable, Sendable {
-    /// The in-script guard found Music closed. Nothing was sent to Music.
+    /// Music wasn't running, so nothing was sent; or, for `RawEventRunner`,
+    /// the process the events were addressed to quit before answering.
+    /// Either way nothing launched Music.
     case notRunning
     case value(ScriptValue)
     /// `NSAppleScript.errorNumber` and `errorMessage`.
     case failure(code: Int, message: String)
 }
 
-/// Runs `MusicScript`s. The real one wraps NSAppleScript; tests use a fake.
+/// Runs `MusicScript`s. `RawEventRunner` is the real one, `AppleScriptRunner`
+/// the reference it is checked against, and tests use a fake. `MusicController`
+/// calls `run` on its own serial queue, never the main thread.
 public protocol MusicScriptRunning: Sendable {
     func run(_ script: MusicScript) -> ScriptOutput
 }
 
-/// Runs scripts with NSAppleScript, **on the main thread only**.
+/// Runs scripts with NSAppleScript, **on the main thread only**. No longer
+/// used by `MusicController`: `msbctl compare` runs it beside
+/// `RawEventRunner` to check the two return the same output.
 ///
 /// Apple documents NSAppleScript as main-thread only, and on macOS 27.0.1 it
 /// means it: measured against Music, a one-event script took 5–30 ms on the
 /// main thread and 8–158 s on a background queue or thread, and an actor on a
-/// serial-queue executor hung. `MusicController` is `@MainActor`, and `run`
-/// checks, which is why `@unchecked Sendable` holds.
+/// serial-queue executor hung. `run` checks, which is why `@unchecked
+/// Sendable` holds. Its `tell application "Music"` addresses Music by name,
+/// which relaunches a quitting Music.
 public final class AppleScriptRunner: MusicScriptRunning, @unchecked Sendable {
     private var compiled: [MusicScript: NSAppleScript] = [:]
 
