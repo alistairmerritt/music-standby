@@ -110,6 +110,7 @@ public final class AppModel {
     /// for anything that couldn't happen in the background.
     public func sceneDidBecomeActive() async {
         pushTokens = registrar.current()
+        await uploadTokens()
         await processCommandsFromExtension()
         if let graceDeadline, now() >= graceDeadline {
             await endSession(.connectionLost)
@@ -132,6 +133,7 @@ public final class AppModel {
         pairingStore.pairedMac = mac
         pairedMac = mac
         record("Paired with \(mac.name)")
+        await uploadTokens()
         await transport.connect()
     }
 
@@ -143,6 +145,11 @@ public final class AppModel {
     public func unpair() async {
         await endSession(.unpaired)
         await transport.unpair()
+        forgetPairing()
+        record("Unpaired")
+    }
+
+    private func forgetPairing() {
         pairingStore.pairedMac = nil
         pairedMac = nil
         attributes = nil
@@ -150,7 +157,6 @@ public final class AppModel {
         latestMessage = nil
         assignedSessionID = nil
         setNowPlayingEnabled(false)
-        record("Unpaired")
     }
 
     public func activateNowPlaying() async {
@@ -207,6 +213,13 @@ public final class AppModel {
             }
         case .sessionEnded(let reason):
             await endSession(reason)
+            assignedSessionID = nil
+            attributes = nil
+            artwork = nil
+            if reason == .pairingRevoked {
+                forgetPairing()
+                record("The pairing was revoked. Pair with your Mac again.")
+            }
         }
     }
 
@@ -281,6 +294,14 @@ public final class AppModel {
         }
         pushTokens = registrar.current()
         record("Now Playing session ended: \(reason.rawValue)")
+    }
+
+    private func uploadTokens() async {
+        do {
+            try await registrar.uploadStored()
+        } catch {
+            record("Couldn’t upload push tokens: \(error.localizedDescription)")
+        }
     }
 
     private func startGrace() {

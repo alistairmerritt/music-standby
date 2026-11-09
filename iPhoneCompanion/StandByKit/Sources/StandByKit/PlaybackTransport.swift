@@ -44,6 +44,8 @@ public enum TransportError: Error, Equatable, Sendable, LocalizedError {
     case commandRejected(ErrorCode)
     case macUnreachable
     case network(String)
+    case timedOut
+    case httpStatus(Int)
     case malformedResponse
 
     public var errorDescription: String? {
@@ -57,6 +59,8 @@ public enum TransportError: Error, Equatable, Sendable, LocalizedError {
         case .commandRejected(let code): "Your Mac refused that command (\(code.rawValue))."
         case .macUnreachable: "Your Mac didn’t respond."
         case .network(let detail): "Network problem: \(detail)"
+        case .timedOut: "The relay took too long to answer."
+        case .httpStatus(let status): "The relay returned HTTP \(status)."
         case .malformedResponse: "The relay sent an unexpected response."
         }
     }

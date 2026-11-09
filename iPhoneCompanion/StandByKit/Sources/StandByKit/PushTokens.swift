@@ -24,6 +24,8 @@ public protocol PushTokenRegistrar: Sendable {
     func invalidate(sessionID id: String) async throws
     /// What is held locally, for Diagnostics.
     func current() -> PushTokens
+    /// Sends anything held locally that couldn't be sent when it appeared.
+    func uploadStored() async throws
 }
 
 /// Stores tokens in the shared container so Diagnostics can show them.

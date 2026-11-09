@@ -13,8 +13,7 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
     let id: String
     private(set) var attributes: MacPlaybackAttributes
 
-    @ObservationIgnored private let container = SharedContainer.appGroup()
-    @ObservationIgnored private let library = MockLibrary.standard
+    @ObservationIgnored private let services = ExtensionServices.make(container: SharedContainer.appGroup(), credentials: KeychainCredentialStore())
     @ObservationIgnored private let logger = Logger(subsystem: "com.alistairmerritt.MusicStandBy.NowPlaying", category: "session")
 
     init(attributes: MacPlaybackAttributes) {
@@ -34,7 +33,7 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
 
     var content: (any MediaContentRepresentable)? {
         guard let track = attributes.track else { return nil }
-        let store = ArtworkStore(container: container)
+        let store = services.artwork
         let artworkURL = track.artworkURL
         return MusicContent(
             id: track.id,
@@ -66,10 +65,10 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
 
     var commands: [MediaCommand] {
         [
-            .play { self.handle(.play) },
-            .pause { self.handle(.pause) },
-            .next { self.handle(.next) }.enabled(attributes.canGoNext),
-            .previous { self.handle(.previous) }.enabled(attributes.canGoPrevious),
+            .play { try await self.handle(.play) },
+            .pause { try await self.handle(.pause) },
+            .next { try await self.handle(.next) }.enabled(attributes.canGoNext),
+            .previous { try await self.handle(.previous) }.enabled(attributes.canGoPrevious),
         ]
     }
 
@@ -77,22 +76,23 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
         [MediaDevice(id: id, name: attributes.macName, type: .desktop, capabilities: [])]
     }
 
-    /// Records the command for the app, wakes it if it is running, and updates
-    /// the system UI straight away. Replace the body's log/signal with a real
-    /// send to the Mac once the shared transport exists.
-    private func handle(_ kind: CommandKind) {
-        logger.log("Received command: \(kind.rawValue, privacy: .public)")
+    /// Sends the command from here, so it works while the main app is suspended.
+    /// Throwing tells the system it failed. The screen changes when the Mac's own
+    /// state arrives, except on the development mock route.
+    private func handle(_ kind: CommandKind) async throws {
+        logger.log("Received command: \(kind.rawValue, privacy: .public), relay: \(self.services.usesRelay)")
         do {
-            try CommandLog(container: container).append(CommandRecord(kind: kind, sessionID: id, receivedAt: Date()))
+            if let local = try await services.commands.perform(kind, on: attributes, at: Date()) {
+                attributes = local
+            }
         } catch {
-            logger.error("Could not record command: \(error.localizedDescription, privacy: .public)")
+            logger.error("Command failed: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
-        CrossProcessSignal.post(AppGroup.commandSignal)
-        attributes = library.applying(kind, to: attributes, at: Date())
     }
 
     private func startObservingPushToken() {
-        let registrar = MockPushTokenRegistrar(container: container)
+        let registrar = services.tokens
         let sessionID = id
         if let token = pushToken {
             Task { try? await registrar.registerUpdateToken(token.hexString, forSessionID: sessionID) }
