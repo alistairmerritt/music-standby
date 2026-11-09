@@ -47,6 +47,13 @@ public enum StandByWire {
         (try? Date(text, strategy: withFraction)) ?? (try? Date(text, strategy: withoutFraction))
     }
 
+    /// `date` as a receiver will decode it: milliseconds only. Senders apply
+    /// this before keeping a message, so what they remember equals what
+    /// arrives and a re-send is byte-identical.
+    public static func wirePrecision(_ date: Date) -> Date {
+        parseDate(formatDate(date)) ?? date
+    }
+
     private static let withFraction = Date.ISO8601FormatStyle(includingFractionalSeconds: true, timeZone: .gmt)
     private static let withoutFraction = Date.ISO8601FormatStyle(timeZone: .gmt)
 }

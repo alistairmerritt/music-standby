@@ -16,7 +16,7 @@ deployed. The relay is still a proposal (`docs/ios/RELAY-DESIGN-8-NOV-2026.md` o
 | Rule | Detail |
 | --- | --- |
 | Coders | Always `StandByWire.makeEncoder()` / `makeDecoder()`. A default `JSONEncoder` writes dates as seconds since 2001 |
-| Dates | ISO-8601 string, UTC, milliseconds: `2026-11-09T07:00:00.250Z`. Decoders also accept no fraction. Numbers are rejected |
+| Dates | ISO-8601 string, UTC, milliseconds: `2026-11-09T07:00:00.250Z`. Decoders also accept no fraction. Numbers are rejected. Senders pass dates through `StandByWire.wirePrecision` before keeping a message, so a re-send is identical to the original |
 | UUIDs | Swift writes them upper-case. Decoders accept either case. The relay must compare them case-insensitively |
 | Durations, positions | Seconds, as JSON numbers, fractional allowed |
 | Revisions | Integers below 2^53, so JavaScript reads them exactly |
