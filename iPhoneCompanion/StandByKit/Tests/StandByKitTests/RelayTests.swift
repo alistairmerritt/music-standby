@@ -231,6 +231,22 @@ final class RecordingSleeper: @unchecked Sendable {
         #expect(result.track?.id == "mock-2")
     }
 
+    @Test func theExtensionRefusesArtworkTooLargeForItsMemoryLimit() async throws {
+        let image = encodedImage(.jpeg, width: 900, height: 900)
+        let http = FakeHTTP([FakeHTTP.Reply(status: 200, body: image, headers: ["Content-Type": "image/jpeg"])])
+        let services = ExtensionServices.make(container: container(), credentials: InMemoryCredentialStore(testCredential), http: http, allowMock: false)
+        await #expect(throws: TransportError.artworkUnavailable) {
+            _ = try await services.artwork.resolve(id: String(repeating: "d", count: 64), remoteURL: nil)
+        }
+    }
+
+    @Test func theExtensionAcceptsTypicalAlbumArt() async throws {
+        let image = encodedImage(.jpeg, width: 600, height: 600)
+        let http = FakeHTTP([FakeHTTP.Reply(status: 200, body: image, headers: ["Content-Type": "image/jpeg"])])
+        let services = ExtensionServices.make(container: container(), credentials: InMemoryCredentialStore(testCredential), http: http, allowMock: false)
+        #expect(try await services.artwork.resolve(id: String(repeating: "e", count: 64), remoteURL: nil) == image)
+    }
+
     @Test func aCommandLogThatCantBeWrittenDoesNotFailTheTap() async throws {
         var attributes = sessionAttributes()
         attributes.track = SessionTrack(id: "mock-1", title: "T", artist: "A", album: "B", duration: 100, artworkID: "mock-art-1")

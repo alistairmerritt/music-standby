@@ -135,7 +135,7 @@ public struct ExtensionServices: Sendable {
             readFailed = true
         }
         if let credential {
-            let client = RelayClient(credential: credential, http: http)
+            let client = RelayClient(credential: credential, http: http, artworkPolicy: .forExtension)
             return ExtensionServices(
                 commands: RelayCommandHandler(sender: client),
                 tokens: RelayPushTokenRegistrar(container: container, client: { client }),

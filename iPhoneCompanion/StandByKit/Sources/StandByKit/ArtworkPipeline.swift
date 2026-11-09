@@ -66,6 +66,14 @@ public struct ArtworkPolicy: Equatable, Sendable {
     }
 }
 
+extension ArtworkPolicy {
+    /// For the Now Playing extension, which iOS holds to a hard 6 MB of memory
+    /// (seen in the system log on iOS 27.2). A 1200-pixel image is about 5.8 MB
+    /// once decoded, while 800 is about the largest size the system was seen to
+    /// request (807). A judgement from that limit: the real ceiling is unmeasured.
+    public static let forExtension = ArtworkPolicy(maximumByteCount: 1_000_000, maximumPixelDimension: 800)
+}
+
 /// Fetches artwork that is not on the device yet.
 public protocol ArtworkFetching: Sendable {
     /// A URL from a push payload.
