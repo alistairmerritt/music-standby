@@ -13,7 +13,8 @@ pairing, but nothing here is deployed: it runs locally under `wrangler dev`, the
 | `src/push.ts` | `PushSender`: `MockPushSender` (records pushes) and `APNsPushSender` (ES256 JWT, `nowplaying` pushes) |
 | `src/crypto.ts` | Tokens, codes, hashing, constant-time comparison, artwork URL signatures |
 | `src/protocol.ts` | The shared protocol's JSON shapes, mirrored from `Shared/StandByProtocol` |
-| `tools/mock-phone.mjs` | A command-line iPhone: pairs, reads the session, sends commands |
+| `tools/mock-phone.mjs` | A command-line iPhone: pairs, reads the session, sends commands, fetches artwork |
+| `tools/e2e-local.mjs` | End-to-end test: real Mac companion ↔ local relay ↔ simulated iPhone |
 
 ## Run
 
@@ -31,6 +32,34 @@ npm run dev
 
 `npm test` runs the suites inside `workerd` through `@cloudflare/vitest-plugin`. `npm run dev`
 serves `http://127.0.0.1:8787` with local Durable Object storage.
+
+## End-to-end on one Mac
+
+```bash
+node tools/e2e-local.mjs --msbctl ../MacCompanion/.build/swiftc/msbctl
+```
+
+```bash
+node tools/e2e-local.mjs --msbctl ../MacCompanion/.build/swiftc/msbctl --playback
+```
+
+The harness starts its own relay on port 8791 and the real Mac companion (`msbctl watch
+--relay`), then acts as the iPhone. It checks:
+- pairing with approval on the Mac, and one-time codes and credentials;
+- forged and malformed credentials;
+- state delivery and session checks on commands;
+- artwork through its signed URL;
+- the Mac killed and restarted, the relay restarted;
+- session end and unpairing.
+
+With `--playback`, Music must already be playing. The harness then sends real next, pause,
+play and a duplicated next, and leaves Music paused. It never changes the volume or launches
+Music.
+
+To drive it by hand, run `npm run dev`, then
+`msbctl watch 600 --relay http://127.0.0.1:8787 --pair`, then
+`node tools/mock-phone.mjs pair <code>` (type `approve` into `msbctl`), then
+`node tools/mock-phone.mjs cmd next`.
 
 ## Configuration
 
