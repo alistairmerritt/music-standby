@@ -231,6 +231,13 @@ final class RecordingSleeper: @unchecked Sendable {
         #expect(result.track?.id == "mock-2")
     }
 
+    @Test func aCommandLogThatCantBeWrittenDoesNotFailTheTap() async throws {
+        var attributes = sessionAttributes()
+        attributes.track = SessionTrack(id: "mock-1", title: "T", artist: "A", album: "B", duration: 100, artworkID: "mock-art-1")
+        let result = try await MockCommandHandler(container: unwritableContainer()).perform(.next, on: attributes, at: Date())
+        #expect(result?.track?.id == "mock-2")
+    }
+
     @Test func releaseBuildWithNoPairingFailsInsteadOfFakingIt() async {
         let services = ExtensionServices.make(container: container(), credentials: InMemoryCredentialStore(), allowMock: false)
         await #expect(throws: TransportError.notPaired) {
@@ -244,6 +251,13 @@ final class RecordingSleeper: @unchecked Sendable {
             _ = try await services.commands.perform(.play, on: sessionAttributes(), at: Date())
         }
     }
+}
+
+/// Inside a regular file, so no folder can ever be made there.
+func unwritableContainer() -> SharedContainer {
+    let blocker = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    FileManager.default.createFile(atPath: blocker.path(), contents: Data())
+    return SharedContainer(directory: blocker.appending(path: "StandBy", directoryHint: .isDirectory), isShared: false)
 }
 
 private struct AckingSender: CommandSender {
@@ -368,6 +382,14 @@ private struct FailingCredentialStore: CredentialStore {
         #expect(registrar.current().sessions["s"] == "bb")
         await http.script([.noContent])
         try await registrar.uploadStored()
+        #expect(await http.requests.count == 2)
+    }
+
+    @Test func relayStillHearsWhenTheLocalCopyCantBeWritten() async throws {
+        let http = FakeHTTP([.noContent])
+        let registrar = RelayPushTokenRegistrar(container: unwritableContainer(), client: { client(http) })
+        try await registrar.registerUpdateToken("bb", forSessionID: "s")
+        try await registrar.invalidate(sessionID: "s")
         #expect(await http.requests.count == 2)
     }
 

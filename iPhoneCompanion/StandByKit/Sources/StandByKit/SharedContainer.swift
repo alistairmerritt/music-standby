@@ -25,8 +25,11 @@ public struct SharedContainer: Sendable {
         return SharedContainer(directory: FileManager.default.temporaryDirectory.appending(path: "StandBy", directoryHint: .isDirectory), isShared: false)
     }
 
+    /// Recreates the folder if needed: without an App Group this lives in `tmp`,
+    /// which iOS can clear at any time.
     func file(_ name: String) -> URL {
-        directory.appending(path: name, directoryHint: .notDirectory)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appending(path: name, directoryHint: .notDirectory)
     }
 }
 

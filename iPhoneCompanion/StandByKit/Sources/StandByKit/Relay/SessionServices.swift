@@ -36,7 +36,8 @@ public struct MockCommandHandler: SessionCommandHandling {
     }
 
     public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
-        try log.append(CommandRecord(kind: kind, sessionID: attributes.id, receivedAt: date))
+        // Only bookkeeping for Diagnostics: failing to write it mustn't fail the tap.
+        try? log.append(CommandRecord(kind: kind, sessionID: attributes.id, receivedAt: date))
         CrossProcessSignal.post(AppGroup.commandSignal)
         return library.applying(kind, to: attributes, at: date)
     }
@@ -64,18 +65,21 @@ public struct RelayPushTokenRegistrar: PushTokenRegistrar {
         self.client = client
     }
 
+    // The local copy is a convenience. If it can't be written, the relay must
+    // still hear about the token.
+
     public func registerStartToken(_ hex: String) async throws {
-        try await local.registerStartToken(hex)
+        try? await local.registerStartToken(hex)
         try await client()?.registerStartToken(hex)
     }
 
     public func registerUpdateToken(_ hex: String, forSessionID id: String) async throws {
-        try await local.registerUpdateToken(hex, forSessionID: id)
+        try? await local.registerUpdateToken(hex, forSessionID: id)
         try await client()?.registerSessionToken(hex, sessionID: id)
     }
 
     public func invalidate(sessionID id: String) async throws {
-        try await local.invalidate(sessionID: id)
+        try? await local.invalidate(sessionID: id)
         try await client()?.invalidateSessionToken(sessionID: id)
     }
 

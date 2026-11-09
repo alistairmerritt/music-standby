@@ -210,6 +210,14 @@ private final class TestClock: @unchecked Sendable {
         #expect(log.all().map(\.kind) == [.pause, .next])
     }
 
+    @Test func writesSurviveTheContainerBeingCleared() throws {
+        let container = temporaryContainer()
+        try FileManager.default.removeItem(at: container.directory)
+        let log = CommandLog(container: container)
+        try log.append(CommandRecord(kind: .next, sessionID: "s", receivedAt: Date()))
+        #expect(log.all().count == 1)
+    }
+
     @Test func artworkResolutionPrefersCacheThenGenerates() async throws {
         let store = ArtworkStore(container: temporaryContainer())
         let generated = try await store.resolve(id: "mock-art-2", remoteURL: nil)
