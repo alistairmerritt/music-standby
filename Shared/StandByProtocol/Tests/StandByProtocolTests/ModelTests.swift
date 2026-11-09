@@ -39,6 +39,25 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
         #expect(StandByWire.wirePrecision(m.capturedAt) == m.capturedAt)
     }
 
+    @Test func wirePrecisionIsExactForAnyClockReading() throws {
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<20_000 {
+            let raw = Date(timeIntervalSince1970: Double.random(in: 0..<4_102_444_800, using: &generator))
+            let kept = StandByWire.wirePrecision(raw)
+            let text = StandByWire.formatDate(kept)
+            #expect(StandByWire.parseDate(text) == kept, "\(raw.timeIntervalSince1970) → \(text)")
+            #expect(StandByWire.formatDate(raw) == text)
+            #expect(abs(kept.timeIntervalSince(raw)) <= 0.0005 + 1e-6)
+        }
+    }
+
+    @Test func fractionsOfAnyLengthParse() {
+        #expect(StandByWire.parseDate("2026-11-08T08:00:00.5Z") == Date(timeIntervalSince1970: 1_794_124_800.5))
+        #expect(StandByWire.parseDate("2026-11-08T08:00:00.123456Z") == Date(timeIntervalSince1970: 1_794_124_800.123))
+        #expect(StandByWire.parseDate("2026-11-08T08:00:00.Z") == nil)
+        #expect(StandByWire.formatDate(Date(timeIntervalSince1970: -0.25)) == "1969-12-31T23:59:59.750Z")
+    }
+
     @Test func messageRoundTripsThroughWireCoders() throws {
         var original = message()
         original.capturedAt = Date(timeIntervalSince1970: 1_794_207_600.125)

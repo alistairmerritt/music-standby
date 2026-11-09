@@ -39,21 +39,49 @@ public enum StandByWire {
         return decoder
     }
 
+    // Milliseconds are handled as integers. Formatting a Double's fraction
+    // directly truncates, so a value stored as …793.99999 would print as .793
+    // and never survive a round trip.
+
     public static func formatDate(_ date: Date) -> String {
-        date.formatted(withFraction)
+        let ms = milliseconds(date)
+        let (seconds, fraction) = (ms.floorDiv(1000), ms.floorMod(1000))
+        let base = Date(timeIntervalSince1970: Double(seconds)).formatted(withoutFraction)   // "…T07:00:00Z"
+        return String(base.dropLast()) + String(format: ".%03lldZ", fraction)
     }
 
     public static func parseDate(_ text: String) -> Date? {
-        (try? Date(text, strategy: withFraction)) ?? (try? Date(text, strategy: withoutFraction))
+        var base = text
+        var fraction: Int64 = 0
+        if let dot = text.firstIndex(of: ".") {
+            let digits = text[text.index(after: dot)...].prefix { $0.isASCII && $0.isNumber }
+            guard !digits.isEmpty else { return nil }
+            fraction = Int64(String((digits + "00").prefix(3)))!
+            base = String(text[..<dot]) + text[text.index(after: dot)...].dropFirst(digits.count)
+        }
+        guard let whole = try? Date(base, strategy: withoutFraction) else { return nil }
+        return date(milliseconds: milliseconds(whole) + fraction)
     }
 
-    /// `date` as a receiver will decode it: milliseconds only. Senders apply
+    /// `date` as a receiver will decode it: whole milliseconds. Senders apply
     /// this before keeping a message, so what they remember equals what
-    /// arrives and a re-send is byte-identical.
+    /// arrives and a re-send is identical.
     public static func wirePrecision(_ date: Date) -> Date {
-        parseDate(formatDate(date)) ?? date
+        Self.date(milliseconds: milliseconds(date))
     }
 
-    private static let withFraction = Date.ISO8601FormatStyle(includingFractionalSeconds: true, timeZone: .gmt)
+    private static func milliseconds(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    private static func date(milliseconds: Int64) -> Date {
+        Date(timeIntervalSince1970: Double(milliseconds) / 1000)
+    }
+
     private static let withoutFraction = Date.ISO8601FormatStyle(timeZone: .gmt)
+}
+
+private extension Int64 {
+    func floorDiv(_ d: Int64) -> Int64 { (self - floorMod(d)) / d }
+    func floorMod(_ d: Int64) -> Int64 { ((self % d) + d) % d }
 }
