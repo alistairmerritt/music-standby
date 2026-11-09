@@ -11,11 +11,12 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 63 tests in 9 suites pass (`swift test`) |
+| Unit tests | 67 tests in 10 suites pass (`swift test`) |
 | Shared protocol | 49 tests pass under `swift test`; builds for iOS with `xcodebuild` |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
-| Menu-bar app | Launched and quit cleanly with the AppleScript runner. **Not relaunched since the switch to raw events** (a rebuilt app asks for Automation permission again) |
+| Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. The menu has never been clicked by hand |
+| Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
 
 ## Raw Apple Events
@@ -209,21 +210,57 @@ again only when that process has gone.
 - **Main-thread cost in daily use.** Measured per read, not over hours.
 - **Local files, radio, podcasts, AirPlay, tracks with several artworks.** The raw-event
   compare ran on a "shared track"; the afternoon's AppleScript checks were on "URL track".
-- **Anything over a network.** The relay and the WebSocket transport don't exist.
+- **A real iPhone on the relay.** Only the simulated iPhone (`Relay/tools/mock-phone.mjs`) has
+  talked to it. The relay ran under `wrangler dev` on this Mac; it has never been deployed.
+- **The pairing controls clicked in the running app.** Rendered offscreen in all four states
+  against the live relay; the approval itself was given through `msbctl`.
+- **Reading Music from inside the app with raw events.** The relay-build app was launched
+  from the shell, so it used this shell's Automation permission. Music was paused and nothing
+  checked the app's reads.
+
+## Relay connection (night of 9 November)
+
+Executed on this Mac against `wrangler dev` (feature/relay), real Music, and the simulated
+iPhone. `Relay/tools/e2e-local.mjs` reproduces it.
+
+| Check | Result |
+| --- | --- |
+| End-to-end harness, `--playback` | **27/27 passed** |
+| End-to-end harness, read-only | 19/19 passed |
+| Pairing | Code on the Mac; the phone's claim waited until the Mac said `approve`; the credential came once; the code couldn't be reused |
+| Next from the phone | Changed the real song (Let's Go Back → Last Dance; Everything Now → Farolim de Felgueiras). Ack in 7–16 ms |
+| Pause and play | Took effect in Music; acks in 8–43 ms; the phone saw the state change |
+| Same command id twice | One skip (Last Dance → Wild Horses, the next in the playlist); identical acks |
+| Command naming an old session | `409 session_mismatch`; the song didn't change |
+| Artwork | 600 px JPEG fetched through its signed URL with no credential; refused without the signature |
+| Companion killed, no goodbye | Relay saw it go; a command got `504 mac_unreachable`; the restarted companion reconnected in about 0.1 s |
+| Companion restarted mid-song | **First run: a new session**, because the listening session wasn't persisted. Fixed; afterwards the session survived |
+| Relay restarted | The Mac backed off 1.9 s, then 4.9 s, reconnected, said `hello`, resent state; same session |
+| Unpair | Mac told `revoked`; phone credential dead |
+
+Two changes came out of this:
+- The Mac acks a phone command as soon as Music takes it. Its re-read follows as the next
+  state frame.
+- The listening session is saved, so restarting the companion mid-song doesn't give the phone
+  a new Now Playing session.
 
 ## For the relay design
 
 - `not_running` arrives within about 0.8 s of `terminate()`, so the relay can end the Now
   Playing session at once instead of waiting for its 60 s grace.
 - `goodbye` tells a deliberate companion quit from a dropped socket.
-- A phone command normally gets its ack in 0.5–0.6 s, inside the proposed 1.2 s. A skip
-  can take longer (1.28 s once) and its ack can carry the pre-skip revision. The new track
-  follows as an ordinary state frame.
+- A phone command now gets its ack in 7–43 ms through the local relay, because the Mac acks
+  when Music takes the command and re-reads afterwards. Its revision is the pre-command one;
+  the result follows as an ordinary state frame (PROTOCOL.md §5).
 - After a relaunch Music can't answer for about 4 s, and a command in that window waits.
 - Artwork ids are known before the state frame leaves, so `artwork-request` works as
   proposed.
 
 ## Recommended next step
 
-Launch the menu-bar app with the raw runner, at the Mac. That shows the first-run
-Automation prompt, and opening the menu by hand checks the buttons. Then the relay.
+1. At the Mac: launch the menu-bar app with `relayURL` set, allow the Automation prompt, and
+   pair from the menu. That covers the prompt, the menu by hand, and the app's own reads.
+2. Deploy the relay to a `workers.dev` hostname, which needs a Cloudflare account, and run
+   `/v1/dev/apns-probe` there. That settles the HTTP/2 question with no Apple credentials.
+3. The iOS side adopts the contract (docs/relay/API-v1.md §13). Then a real phone can
+   replace the mock.
