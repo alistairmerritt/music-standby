@@ -360,7 +360,12 @@ export class Pairing extends DurableObject<Env> {
       session = undefined;
     }
     if (!session) {
-      if (state === "playing") await this.startSession(message);
+      if (state !== "playing") return;
+      // A session the phone dismissed stays dismissed for that listening session.
+      const dismissed = await this.ctx.storage.get<string>("dismissed");
+      if (dismissed && message.listeningSessionID === dismissed) return;
+      await this.ctx.storage.delete("dismissed");
+      await this.startSession(message);
       return;
     }
     session.listeningSessionID ??= message.listeningSessionID;
@@ -561,6 +566,7 @@ export class Pairing extends DurableObject<Env> {
     const session = await this.ctx.storage.get<Session>("session");
     if (!session) throw new HttpError(409, "no_session");
     if (body?.sessionID !== session.sessionID) throw new HttpError(409, "session_mismatch");
+    if (session.listeningSessionID) await this.ctx.storage.put("dismissed", session.listeningSessionID);
     await this.endSession("phone");
     return empty();
   }

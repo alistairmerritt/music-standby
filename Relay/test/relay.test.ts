@@ -290,6 +290,19 @@ describe("playback and sessions", () => {
     expect((await session(phoneToken)).sessionID).toBeUndefined();
     expect((await pushes(phoneToken)).at(-1).event).toBe("end");
   });
+
+  it("keeps a dismissed session ended until the next listening session", async () => {
+    const { mac, phoneToken, sessionID, state } = await playingSetup();
+    await call("POST", "/v1/session/end", { token: phoneToken, body: { sessionID } });
+    const sameListening = playback({ listeningSessionID: state.listeningSessionID, track: { id: "pid:Z", title: "Z", artist: "A", album: "B", duration: 9 } });
+    mac.send({ type: "state", message: sameListening });
+    expect((await waitForRevision(phoneToken, sameListening.revision)).sessionID).toBeUndefined();
+    const nextListening = playback({ listeningSessionID: crypto.randomUUID().toUpperCase() });
+    mac.send({ type: "state", message: nextListening });
+    const s = await waitForRevision(phoneToken, nextListening.revision);
+    expect(s.sessionID).toBeDefined();
+    expect(s.sessionID).not.toBe(sessionID);
+  });
 });
 
 describe("commands", () => {
