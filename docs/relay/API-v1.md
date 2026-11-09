@@ -234,8 +234,9 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   dates inside `attributes` are ISO-8601 strings, as in Apple's examples.
 - **The APNs key lives only in the relay's secrets.** Neither app ever sees it.
 - **Version 1 ships with pushes mocked.** The relay records what it would send. Live APNs needs
-  the paid developer programme for a key, and a deployed relay to prove Cloudflare `fetch()`
-  speaks HTTP/2 to APNs (relay design §8).
+  the paid developer programme for a key. Cloudflare `fetch()` does speak HTTP/2 to APNs (relay
+  design §8): a probe from the deployed relay on 10 November 2026 got APNs' own
+  `403 InvalidProviderToken` with an `apns-id`, so the relay can send pushes itself.
 
 ---
 
