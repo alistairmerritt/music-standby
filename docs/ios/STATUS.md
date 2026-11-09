@@ -1,8 +1,8 @@
 # iOS status
 
-Last updated 8 November 2026, branch `feature/ios`.
+Last updated 9 November 2026, branch `feature/ios`.
 
-**The iOS app has not been built with Xcode or run on a device.** The Mac it was written on has no Xcode, so nothing importing `NowPlaying` has been compiled against the real SDK. Do [DEVICE-TESTING.md](DEVICE-TESTING.md) first.
+**The iOS app builds against the real iOS 27.2 SDK but has not been run on a device.** Whether a remote session appears in StandBy is still unknown. Do [DEVICE-TESTING.md](DEVICE-TESTING.md) next.
 
 ## What exists
 
@@ -19,10 +19,11 @@ Last updated 8 November 2026, branch `feature/ios`.
 | Item | State | How |
 | --- | --- | --- |
 | API names and signatures | Checked against docs | Apple's published NowPlaying documentation, not the SDK |
-| `StandByKit` logic | Compiled and tested | 24 tests pass on macOS, Swift 6 language mode |
-| App and extension source | Typechecked against a stand-in only | A hand-written `NowPlaying` module transcribed from the docs, macOS 26 SDK |
-| `project.pbxproj` | Syntax and references only | `plutil -lint` plus a reference check; never opened in Xcode |
-| Real iOS 27 SDK build | **Not done** | Requires Xcode 27 |
+| `StandByKit` logic | Compiled and tested | 24 of 24 tests pass with `swift test`, Xcode 27.2 toolchain (Swift 6.4.2), macOS |
+| App and extension source | Compiled | Clean device build, iOS 27.2 SDK, Xcode 27.2; no compiler warnings |
+| `project.pbxproj` | Builds | `xcodebuild`; the extension embeds at `MusicStandBy.app/Extensions/` |
+| Signing, free Personal Team | Partial | Signs with the push and App Group entitlements removed. With the App Group left in, `xcodebuild` fails: the issued profile has an empty group list, so the group was never registered |
+| App Group on a device | **Not tested** | Needs the group registered, then a device |
 | Lock Screen, Control Centre, StandBy | **Not tested** | Requires an iOS 27 iPhone |
 | System-issued commands reaching the extension | **Not tested** | Requires a device |
 | Push tokens and APNs delivery | **Not tested** | Requires a device, paid team and APNs key |
