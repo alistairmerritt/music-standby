@@ -5,13 +5,14 @@ import SwiftUI
 
 struct MenuContent: View {
     let companion: Companion
+    let relay: RelayAccount?
     let launchAtLogin: LaunchAtLogin
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             NowPlayingSection(companion: companion)
             Divider()
-            ConnectionSection(companion: companion)
+            ConnectionSection(companion: companion, relay: relay)
             Divider()
             LaunchAtLoginRow(launchAtLogin: launchAtLogin)
             if let mock = companion.transport as? MockRelayTransport {
@@ -186,6 +187,7 @@ private struct Notice: View {
 
 private struct ConnectionSection: View {
     let companion: Companion
+    let relay: RelayAccount?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -196,11 +198,13 @@ private struct ConnectionSection: View {
             LabeledContent("iPhone") {
                 Text(companion.pairedPhone?.name ?? "Not paired").foregroundStyle(.secondary)
             }
-            Button("Pair iPhone…") {}
-                .disabled(true)
-            Text("Pairing arrives with the relay. Until then this Mac talks to a built-in mock relay.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let relay {
+                PairingControls(companion: companion, relay: relay)
+            } else {
+                Text("No relay set, so this Mac talks to a built-in mock relay.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -221,6 +225,47 @@ private struct ConnectionSection: View {
         case .connecting, .reconnecting: .yellow
         case .failed: .red
         case .disconnected: .secondary
+        }
+    }
+}
+
+/// Pairing with the relay: a code to type on the phone, then the person at the
+/// Mac allows or refuses the phone that typed it (docs/relay/API-v1.md §4).
+private struct PairingControls: View {
+    let companion: Companion
+    let relay: RelayAccount
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let request = companion.pairRequests.first {
+                Text("“\(request.phone.name)” wants to show this Mac’s music.")
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Allow") { companion.decidePairing(request.claimID, approved: true); relay.clearPairingCode() }
+                        .keyboardShortcut(.defaultAction)
+                    Button("Don’t Allow") { companion.decidePairing(request.claimID, approved: false) }
+                }
+            } else if companion.pairedPhone != nil {
+                // Paired: any code still on file was used up by the phone's claim.
+                Button("Unpair iPhone") { Task { await relay.unpair() } }
+            } else if let code = relay.pairingCode, code.expiresAt > Date() {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let left = max(0, Int(code.expiresAt.timeIntervalSince(context.date)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(code.code.map(String.init).joined(separator: " "))
+                            .font(.system(.title, design: .monospaced).weight(.semibold))
+                            .textSelection(.enabled)
+                        Text(left > 0 ? "Type this in Music StandBy on your iPhone. Expires in \(left / 60):\(String(format: "%02d", left % 60))." : "Expired.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Button("Pair iPhone…") { Task { await relay.requestPairingCode() } }
+                    .disabled(!relay.isRegistered || companion.connection.phase != .connected)
+            }
+            if let error = relay.lastError {
+                Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

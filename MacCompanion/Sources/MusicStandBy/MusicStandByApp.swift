@@ -6,18 +6,30 @@ import SwiftUI
 struct MusicStandByApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var companion: Companion
+    @State private var relay: RelayAccount?
     @State private var launchAtLogin = LaunchAtLogin()
 
     init() {
-        let companion = Companion.live()
+        // The relay is opt-in until one is deployed:
+        //   defaults write com.alistairmerritt.MusicStandBy.Mac relayURL http://127.0.0.1:8787
+        let relay = UserDefaults.standard.string(forKey: "relayURL").flatMap(URL.init(string:)).map {
+            RelayAccount(baseURL: $0, store: KeychainCredentialStore(account: $0.absoluteString))
+        }
+        let transport: any CompanionTransport = relay.map { RelayTransport(client: $0.client, token: $0.token) } ?? MockRelayTransport()
+        let companion = Companion.live(transport: transport)
+        if let relay {
+            let device = companion.device
+            Task { await relay.register(device: device) }
+        }
         companion.start()
         AppDelegate.companion = companion
         _companion = State(initialValue: companion)
+        _relay = State(initialValue: relay)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(companion: companion, launchAtLogin: launchAtLogin)
+            MenuContent(companion: companion, relay: relay, launchAtLogin: launchAtLogin)
         } label: {
             Image(systemName: companion.snapshot?.state == .automationDenied ? "exclamationmark.triangle" : "music.note")
                 .accessibilityLabel("Music StandBy")

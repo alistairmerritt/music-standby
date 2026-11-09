@@ -26,6 +26,12 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Lets a development relay on 127.0.0.1 or a .local host use plain ws://. Internet hosts still need TLS. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Music StandBy reads what is playing in Music and passes your iPhone's play, pause and skip controls back to it.</string>
 	<key>NSHumanReadableCopyright</key>
