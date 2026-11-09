@@ -49,8 +49,11 @@ final class AppModel {
         hasSeenIntro = defaults.bool(forKey: "hasSeenIntro")
         isNowPlayingEnabled = defaults.bool(forKey: "nowPlayingEnabled")
         pairedMac = pairingStore.pairedMac
-        commandsFromSystem = commandLog.all()
-        handledCommandIDs = Set(commandsFromSystem.map(\.id))
+        // Read into a local: @Observable makes commandsFromSystem computed, so it
+        // can't be read until every stored property is initialised.
+        let existingCommands = commandLog.all()
+        commandsFromSystem = existingCommands
+        handledCommandIDs = Set(existingCommands.map(\.id))
         pushTokens = registrar.current()
     }
 
