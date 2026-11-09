@@ -2,7 +2,7 @@
 
 Last updated 9 November 2026, branch `feature/ios`.
 
-**A remote media session appears in landscape StandBy on a real iPhone.** Tested by hand on 9 November 2026 on an iPhone 15 Pro running iOS 27.2, using the mock transport and a free-team build without the App Group. The remaining tests in [DEVICE-TESTING.md](DEVICE-TESTING.md) haven't been run.
+**A remote media session appears in landscape StandBy on a real iPhone.** That was shown with the mock transport. The reliability fixes and relay client below pass automated tests but have **not yet been run on a phone**. No part of this has talked to a real Mac or relay.
 
 ## What exists
 
@@ -10,47 +10,74 @@ Last updated 9 November 2026, branch `feature/ios`.
 | --- | --- |
 | App (intro, pairing, status, controls, diagnostics) | `iPhoneCompanion/App/` |
 | Remote media session extension | `iPhoneCompanion/NowPlayingExtension/` |
-| Shared logic and mock transport | `iPhoneCompanion/StandByKit/` |
-| Temporary wire models (delete when the shared protocol lands) | `StandByKit/Sources/StandByKit/Temporary/` |
-| Xcode project, entitlements, extension Info.plist | `iPhoneCompanion/MusicStandBy.xcodeproj`, `iPhoneCompanion/Signing/` |
+| Shared logic, `AppModel`, session lifecycle | `iPhoneCompanion/StandByKit/` |
+| Relay client, credentials, command path | `StandByKit/Sources/StandByKit/Relay/` |
+| Mock transport for development | `StandByKit/Sources/StandByKit/Mock/` |
+| Wire protocol | `Shared/StandByProtocol/`, merged from `main` |
+| Relay endpoints the client assumes | [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md) |
 
-## Verification
+## Observed on a physical iPhone
 
-| Item | State | How |
+iPhone 15 Pro, iOS 27.2, free Personal Team, mock transport. All from the build at commit `a824478` and earlier debug builds of it, so these predate the reliability and relay work.
+
+| Behaviour | Result | Evidence |
 | --- | --- | --- |
-| API names and signatures | Checked against docs | Apple's published NowPlaying documentation, not the SDK |
-| `StandByKit` logic | Compiled and tested | 24 of 24 tests pass with `swift test`, Xcode 27.2 toolchain (Swift 6.4.2), macOS |
-| App and extension source | Compiled | Clean device build, iOS 27.2 SDK, Xcode 27.2; no compiler warnings |
-| `project.pbxproj` | Builds | `xcodebuild`; the extension embeds at `MusicStandBy.app/Extensions/` |
-| Signing, free Personal Team | Partial | Signs with the push and App Group entitlements removed. With the App Group left in, `xcodebuild` fails: the issued profile has an empty group list, so the group was never registered |
-| App Group on a device | **Not tested** | Needs the group registered, then a device |
-| Install and launch on a device | Done | Free-team build on iPhone 15 Pro, iOS 27.2 |
-| Now Playing metadata and controls | Working | Song and artist shown with skip and pause buttons; observed by hand |
-| Landscape StandBy (test 6) | Working | Observed by hand with the mock transport |
-| Generated placeholder artwork | Working | Observed by hand. PNG encoding never finished in the extension and it kept relaunching, so generated art now reaches the system as a `CGImage` |
-| Real artwork passed as image data | **Not tested** | The route `ArtworkStore.resolve` uses for cached or downloaded art |
-| System Primary (test 5) | Reads No | Diagnostics showed No while the session was still displayed. Cause unknown |
-| Control Centre (test 3) | **Not tested** | Requires a device |
-| Survival when locked for 10 minutes, or after a force-quit | **Not tested** | Requires a device |
-| System-issued commands reaching the extension | Working on the phone | Tapping skip changes the track. Nothing reaches a Mac yet (audit B1) |
-| Push tokens and APNs delivery | **Not tested** | Requires a device, paid team and APNs key |
+| Installs and launches | Works | Hand test |
+| Song details on the Lock Screen | Works | Hand test |
+| Skip and pause buttons | Appear and respond | Hand test; the extension logged each tap |
+| Landscape StandBy (test 6) | Works | Hand test |
+| Generated placeholder artwork | Shows | Hand test, after a fix |
+| PNG encoding inside the extension | **Never finishes** | Log: it stopped at `CGImageDestinationFinalize` and the process was relaunched. Avoid it there |
+| Image data handed to the system | Accepted without error | Extension log only. Whether it looked right is unconfirmed |
+| System Primary | Read No while the session was showing | Hand test. Cause unknown |
 
-The stand-in proves the code is internally consistent. It can't catch a place where the real SDK differs from the docs.
+Other device tests are in [DEVICE-TESTING.md](DEVICE-TESTING.md).
 
-## What Apple's documentation establishes
+## Passes automated tests
 
-- `requestToBecomeSystemPrimary()` only takes effect while the app is in the foreground, and Apple states that it doesn't guarantee the session is displayed.
-- A Mac is a supported device model: `MediaDevice.DeviceType` includes `.desktop` and `.laptop`. The articles' examples are speakers, streaming sticks and TVs.
-- The docs promise the Lock Screen and Control Center. StandBy appears only in WWDC26 session 312, as a general Now Playing surface and not specifically for remote sessions. **Remote sessions in StandBy are undocumented until tested.**
-- Whether a remote session can hold the primary slot while nothing plays locally on the iPhone is undocumented. Test 5 covers it.
+`swift test` from `iPhoneCompanion/StandByKit`: **120 tests**, macOS, Xcode 27.2. `Shared/StandByProtocol`: 49 tests. Nine deliberately reintroduced bugs were each caught.
+
+| Area | Covers |
+| --- | --- |
+| Session lifecycle (audit B3) | Ends on stop, Music quit, refused Automation, unpair, deliberate disconnect, and a drop past 60 s. Pause, read errors and brief drops keep it. Push tokens go with it |
+| Event loop (audit C3) | Survives cancellation and restart, and reports the true connection state afterwards |
+| Failed activation (audit C4) | Retries on the next update and on foreground, with the newest state |
+| Relay client | Pairing, commands, acks and failures, tokens, reconnection, revocation, revision ordering, against scripted HTTP |
+| Extension command path (audit B1, B2) | Sends directly; no optimistic change; mock only on the Debug route; an unreadable Keychain never falls back to the mock |
+| Artwork (audit C1) | PNG and JPEG, size limits, HTTPS and relay-host only, missing artwork |
+
+These cover logic, on macOS. They do not exercise `NowPlaying` or the Keychain.
+
+## Compiles only
+
+App and extension build for the iOS 27.2 device SDK, Debug and Release. They sign with the free team once the App Group and push entitlements are removed. `RemoteSessionController` and the views have no tests.
+
+## Assumptions still to check on a device
+
+- The extension can make an HTTPS call from a locked phone, and the system waits for it.
+- `KeychainCredentialStore` works, and the extension can read what the app wrote. The free team's profile allows the shared group, and the app signs with it, but it hasn't run.
+- Real album-art data, at real sizes, renders.
+- The new lifecycle behaves as tested once it talks to the real `NowPlaying` framework.
+
+## Blocked
+
+**Solely by Apple Developer Program membership**
+
+- APNs: start, update and end pushes, and whether tokens are issued at all.
+- Updating a locked phone. A session can only change while the app is open until then.
+- App Group. Only the mock route's command log and Diagnostics use it, so the relay path doesn't need it.
+- Builds lasting more than 7 days, TestFlight and distribution.
+
+**Solely by the unfinished relay**
+
+- Pairing with a real Mac, and Lock Screen controls reaching it.
+- Artwork from the relay.
+- Confirming [the endpoints](RELAY-CLIENT-CONTRACT.md), which are still assumptions.
 
 ## Decisions
 
-- App and extension use the Swift 5 language mode, so strict-concurrency differences in a framework that couldn't be compiled here don't block the first build. `StandByKit` is Swift 6.
-- The extension applies each command optimistically without bumping the revision, so the next authoritative update always wins.
-- Commands older than 30 seconds are dropped rather than replayed when the app wakes.
-- A lower revision is accepted only if its timestamp is more than 5 seconds newer, which is how a restarted Mac appears.
-
-## Waiting on the Mac developer
-
-The shared protocol wasn't on `main` as of this update. When it lands, replace `Temporary/` and the mapping in `MacPlaybackAttributes+Message.swift`, then add a real `PlaybackTransport`. It would help if the protocol defined how revisions behave across a Mac restart.
+- App and extension use the Swift 5 language mode. `StandByKit` is Swift 6.
+- The relay route never changes the screen optimistically. Only the Debug mock does.
+- Debug builds use the mock unless a relay credential exists. Release builds never use it.
+- 60 s reconnect grace, 1.5 s command timeout and 5 s foreground polling are judgement calls from the relay proposal. None are measured.
+- A paused session is not ended on the phone. The proposal gives the 15-minute timeout to the relay.

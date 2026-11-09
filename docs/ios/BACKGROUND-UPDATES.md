@@ -13,7 +13,7 @@ Pushes are only needed when state changes, such as track, play or pause, or a se
 | Push-to-start | Start a session while the app isn't running | `RemoteSessionController` | `MockPushTokenRegistrar` |
 | Session update | Update or end one session | `MacRemoteSession` | `MockPushTokenRegistrar` |
 
-Both appear in Diagnostics. To connect a backend, implement `PushTokenRegistrar`, which is the only change needed on the client.
+Both appear in Diagnostics. `RelayPushTokenRegistrar` sends them to the relay once it exists, and invalidates a session's token when the session ends.
 
 ## Setup
 
@@ -66,7 +66,7 @@ An `end` event needs only `id` in `attributes`. `artworkURL` is needed for songs
 - Whether the extension needs its own `aps-environment` entitlement. Apple's docs list no extension entitlements.
 - Whether the system decodes dates as ISO-8601. Apple's sample payload implies it, and a unit test covers that shape.
 - Any push budget or rate limit. None is documented for `nowplaying`.
-- Whether the extension can reach the Mac on the local network to deliver commands. If not, commands must go through the server too. Today they are mocked, in `MacRemoteSession.handle(_:)`.
+- Whether the system waits for an HTTPS call made inside a command handler on a locked phone. Commands go to the relay directly from the extension; see [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md).
 
 ## ActivityKit fallback
 
