@@ -208,6 +208,22 @@ try {
   check("unpairing succeeds", unpair.status === 204);
   check("the Mac hears it was revoked", !!(await until(async () => macLog.includes("pairing revoked"))));
   check("the phone's credential is dead afterwards", (await api("GET", "/v1/session", { token: phoneToken })).status === 401);
+
+  // 10. Recovery: the Mac registers afresh and can pair again
+  const reregistered = await until(async () => /re-registered as pairing[\s\S]*relay welcome/.test(macLog), 15000);
+  check("the Mac re-registers and reconnects after being unpaired", !!reregistered);
+  macLog = "";
+  mac.stdin.write("code\n");
+  const code2 = await until(async () => macLog.match(/PAIRING CODE (\d{6})/)?.[1], 10000);
+  const claim2 = code2 ? await api("POST", "/v1/pairing/claim", { body: { code: code2, phone } }) : undefined;
+  await until(async () => macLog.includes("E2E iPhone asks to pair"));
+  mac.stdin.write("approve\n");
+  const again2 = claim2 && (await until(async () => {
+    const r = await api("GET", `/v1/pairing/claim/${claim2.json.claimID}`, { token: claim2.json.claimSecret });
+    return r.json?.status === "approved" ? r.json : undefined;
+  }));
+  const fresh = again2 ? await api("GET", "/v1/session", { token: again2.phoneToken }) : undefined;
+  check("a phone can pair with the Mac again", fresh?.status === 200 && fresh.json.macConnected === true);
 } catch (e) {
   check("harness ran to the end", false, e.message);
 } finally {
