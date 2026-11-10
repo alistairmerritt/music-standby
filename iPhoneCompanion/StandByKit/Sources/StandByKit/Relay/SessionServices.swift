@@ -7,21 +7,78 @@ public protocol SessionCommandHandling: Sendable {
     func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes?
 }
 
-/// The production path: straight to the relay from the extension, whether or
-/// not the main app is running. Nothing is changed on screen until the Mac's
-/// own state arrives, so the phone can't disagree with it.
-public struct RelayCommandHandler: SessionCommandHandling {
-    private let sender: any CommandSender
+/// Reads what the relay holds now.
+public protocol SessionReading: Sendable {
+    func fetchSession(timeout: TimeInterval) async throws -> SessionState
+}
 
-    public init(sender: any CommandSender) {
+/// The production path: straight to the relay from the extension, whether or
+/// not the main app is running.
+///
+/// Nothing on screen is guessed. Once the Mac has acknowledged the tap, the
+/// handler reads the relay's state and shows it, but only if it is for the same
+/// session and newer than the acknowledgement: the Mac's own result. Without
+/// pushes this is the only way a locked phone learns what its own tap did; on
+/// an iPhone, Pause otherwise stayed Pause and the next tap paused again.
+/// Changes made at the Mac still need a push.
+public struct RelayCommandHandler: SessionCommandHandling {
+    /// The Mac acknowledges when Music takes a command and re-reads it about
+    /// 0.4 s later, so its result usually reaches the relay within the first wait.
+    public static let resultWaits: [TimeInterval] = [0.5, 0.6]
+    public static let readTimeout: TimeInterval = 1
+
+    private let sender: any CommandSender
+    private let reader: (any SessionReading)?
+    private let waits: [TimeInterval]
+    private let sleep: @Sendable (TimeInterval) async throws -> Void
+
+    public init(
+        sender: any CommandSender,
+        reader: (any SessionReading)? = nil,
+        waits: [TimeInterval] = RelayCommandHandler.resultWaits,
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
+    ) {
         self.sender = sender
+        self.reader = reader
+        self.waits = waits
+        self.sleep = sleep
     }
 
     public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
         // The session on screen, so the relay can refuse a tap on a stale one.
         let ack = try await sender.send(RemoteCommand(kind: kind, issuedAt: date), sessionID: attributes.id)
         guard ack.accepted else { throw TransportError.commandRejected(ack.error?.code ?? .commandFailed) }
+        guard let reader else { return nil }
+        // The command has worked by now. Failing to see its result changes nothing.
+        for wait in waits {
+            do { try await sleep(wait) } catch { return nil }
+            guard let state = try? await reader.fetchSession(timeout: Self.readTimeout) else { continue }
+            guard state.sessionID == attributes.id else { return nil }
+            if let latest = state.attributes, latest.revision > ack.revision, latest.revision >= attributes.revision {
+                return MacPlaybackAttributes(latest)
+            }
+        }
         return nil
+    }
+}
+
+extension MacPlaybackAttributes {
+    /// The relay's push attributes, field for field.
+    public init(_ relay: NowPlayingAttributes) {
+        self.init(
+            id: relay.id,
+            macName: relay.macName,
+            revision: relay.revision,
+            isPlaying: relay.isPlaying,
+            elapsedTime: relay.elapsedTime,
+            timestamp: relay.timestamp,
+            track: relay.track.map {
+                SessionTrack(id: $0.id, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration,
+                             artworkID: $0.artworkID.isEmpty ? nil : $0.artworkID, artworkURL: $0.artworkURL)
+            },
+            canGoNext: relay.canGoNext,
+            canGoPrevious: relay.canGoPrevious
+        )
     }
 }
 
@@ -145,7 +202,7 @@ public struct ExtensionServices: Sendable {
         if let credential {
             let client = RelayClient(credential: credential, http: http, artworkPolicy: .forExtension)
             return ExtensionServices(
-                commands: RelayCommandHandler(sender: client),
+                commands: RelayCommandHandler(sender: client, reader: client),
                 tokens: RelayPushTokenRegistrar(container: container, client: { client }),
                 artwork: ArtworkStore(container: container, fetcher: client),
                 usesRelay: true

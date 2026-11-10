@@ -75,7 +75,7 @@ public protocol CommandSender: Sendable {
 
 /// Authenticated HTTPS calls to the relay. Plain data and no process state, so
 /// the extension can use it while the main app is suspended or gone.
-public struct RelayClient: CommandSender, Sendable {
+public struct RelayClient: CommandSender, SessionReading, Sendable {
     /// Apple documents no time budget for a command handler. API-v1 §7 sets
     /// 1.5 s, just past the relay's own 1.2 s wait for the Mac. Unmeasured.
     public static let commandTimeout: TimeInterval = 1.5
@@ -140,8 +140,8 @@ public struct RelayClient: CommandSender, Sendable {
     }
 
     /// What the relay holds now: the session, if any, and the Mac's last state.
-    public func fetchSession() async throws -> SessionState {
-        try decode(SessionState.self, from: try await perform(try makeRequest(RelayPath.session, method: "GET")).0)
+    public func fetchSession(timeout: TimeInterval = RelayClient.defaultTimeout) async throws -> SessionState {
+        try decode(SessionState.self, from: try await perform(try makeRequest(RelayPath.session, method: "GET", timeout: timeout)).0)
     }
 
     /// Ends the session at the relay. It then starts no new one for the same

@@ -77,13 +77,17 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
     }
 
     /// Sends the command from here, so it works while the main app is suspended.
-    /// Throwing tells the system it failed. The screen changes when the Mac's own
-    /// state arrives, except on the development mock route.
+    /// Throwing tells the system it failed. On the relay route the screen shows
+    /// the Mac's own result once the relay has it; only the development mock guesses.
     private func handle(_ kind: CommandKind) async throws {
         logger.log("Received command: \(kind.rawValue, privacy: .public), relay: \(self.services.usesRelay)")
+        let started = Date()
         do {
-            if let local = try await services.commands.perform(kind, on: attributes, at: Date()) {
-                attributes = local
+            if let result = try await services.commands.perform(kind, on: attributes, at: started) {
+                update(result)
+                logger.log("Showing revision \(result.revision) after \(kind.rawValue, privacy: .public), \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+            } else {
+                logger.log("Sent \(kind.rawValue, privacy: .public), no newer state yet, \(Int(Date().timeIntervalSince(started) * 1000)) ms")
             }
         } catch {
             logger.error("Command failed: \(error.localizedDescription, privacy: .public)")

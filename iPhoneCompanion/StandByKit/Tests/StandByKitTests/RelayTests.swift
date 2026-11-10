@@ -944,3 +944,93 @@ private final class ClientBox: @unchecked Sendable {
         #expect(await h.transport.connectCount >= 1, "reads afresh on return")
     }
 }
+
+// MARK: - Showing the result of a tap (no pushes yet)
+
+private actor ScriptedReader: SessionReading {
+    private var states: [Result<SessionState, TransportError>]
+    private(set) var reads = 0
+    private(set) var timeouts: [TimeInterval] = []
+    init(_ states: [Result<SessionState, TransportError>]) { self.states = states }
+    func fetchSession(timeout: TimeInterval) throws -> SessionState {
+        reads += 1
+        timeouts.append(timeout)
+        return try (states.count > 1 ? states.removeFirst() : states[0]).get()
+    }
+}
+
+private struct FixedAck: CommandSender {
+    var revision: UInt64 = 10
+    var accepted = true
+    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
+        accepted ? .accepted(command.id, revision: revision) : .rejected(command.id, revision: revision, ProtocolError(.musicNotRunning))
+    }
+}
+
+@Suite struct TapResultTests {
+    private let onScreen = MacPlaybackAttributes(mac: studioMac, message: message(revision: 7), sessionID: "s1")
+
+    private func relayState(_ id: String?, revision: UInt64, playing: Bool = false) -> SessionState {
+        let attributes = NowPlayingAttributes(id: id ?? "x", macName: "Studio Mac", revision: revision, isPlaying: playing, elapsedTime: 3,
+                                              timestamp: Date(timeIntervalSince1970: 100),
+                                              track: .init(id: "t2", title: "Next Song", artist: "A", album: "B", duration: 200, artworkID: ""),
+                                              canGoNext: true, canGoPrevious: true)
+        return SessionState(sessionID: id, mac: studioMac, macConnected: true, playback: nil, attributes: id == nil ? nil : attributes)
+    }
+
+    private func handler(_ reader: ScriptedReader, sleeper: RecordingSleeper = RecordingSleeper(), ack: FixedAck = FixedAck()) -> RelayCommandHandler {
+        RelayCommandHandler(sender: ack, reader: reader, sleep: { try await sleeper.sleep($0) })
+    }
+
+    @Test func theMacsResultIsShownOnceTheRelayHasIt() async throws {
+        let reader = ScriptedReader([.success(relayState("s1", revision: 11))])
+        let sleeper = RecordingSleeper()
+        let shown = try #require(try await handler(reader, sleeper: sleeper).perform(.pause, on: onScreen, at: Date()))
+        #expect(shown.revision == 11)
+        #expect(!shown.isPlaying, "Pause becomes Play")
+        #expect(shown.track?.title == "Next Song")
+        #expect(shown.track?.artworkID == nil, "an empty artwork id is no artwork")
+        #expect(sleeper.recorded == [0.5])
+        #expect(await reader.timeouts == [RelayCommandHandler.readTimeout], "a short read inside the handler")
+    }
+
+    @Test func aResultNotThereYetIsReadOnceMore() async throws {
+        let reader = ScriptedReader([.success(relayState("s1", revision: 10)), .success(relayState("s1", revision: 12))])
+        let sleeper = RecordingSleeper()
+        let shown = try await handler(reader, sleeper: sleeper).perform(.next, on: onScreen, at: Date())
+        #expect(shown?.revision == 12)
+        #expect(sleeper.recorded == [0.5, 0.6])
+    }
+
+    @Test func stateNoNewerThanTheAckIsNotShown() async throws {
+        let reader = ScriptedReader([.success(relayState("s1", revision: 10))])
+        #expect(try await handler(reader).perform(.next, on: onScreen, at: Date()) == nil, "that state is from before the tap")
+        #expect(await reader.reads == 2, "and no more than two reads")
+    }
+
+    @Test func anotherSessionIsNeverShownHere() async throws {
+        let reader = ScriptedReader([.success(relayState("s2", revision: 20))])
+        #expect(try await handler(reader).perform(.next, on: onScreen, at: Date()) == nil)
+        #expect(await reader.reads == 1)
+    }
+
+    @Test func aFailedReadDoesNotFailTheTap() async throws {
+        let reader = ScriptedReader([.failure(.network("offline"))])
+        #expect(try await handler(reader).perform(.pause, on: onScreen, at: Date()) == nil)
+    }
+
+    @Test func aRefusedTapIsNotFollowedByARead() async {
+        let reader = ScriptedReader([.success(relayState("s1", revision: 11))])
+        await #expect(throws: TransportError.commandRejected(.musicNotRunning)) {
+            _ = try await handler(reader, ack: FixedAck(accepted: false)).perform(.play, on: onScreen, at: Date())
+        }
+        #expect(await reader.reads == 0)
+    }
+
+    @Test func stateOlderThanTheScreenIsNotShown() async throws {
+        var newer = onScreen
+        newer.revision = 30
+        let reader = ScriptedReader([.success(relayState("s1", revision: 20))])
+        #expect(try await handler(reader).perform(.pause, on: newer, at: Date()) == nil)
+    }
+}
