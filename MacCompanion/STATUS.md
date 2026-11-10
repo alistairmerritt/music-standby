@@ -1,6 +1,6 @@
 # Mac companion — status
 
-10 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
+11 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
 SDK), Music.app 1.7.
 
 **Executed** means run on this Mac with output recorded. **Not verified** means written and
@@ -313,6 +313,15 @@ The fixed keep-alive, executed afterwards with `msbctl watch --relay` against `n
 On this macOS, `lsof -i` doesn't list the app's WebSocket: the connection shows only as a
 `CHAN` descriptor. `nettop -p <pid>` shows its traffic, about 28 bytes of pongs every 30 s.
 
+**Changes at the Mac reach a suspended phone by push (11 November).** With the paid Apple
+team and the APNs key in the relay, the phone's app was sent to the Home Screen and left 30 s
+so iOS suspended it. Control Centre was then read while the Mac skipped, paused and skipped
+again (Music at volume 0). Each change arrived as an APNs push 1.4–3 s after the Mac command,
+and Control Centre showed the new track, then Play, then the next track. No Mac code changed:
+the fixes were in the relay's APNs sender (`feature/relay`) and in how the phone decodes a
+push (`feature/ios`, docs/ios/STATUS.md). Not yet tried: a locked phone and StandBy by hand,
+and late catalogue artwork (the "Godspeed" case) arriving by push.
+
 ## For the relay design
 
 - `not_running` arrives within about 0.8 s of `terminate()`, so the relay can end the Now
@@ -333,5 +342,5 @@ On this macOS, `lsof -i` doesn't list the app's WebSocket: the connection shows 
    APNs' own `403 InvalidProviderToken`, so Cloudflare reaches APNs over HTTP/2. The
    `--playback` harness passed 29/29 against the deployment.
 3. Done on 10 November: the iOS side adopted the contract, and a real iPhone drove Music
-   through the deployed relay (above). Changes made at the Mac still reach a locked phone
-   only through a push.
+   through the deployed relay (above). Changes made at the Mac reach a locked phone only
+   through a push, and since 11 November those pushes are live (above).
