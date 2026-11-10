@@ -193,6 +193,26 @@ final class RecordingSleeper: @unchecked Sendable {
         #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Idempotency-Key") == command.id.uuidString }, "the relay acts on it once")
     }
 
+    @Test func aConnectionTheSystemCancelledIsRetriedToo() async throws {
+        let command = RemoteCommand(kind: .pause)
+        let http = FakeHTTP([.network(.cancelled), ackBody(command.id)])
+        #expect(try await client(http).send(command, sessionID: "s1").accepted)
+        #expect(await http.requests.count == 2)
+    }
+
+    @Test func aCancellationOfOursIsNeverRetried() async throws {
+        let http = FakeHTTP([.network(.cancelled), ackBody(UUID())])
+        let (gate, open) = AsyncStream.makeStream(of: Void.self)
+        let task = Task {
+            for await _ in gate { break }  // ends early once the task is cancelled
+            _ = try await client(http).send(RemoteCommand(kind: .pause), sessionID: "s1")
+        }
+        task.cancel()
+        open.finish()
+        _ = await task.result
+        #expect(await http.requests.count == 1)
+    }
+
     @Test func aSecondDropIsReportedNotRetriedAgain() async {
         let http = FakeHTTP([.network(.networkConnectionLost)])
         await #expect(throws: TransportError.self) { _ = try await client(http).send(RemoteCommand(kind: .next), sessionID: "s1") }

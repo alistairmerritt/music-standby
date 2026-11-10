@@ -219,16 +219,26 @@ public struct RelayClient: CommandSender, Sendable {
         return (data, response)
     }
 
-    /// iOS suspends the extension between taps, and an idle connection can die
-    /// meanwhile. Seen on an iPhone: the next request failed in under 40 ms with
-    /// -1005 on the reused connection. One more try opens a fresh one. Only for
-    /// requests the relay can safely see twice: a command carries its
-    /// `Idempotency-Key`, so a repeated Next still skips one track.
+    /// iOS suspends the extension between taps, and an idle connection dies
+    /// meanwhile. Seen on an iPhone: a connection idle for 2.3 s or more failed
+    /// the next request within 11 ms, as -1005 or as -999 with no cancellation
+    /// of ours. One more try opens a fresh one. Only for requests the relay can
+    /// safely see twice: a command carries its `Idempotency-Key`, so a repeated
+    /// Next still skips one track.
     private func sendRetryingDroppedConnection(_ request: URLRequest, maxBytes: Int?) async throws -> (Data, HTTPURLResponse) {
         do {
             return try await http.send(request, maxBytes: maxBytes)
-        } catch let error as URLError where error.code == .networkConnectionLost && Self.canRepeat(request) {
+        } catch let error as URLError where Self.isDroppedConnection(error) && Self.canRepeat(request) {
             return try await http.send(request, maxBytes: maxBytes)
+        }
+    }
+
+    /// A cancellation counts only when nothing on our side cancelled.
+    static func isDroppedConnection(_ error: URLError) -> Bool {
+        switch error.code {
+        case .networkConnectionLost: true
+        case .cancelled: !Task.isCancelled
+        default: false
         }
     }
 
