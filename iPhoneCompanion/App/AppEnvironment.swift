@@ -29,6 +29,11 @@ enum AppEnvironment {
         let registrar: any PushTokenRegistrar
         if let relayConfiguration {
             let credentials = KeychainCredentialStore()
+            // A Mac remembered from the development mock, or from before a
+            // reinstall, has no relay credential behind it: pair again.
+            if case .success(nil) = Result(catching: { try credentials.load() }) {
+                PairingStore(defaults: defaults).pairedMac = nil
+            }
             let http = URLSessionHTTP()
             let device = currentDevice(defaults: defaults)
             transport = RelayTransport(configuration: relayConfiguration, credentials: credentials, http: http, device: { device })

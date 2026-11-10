@@ -13,6 +13,33 @@ You need a Mac with Xcode 27, an iPhone on iOS 27, and a charger that holds the 
 
 Without a relay, Debug builds use a built-in fake Mac. Tap **Continue**, then enter any six digits except `000000`, which simulates a rejected code. "Harbour Lights" appears with artwork and moving progress.
 
+## With the relay
+
+The relay's host comes from the `MSB_RELAY_HOST` build setting, which the repository leaves empty. Pass it on the command line, or set it in Xcode without committing it:
+
+```
+xcodebuild … MSB_RELAY_HOST=<relay host> build
+```
+
+1. On the Mac: `defaults write com.alistairmerritt.MusicStandBy.Mac relayURL https://<relay host>`, then launch the menu-bar app from `feature/macos` (`MacCompanion/scripts/build.sh`).
+2. Play something in Music. The relay only opens a session while Music is playing.
+3. On the Mac, choose **Pair iPhone…** from the menu-bar icon. A six-digit code appears.
+4. On the iPhone, enter the code. The app says it is waiting for your Mac.
+5. On the Mac, click **Allow** in the menu.
+6. The iPhone shows the song. Tap **Show in Now Playing**.
+
+Without APNs, the Lock Screen can't change while the app isn't open. A command tapped there still reaches the Mac; the screen catches up when the app is next opened.
+
+| # | Do this | Expected |
+| --- | --- | --- |
+| R1 | Pair as above | Waiting screen, then the Mac's song |
+| R2 | In the app, tap Pause, Play, Next and Previous | Music on the Mac does the same; the app follows within about a second |
+| R3 | Lock the phone and tap Pause, then Play | Music pauses and resumes. The Lock Screen may not change |
+| R4 | Locked, tap Next, then Previous | Music skips and goes back. The Lock Screen may not change |
+| R5 | In StandBy, tap Pause, Play and Next | As R3 and R4 |
+| R6 | Open the app after R3–R5 | It shows what the Mac is playing |
+| R7 | Check the artwork in the app and on the Lock Screen | The album's own artwork |
+
 ## Tests
 
 With the app open, tap **Show in Now Playing** before starting.

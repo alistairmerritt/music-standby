@@ -1,76 +1,47 @@
-# Relay client contract — what the iOS app expects
+# How the iPhone uses the relay
 
-9 November 2026. For the Mac/relay developer.
+10 November 2026. For the Mac/relay developer and whoever works on the iOS client next.
 
-**Status: draft, awaiting your confirmation.** `Shared/StandByProtocol` v1 fixes the messages but leaves the pairing, token and session endpoints out (`PROTOCOL.md` §9). The iOS client follows `RELAY-DESIGN-8-NOV-2026.md` §4 for those, because nothing else exists. Every path and draft body is in one file, `StandByKit/Sources/StandByKit/Relay/RelayAPI.swift`, so an agreed contract changes that file.
+The contract is [docs/relay/API-v1.md](../relay/API-v1.md), merged into `feature/ios` from PR #2. This file records only how the phone applies it and the choices the contract leaves to the client. All paths and bodies are in `StandByKit/Sources/StandByKit/Relay/`.
 
-**Nothing here has run against a real relay.** It is tested against scripted HTTP responses only.
+## What the phone does
 
-## Decisions needed from you
-
-| # | Question | What the client does today |
+| Step | Call | Made by |
 | --- | --- | --- |
-| 1 | **Shape of `GET /v1/session`.** The proposal says only "current session or null" | Expects `{"session":{"sessionID":"…","playback":<PlaybackMessage>}}` or `{"session":null}`. `204` also means none |
-| 2 | **Pairing error body.** The proposal has `404 {"error":"unknown_or_expired_code"}`; `PROTOCOL.md` makes every error `{"error":{"code":…}}` and defines `pairing_rejected` | Treats any `404`, `pairing_rejected` or unrecognised code from claim as a rejected code. Suggest `pairing_rejected` in the object form |
-| 3 | **Who the phone is.** The proposal's claim sends `deviceName`; the `paired` frame needs a `DeviceIdentity` | Sends both `deviceName` and `device` |
-| 4 | **Is polling acceptable?** The app has no socket | Polls `GET /v1/session` every 5 s while foregrounded, and only then |
-| 5 | **A `401` ends the pairing** | The app deletes its credential and asks to pair again, so don't return `401` for anything recoverable |
+| Pair | `POST /v1/pairing/claim`, then `GET /v1/pairing/claim/{id}` every 2 s with the claim secret until approved, denied or expired | App |
+| Reconcile | `GET /v1/session` on launch and every 5 s while the app is in the foreground, plus once 0.7 s after an in-app command | App |
+| Command | `POST /v1/commands` with the session on screen and `Idempotency-Key`, 1.5 s timeout | Extension, directly; the app for its own buttons |
+| Push tokens | `PUT /v1/tokens/start`, `PUT /v1/tokens/session`, `DELETE /v1/tokens/session/{id}` | App and extension |
+| Artwork | The signed `artworkURL`, or `/v1/artwork/{pairingID}/{artworkID}` with the bearer | Extension and app |
+| Unpair | `DELETE /v1/pairing`, then forgets the credential whatever the answer | App |
 
-## Endpoints
+`phoneToken` lives in the shared Keychain group with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so the extension reads it while the phone is locked and the main app is suspended or force-quit.
 
-All calls send `X-Protocol-Version: 1`. If a response carries that header with another value, the client refuses it. Bodies use `StandByWire` coding. Every call except claim sends `Authorization: Bearer <phoneToken>`. Redirects are never followed.
+## Choices the contract leaves to the client
 
-| Call | Sent by | Body | Success |
-| --- | --- | --- | --- |
-| `POST /v1/pair/claim` | App, no auth | `{"code","deviceName","device":<DeviceIdentity>}` | `200 {"pairingID","phoneToken","mac":<PairedMac>}` |
-| `POST /v1/commands` | **Extension** | `CommandRequest`, plus `Idempotency-Key: <command.id>` | `200 CommandResponse` |
-| `POST /v1/tokens/start` | App | `{"pushToStartToken":"<hex>"}` | Any 2xx |
-| `POST /v1/tokens/session` | Extension | `{"sessionID","pushToken":"<hex>"}` | Any 2xx |
-| `DELETE /v1/tokens/session/{id}` | App | None | Any 2xx |
-| `GET /v1/session` | App | None | See question 1 |
-| `DELETE /v1/pairing` | App | None | Any 2xx. Best effort: the phone forgets the pairing regardless |
-| `GET /v1/artwork/{artworkID}` | App, extension | None, `Accept: image/png, image/jpeg` | `200` image bytes with `Content-Type` |
+- **Only a relay-named session is shown.** With the relay, the app never activates a session until `GET /v1/session` names one, so every command carries an id the relay recognises.
+- **`401` on artwork means no artwork.** Everywhere else `401` ends the pairing. A forged or stale `sig` also answers `401`, and must not unpair the phone.
+- **`artworkID: ""` means no artwork.** The phone's type keeps the field optional, so `""` and an absent field both decode.
+- **"Mac offline" is its own state.** `macConnected: false` keeps the session. The relay ends it after its 60 s grace and the phone follows.
+- **Stop Showing doesn't call `POST /v1/session/end`.** It ends the session on the phone and deletes its push token. `session/end` is sticky for the whole listening session, so after it the person couldn't show the same music again until Music stops or quits. The client has `endSession(sessionID:)`, tested but not wired to anything. **Question for you:** is a non-sticky "hide on this phone" worth adding, or should Stop Showing become the sticky dismissal once pushes work?
+- **Polling is foreground only.** Without APNs a locked phone's Lock Screen doesn't change after a command. The command still reaches the Mac. This is deliberate: no background polling.
 
-Non-2xx bodies are `ErrorResponse`.
+## Checked against the deployed relay
 
-| Response | Client behaviour |
+10 November, from this Mac, with the iOS client code running as a stand-in phone and `msbctl` as a second Mac. Music was paused, so no session existed.
+
+| Check | Result |
 | --- | --- |
-| `401`, or `pairing_revoked` | Pairing over: credential deleted, session ended |
-| `429`, or `rate_limited` | Reported, using `retryAfter` or the `Retry-After` header |
-| `504`, `mac_unreachable`, or no answer in 1.5 s | Command fails: the extension throws |
-| Network failure in the foreground loop | Reconnects, backing off 1 s to 30 s. The session is kept for 60 s |
+| Claim, wait for the Mac, receive a phone token | Pass, 2.3 s |
+| `GET /v1/session` decodes as `SessionState` | Pass |
+| `PUT /v1/tokens/start` | Pass |
+| `PUT /v1/tokens/session` for another session | Refused, `session_mismatch` |
+| Command for another session | Refused before the Mac, `no_session` |
+| `DELETE /v1/tokens/session/{id}` | Pass |
+| After unpair, the token | `401`, read as a revoked pairing |
 
-## How commands behave
-
-- The extension posts directly and needs nothing from the main app, which may be suspended or force-quit.
-- It waits for the `CommandAck`, and **changes nothing on screen**. The visible result must arrive as a push.
-- `accepted: false` makes the handler throw. The relay must answer within the 1.5 s client timeout. The proposal's 1.2 s hold fits; neither number is measured.
-- Commands carry `issuedAt`, and the id is the idempotency key.
-
-## What the extension needs from pushes
-
-The push `attributes` decode as `MacPlaybackAttributes`: `id`, `macName`, `revision`, `isPlaying`, `elapsedTime`, `timestamp`, `track`, `canGoNext`, `canGoPrevious`.
-
-- `id` is your session identifier, fresh per session.
-- `track.artworkID` is optional. **Prefer omitting `track.artworkURL`.** The extension fetches `/v1/artwork/{artworkID}` itself. A URL is honoured only over HTTPS on the relay's own host, port 443.
-- `timestamp` is expected as ISO-8601, unverified until a real push arrives (design §11).
-- Send `end` for `stopped`, `not_running` and `automation_denied`. The app ends the session on those too when it is foregrounded.
+Not covered there because nothing was playing: `attributes`, artwork, and an accepted command. Those need the phone; see [DEVICE-TESTING.md](DEVICE-TESTING.md).
 
 ## Artwork limits
 
-PNG or JPEG only, decided from the bytes. Anything over the limit is treated as no artwork.
-
-| Where | Maximum |
-| --- | --- |
-| The extension, which is what fills the Lock Screen and StandBy | **1 MB and 800 pixels per side** |
-| The foreground app | `ArtworkDescriptor.maximumByteCount` (5 MB) and 4096 pixels per side |
-
-**Please serve artwork at about 600×600.** iOS holds the extension to a hard 6 MB of memory, seen in the system log on an iPhone running iOS 27.2. A 1200-pixel image is about 5.8 MB once decoded. The 800-pixel figure is a judgement from that limit, and real sizes haven't yet been measured on a phone.
-
-## Confirmed on an iPhone
-
-With the mock transport on an iPhone 15 Pro, iOS 27.2, connected by USB. No relay was involved.
-
-- The extension made HTTPS requests from command handlers in 120 to 250 ms, and iOS waited for them.
-- The extension read a Keychain item the app had written, on a free developer team.
-- iOS logs a "network restriction" for the extension. HTTPS to a public host still worked. Its scope is unknown, so a relay on an unusual port or host type should be tried early.
+PNG or JPEG only, decided from the bytes. The extension holds artwork to **1 MB and 800 pixels per side**, because iOS gives it 6 MB of memory. The Mac already uploads 600-pixel JPEGs of about 86 KB, well inside both.
