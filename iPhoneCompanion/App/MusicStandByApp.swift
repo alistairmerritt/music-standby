@@ -12,8 +12,10 @@ struct MusicStandByApp: App {
                 .environment(model)
                 .task { await model.start() }
                 .onChange(of: scenePhase, initial: true) { _, phase in
-                    if phase == .active {
-                        Task { await model.sceneDidBecomeActive() }
+                    switch phase {
+                    case .active: Task { await model.sceneDidBecomeActive() }
+                    case .background: Task { await model.sceneDidEnterBackground() }
+                    default: break
                     }
                 }
         }

@@ -12,6 +12,7 @@ actor FakeTransport: PlaybackTransport {
     private(set) var connectCount = 0
     private(set) var reconnectCount = 0
     private(set) var unpairCount = 0
+    private(set) var suspendCount = 0
     private(set) var sent: [RemoteCommand] = []
 
     func subscribe() -> AsyncStream<TransportEvent> {
@@ -26,6 +27,7 @@ actor FakeTransport: PlaybackTransport {
         hub.send(.connection(.connected(macName: "Studio Mac")))
     }
     func disconnect() { hub.send(.connection(.disconnected)) }
+    func suspend() { suspendCount += 1 }
     func pair(code: PairingCode, progress: @escaping @Sendable (PairingProgress) async -> Void) async -> PairedMac {
         let mac = PairedMac(id: "a", name: "Studio Mac")
         await progress(.waitingForApproval(mac))

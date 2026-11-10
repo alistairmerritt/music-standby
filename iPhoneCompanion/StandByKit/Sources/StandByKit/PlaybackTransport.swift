@@ -97,6 +97,9 @@ public protocol PlaybackTransport: Sendable {
     /// so a Now Playing session survives it.
     func reconnect() async
     func disconnect() async
+    /// Stops talking to the far side without reporting a disconnection, for an
+    /// app leaving the foreground. `connect()` picks up again.
+    func suspend() async
     /// Returns once the pairing is complete. `progress` hears about any wait.
     func pair(code: PairingCode, progress: @escaping @Sendable (PairingProgress) async -> Void) async throws -> PairedMac
     func unpair() async
@@ -106,6 +109,7 @@ public protocol PlaybackTransport: Sendable {
 
 extension PlaybackTransport {
     public var issuesSessionIDs: Bool { false }
+    public func suspend() async {}
 }
 
 /// Delivers events to the current subscriber and remembers enough to bring a

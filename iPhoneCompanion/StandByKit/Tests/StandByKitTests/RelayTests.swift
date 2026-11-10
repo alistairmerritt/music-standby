@@ -183,6 +183,35 @@ final class RecordingSleeper: @unchecked Sendable {
         }
     }
 
+    @Test func aCommandOnADroppedConnectionIsRetriedOnceWithTheSameKey() async throws {
+        let command = RemoteCommand(kind: .pause)
+        let http = FakeHTTP([.network(.networkConnectionLost), ackBody(command.id)])
+        let ack = try await client(http).send(command, sessionID: "s1")
+        #expect(ack.accepted)
+        let requests = await http.requests
+        #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Idempotency-Key") == command.id.uuidString }, "the relay acts on it once")
+    }
+
+    @Test func aSecondDropIsReportedNotRetriedAgain() async {
+        let http = FakeHTTP([.network(.networkConnectionLost)])
+        await #expect(throws: TransportError.self) { _ = try await client(http).send(RemoteCommand(kind: .next), sessionID: "s1") }
+        #expect(await http.requests.count == 2)
+    }
+
+    @Test func aClaimIsNeverSentTwice() async throws {
+        let http = FakeHTTP([.network(.networkConnectionLost), .json(PairingClaimResponse(claimID: "c", claimSecret: "s", expiresAt: .distantFuture, mac: studioMac), status: 202)])
+        let unauthenticated = RelayClient(configuration: relayConfiguration, http: http, token: { nil })
+        await #expect(throws: TransportError.self) { _ = try await unauthenticated.claimPairing(code: try #require(PairingCode("472915")), device: testDevice) }
+        #expect(await http.requests.count == 1, "a code is used up by the first claim the relay sees")
+    }
+
+    @Test func otherFailuresAreNotRetried() async {
+        let http = FakeHTTP([.network(.timedOut)])
+        await #expect(throws: TransportError.macUnreachable) { _ = try await client(http).send(RemoteCommand(kind: .next), sessionID: "s1") }
+        #expect(await http.requests.count == 1)
+    }
+
     @Test func aCommandForAnEndedSessionIsRefusedNotRetried() async {
         let http = FakeHTTP([.failure(.sessionMismatch, status: 409)])
         await #expect(throws: TransportError.commandRejected(.sessionMismatch)) {
@@ -728,6 +757,21 @@ private final class ClientBox: @unchecked Sendable {
         #expect(try bodyOf(sent, as: CommandRequest.self).sessionID == "s1")
     }
 
+    @Test func suspendingStopsReadingWithoutReportingADisconnection() async {
+        let http = FakeHTTP([live])
+        let transport = RelayTransport(configuration: relayConfiguration, credentials: InMemoryCredentialStore(testCredential), http: http, device: { testDevice },
+                                       sleep: { if $0 == 5 { try await Task.sleep(for: .seconds(3600)) } }, jitter: { 0 })
+        let stream = await transport.subscribe()
+        await transport.connect()
+        _ = await collect(stream, count: 5)
+        await transport.suspend()
+        await transport.connect()
+        await eventually("read again on return") { await http.requests.count == 2 }
+        await transport.disconnect()
+        let after = await collect(stream, count: 3)
+        #expect(after == ["connecting", "connected:Studio Mac", "disconnected"], "the suspension itself reports nothing; only the deliberate disconnect does")
+    }
+
     @Test func noSessionMeansNoCommand() async throws {
         let http = FakeHTTP([.json(sessionState(nil))])
         let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1))
@@ -857,5 +901,26 @@ private final class ClientBox: @unchecked Sendable {
     @Test func theMacSendingAnEmptyIDIsNotArtwork() {
         let attributes = MacPlaybackAttributes(mac: studioMac, message: message(track: track(artworkID: "")), sessionID: "s1")
         #expect(attributes.track?.artworkID == nil)
+    }
+}
+
+@MainActor
+@Suite struct BackgroundTests {
+    @Test func timeInTheBackgroundIsNotALostConnection() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.play()
+        // A request fails as the app is suspended, starting the countdown.
+        await h.transport.emit(.connection(.reconnecting))
+        await eventually("grace started") { h.sleeper.pending == 1 }
+        await h.model.sceneDidEnterBackground()
+        #expect(await h.transport.suspendCount == 1)
+        h.clock.advance(120)
+        await h.model.sceneDidBecomeActive()
+        #expect(h.controller.isActive, "the session is reconciled on return, not ended for being away")
+        #expect(h.controller.deactivations == 0)
+        #expect(await h.transport.connectCount >= 1, "reads afresh on return")
     }
 }

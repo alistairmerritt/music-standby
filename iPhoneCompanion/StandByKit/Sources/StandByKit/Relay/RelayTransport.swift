@@ -87,6 +87,13 @@ public actor RelayTransport: PlaybackTransport {
         hub.send(.connection(.disconnected))
     }
 
+    /// A suspended app's requests fail, which would read as a lost connection.
+    /// Stop asking instead, and say nothing: the session is the relay's to end.
+    public func suspend() async {
+        loop?.cancel()
+        loop = nil
+    }
+
     /// Claims the code, then waits for the person at the Mac (API-v1 §4).
     /// Cancelling the task stops waiting; the relay lets the claim expire.
     public func pair(code: PairingCode, progress: @escaping @Sendable (PairingProgress) async -> Void) async throws -> PairedMac {

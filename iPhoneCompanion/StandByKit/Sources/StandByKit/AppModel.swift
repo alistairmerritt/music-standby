@@ -111,6 +111,7 @@ public final class AppModel {
     /// honours a request to become the primary session, and the recovery point
     /// for anything that couldn't happen in the background.
     public func sceneDidBecomeActive() async {
+        if pairedMac != nil { await transport.connect() }
         pushTokens = registrar.current()
         await uploadTokens()
         await processCommandsFromExtension()
@@ -122,6 +123,13 @@ public final class AppModel {
         } else if sessionController.isActive {
             await sessionController.requestPrimary()
         }
+    }
+
+    /// Time in the background is not a lost connection. Stop reading the Mac
+    /// and drop any countdown; the next foreground reads afresh and reconciles.
+    public func sceneDidEnterBackground() async {
+        cancelGrace()
+        await transport.suspend()
     }
 
     public func finishIntro() {

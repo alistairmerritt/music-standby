@@ -200,7 +200,7 @@ public struct RelayClient: CommandSender, Sendable {
         let data: Data
         let response: HTTPURLResponse
         do {
-            (data, response) = try await http.send(request, maxBytes: maxBytes)
+            (data, response) = try await sendRetryingDroppedConnection(request, maxBytes: maxBytes)
         } catch let error as TransportError {
             throw error
         } catch is CancellationError {
@@ -217,6 +217,26 @@ public struct RelayClient: CommandSender, Sendable {
             throw Self.error(for: response, body: data)
         }
         return (data, response)
+    }
+
+    /// iOS suspends the extension between taps, and an idle connection can die
+    /// meanwhile. Seen on an iPhone: the next request failed in under 40 ms with
+    /// -1005 on the reused connection. One more try opens a fresh one. Only for
+    /// requests the relay can safely see twice: a command carries its
+    /// `Idempotency-Key`, so a repeated Next still skips one track.
+    private func sendRetryingDroppedConnection(_ request: URLRequest, maxBytes: Int?) async throws -> (Data, HTTPURLResponse) {
+        do {
+            return try await http.send(request, maxBytes: maxBytes)
+        } catch let error as URLError where error.code == .networkConnectionLost && Self.canRepeat(request) {
+            return try await http.send(request, maxBytes: maxBytes)
+        }
+    }
+
+    static func canRepeat(_ request: URLRequest) -> Bool {
+        switch request.httpMethod ?? "GET" {
+        case "GET", "HEAD", "PUT", "DELETE": true
+        default: request.value(forHTTPHeaderField: "Idempotency-Key") != nil
+        }
     }
 
     private static func error(for response: HTTPURLResponse, body: Data) -> TransportError {
