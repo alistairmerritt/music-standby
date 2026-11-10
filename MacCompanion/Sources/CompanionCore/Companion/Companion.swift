@@ -63,25 +63,42 @@ public final class Companion {
         var failedAt: Date?
     }
 
+    @ObservationIgnored private let artworkLookup: (any CatalogArtworkLookup)?
+    @ObservationIgnored private var catalogArtwork: [String: CatalogEntry] = [:]
+    static let catalogRetryAfterFailure: TimeInterval = 60
+    static let catalogRetryAfterNoMatch: TimeInterval = 1800
+
+    private enum CatalogEntry {
+        case pending
+        case found(ProcessedArtwork)
+        case missing(retryAt: Date)
+    }
+
+    /// `artworkLookup` supplies art for tracks Music has none for; nil means
+    /// Music's own artwork only.
     public init(controller: MusicController, transport: any CompanionTransport, store: CompanionStore,
-                device: DeviceIdentity, now: @escaping @Sendable () -> Date = { Date() },
+                device: DeviceIdentity, artworkLookup: (any CatalogArtworkLookup)? = nil,
+                now: @escaping @Sendable () -> Date = { Date() },
                 isMusicLaunching: @escaping () -> Bool = MusicController.isMusicLaunching) {
         self.controller = controller
         self.monitor = MusicMonitor(controller: controller, isLaunching: isMusicLaunching)
         self.transport = transport
         self.store = store
         self.device = device
+        self.artworkLookup = artworkLookup
         self.now = now
         publisher = PlaybackPublisher(revisions: RevisionCounter(lastPersisted: store.lastRevision, now: now()),
                                       resuming: store.listeningSession(now: now()))
     }
 
-    /// The app's companion: real Music.app, mock relay.
+    /// The app's companion: real Music.app, mock relay unless given one, and
+    /// catalogue artwork unless `catalogArtwork` is set to false in `defaults`.
     public static func live(transport: any CompanionTransport = MockRelayTransport(), defaults: UserDefaults = .standard) -> Companion {
         let store = CompanionStore(defaults: defaults)
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         let device = store.deviceIdentity(name: Host.current().localizedName ?? "Mac", appVersion: version)
-        return Companion(controller: MusicController(), transport: transport, store: store, device: device)
+        let lookup: (any CatalogArtworkLookup)? = (defaults.object(forKey: "catalogArtwork") as? Bool) == false ? nil : ITunesCatalogArtwork()
+        return Companion(controller: MusicController(), transport: transport, store: store, device: device, artworkLookup: lookup)
     }
 
     // MARK: Lifecycle
@@ -298,53 +315,123 @@ public final class Companion {
         }
     }
 
+    /// Music's own artwork; failing that, when Music has none at all, the
+    /// catalogue's. A failed read from Music is retried, not replaced.
     private func artworkID(for snapshot: MusicSnapshot) async -> String? {
         guard let track = snapshot.track else {
             artwork = nil
             return nil
         }
+        let processed: ProcessedArtwork?
+        switch await musicArtwork(for: track) {
+        case .found(let art): processed = art
+        case .none: processed = catalogArtwork(for: track)
+        case .unavailable: processed = nil
+        }
+        artwork = processed
+        return processed?.artworkID
+    }
+
+    private enum MusicArtwork {
+        case found(ProcessedArtwork)
+        /// Music reports no artwork for the track.
+        case none
+        /// Music has artwork that couldn't be read or decoded this time.
+        case unavailable
+    }
+
+    private func musicArtwork(for track: MusicTrack) async -> MusicArtwork {
         let key = track.trackID
         if let entry = artworkByTrack[key], entry.artworkCount == track.artworkCount,
            entry.failedAt.map({ now().timeIntervalSince($0) < 30 }) ?? true {
-            artwork = entry.artwork
-            return entry.artwork?.artworkID
+            if let art = entry.artwork { return .found(art) }
+            return entry.failedAt == nil ? .none : .unavailable
         }
         guard track.artworkCount > 0 else {
             artworkByTrack[key] = ArtworkEntry(artworkCount: 0)
-            artwork = nil
-            return nil
+            return .none
         }
         let started = now()
         let result = await controller.artwork()
         guard case .image(let bytes, let pid, let type) = result else {
             if case .noArtwork = result {
                 artworkByTrack[key] = ArtworkEntry(artworkCount: track.artworkCount)
-            } else {
-                artworkByTrack[key] = ArtworkEntry(artworkCount: track.artworkCount, failedAt: now())
-                record("artwork unavailable: \(result)")
+                return .none
             }
-            artwork = nil
-            return nil
+            artworkByTrack[key] = ArtworkEntry(artworkCount: track.artworkCount, failedAt: now())
+            record("artwork unavailable: \(result)")
+            return .unavailable
         }
         guard pid == track.persistentID else {
             record("artwork belonged to another track; will retry")
-            artwork = nil
-            return nil
+            return .unavailable
         }
         let processed = await Task.detached(priority: .utility) { ArtworkProcessor.process(bytes) }.value
         if artworkByTrack.count > 64 { artworkByTrack.removeAll() }
         if artworkByID.count > 64 { artworkByID.removeAll() }
         artworkByTrack[key] = ArtworkEntry(artworkCount: track.artworkCount, artwork: processed,
                                            failedAt: processed == nil ? now() : nil)
-        if let processed {
-            artworkByID[processed.artworkID] = processed
-            let ms = Int(now().timeIntervalSince(started) * 1000)
-            record("artwork \(processed.artworkID.prefix(12))… \(bytes.count) bytes '\(type)' \(processed.sourceFormat) → \(processed.descriptor.byteCount) byte JPEG, \(ms) ms")
-        } else {
+        guard let processed else {
             record("artwork bytes could not be decoded (\(bytes.count) bytes, '\(type)')")
+            return .unavailable
         }
-        artwork = processed
-        return processed?.artworkID
+        artworkByID[processed.artworkID] = processed
+        let ms = Int(now().timeIntervalSince(started) * 1000)
+        record("artwork \(processed.artworkID.prefix(12))… \(bytes.count) bytes '\(type)' \(processed.sourceFormat) → \(processed.descriptor.byteCount) byte JPEG, \(ms) ms")
+        return .found(processed)
+    }
+
+    /// The catalogue's art for a track Music has none for. Looked up once per
+    /// track, off the serial chain, so the state isn't held up waiting for it;
+    /// when it arrives a fresh read follows, and that read carries it.
+    private func catalogArtwork(for track: MusicTrack) -> ProcessedArtwork? {
+        guard let artworkLookup, !track.title.isEmpty, !track.artist.isEmpty else { return nil }
+        let key = track.trackID
+        switch catalogArtwork[key] {
+        case .found(let art):
+            artworkByID[art.artworkID] = art   // may have been trimmed since
+            return art
+        case .pending:
+            return nil
+        case .missing(let retryAt) where now() < retryAt:
+            return nil
+        case .missing, nil:
+            break
+        }
+        if catalogArtwork.count > 128 { catalogArtwork = catalogArtwork.filter { if case .pending = $0.value { true } else { false } } }
+        catalogArtwork[key] = .pending
+        let query = CatalogQuery(title: track.title, artist: track.artist, album: track.album, duration: track.duration)
+        Task { [weak self] in
+            let outcome: Result<Data?, any Error>
+            do { outcome = .success(try await artworkLookup.artwork(for: query)) } catch { outcome = .failure(error) }
+            var processed: ProcessedArtwork?
+            if case .success(let bytes?) = outcome {
+                processed = await Task.detached(priority: .utility) { ArtworkProcessor.process(bytes) }.value
+            }
+            self?.finishCatalogLookup(key: key, title: track.title, outcome: outcome, processed: processed)
+        }
+        return nil
+    }
+
+    private func finishCatalogLookup(key: String, title: String, outcome: Result<Data?, any Error>, processed: ProcessedArtwork?) {
+        switch outcome {
+        case .failure(let error):
+            catalogArtwork[key] = .missing(retryAt: now().addingTimeInterval(Self.catalogRetryAfterFailure))
+            record("catalogue artwork lookup failed for \(title): \(error)")
+        case .success(nil):
+            catalogArtwork[key] = .missing(retryAt: now().addingTimeInterval(Self.catalogRetryAfterNoMatch))
+            record("no catalogue artwork matches \(title)")
+        case .success(.some(let bytes)):
+            guard let processed else {
+                catalogArtwork[key] = .missing(retryAt: now().addingTimeInterval(Self.catalogRetryAfterNoMatch))
+                record("catalogue artwork for \(title) could not be decoded (\(bytes.count) bytes)")
+                return
+            }
+            catalogArtwork[key] = .found(processed)
+            artworkByID[processed.artworkID] = processed
+            record("catalogue artwork \(processed.artworkID.prefix(12))… for \(title): \(bytes.count) bytes → \(processed.descriptor.byteCount) byte JPEG")
+            if snapshot?.track?.trackID == key { monitor.requestRead(.poll) }
+        }
     }
 
     private func serveArtwork(_ id: String) async {

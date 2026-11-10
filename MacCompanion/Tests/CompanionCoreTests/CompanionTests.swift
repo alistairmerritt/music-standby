@@ -15,13 +15,14 @@ import StandByProtocol
 
     private static let device = DeviceIdentity(id: "test-mac", name: "Test Mac", kind: .mac, appVersion: "test")
 
-    private func rig(state: String = "playing", defaults: UserDefaults? = nil, now: @escaping @Sendable () -> Date = { Date() }) async -> Rig {
-        let music = FakeMusic(state: state)
+    private func rig(state: String = "playing", defaults: UserDefaults? = nil, now: @escaping @Sendable () -> Date = { Date() },
+                     tracks: [FakeMusic.Track] = FakeMusic.standardTracks, artworkLookup: (any CatalogArtworkLookup)? = nil) async -> Rig {
+        let music = FakeMusic(tracks: tracks, state: state)
         let relay = MockRelayTransport()
         let defaults = defaults ?? UserDefaults(suiteName: "CompanionTests-\(UUID().uuidString)")!
         let companion = Companion(controller: MusicController(runner: music, isRunning: music.processCheck),
-                                  transport: relay, store: CompanionStore(defaults: defaults), device: Self.device, now: now,
-                                  isMusicLaunching: { false })
+                                  transport: relay, store: CompanionStore(defaults: defaults), device: Self.device,
+                                  artworkLookup: artworkLookup, now: now, isMusicLaunching: { false })
         companion.settleDelay = .zero
         for state in PlaybackState.allCases { companion.monitor.pollIntervals[state] = .seconds(3600) }
         companion.start()
@@ -159,6 +160,64 @@ import StandByProtocol
         #expect(descriptor.width == 600)
         #expect(await r.relay.sent.contains(.artwork(descriptor)))
         #expect(r.companion.artwork?.artworkID == expectedID)
+    }
+
+    // MARK: Catalogue artwork, for tracks Music has none for
+
+    private static let bareTrack = FakeMusic.Track(title: "Idontknow", artist: "Jamie xx", album: "Idontknow",
+                                                   duration: 240.5, pid: "542CEB17C137B3A5", artwork: nil)
+
+    @Test func catalogueArtworkFollowsInALaterStateAndIsServed() async throws {
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue)
+        let first = try #require(await states(r.relay).first)
+        #expect(first.track?.artworkID == nil, "the title isn't held up for the lookup")
+        await eventually { await states(r.relay).last?.track?.artworkID != nil }
+        let later = try #require(await states(r.relay).last)
+        let expectedID = ArtworkID.make(sourceBytes: FakeMusic.png(side: 400))
+        #expect(later.track?.artworkID == expectedID)
+        #expect(later.revision > first.revision)
+        #expect(await catalogue.queries == [CatalogQuery(title: "Idontknow", artist: "Jamie xx", album: "Idontknow", duration: 240.5)])
+        await eventually { await r.relay.uploads[expectedID] != nil }
+        #expect(await r.relay.uploads[expectedID]?.width == 400)
+    }
+
+    @Test func catalogueIsAskedOncePerTrack() async throws {
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue)
+        await eventually { await states(r.relay).last?.track?.artworkID != nil }
+        r.music.position = 120
+        r.companion.refresh()
+        await eventually { await states(r.relay).last.map { abs($0.elapsedTime - 120) < 1 } ?? false }
+        #expect(await states(r.relay).last?.track?.artworkID != nil)
+        #expect(await catalogue.queries.count == 1)
+    }
+
+    @Test func musicsOwnArtworkMeansNoLookup() async throws {
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let r = await rig(artworkLookup: catalogue)
+        let state = try #require(await states(r.relay).last)
+        #expect(state.track?.artworkID == ArtworkID.make(sourceBytes: r.music.current.artwork!))
+        await r.companion.settle()
+        #expect(await catalogue.queries.isEmpty)
+    }
+
+    @Test func noCatalogueMatchLeavesTheTrackWithoutArtwork() async throws {
+        let catalogue = FakeCatalogue(.noMatch)
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue)
+        await eventually { r.companion.events.contains { $0.text.hasPrefix("no catalogue artwork matches") } }
+        await r.companion.settle()
+        #expect(await states(r.relay).allSatisfy { $0.track?.artworkID == nil })
+    }
+
+    @Test func aFailedLookupIsNotRetriedOnEveryRead() async throws {
+        let catalogue = FakeCatalogue(.failure)
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue)
+        await eventually { r.companion.events.contains { $0.text.hasPrefix("catalogue artwork lookup failed") } }
+        r.music.position = 60
+        r.companion.refresh()
+        await eventually { await states(r.relay).last.map { abs($0.elapsedTime - 60) < 1 } ?? false }
+        #expect(await catalogue.queries.count == 1)
     }
 
     @Test func unknownArtworkRequestGetsAnError() async {

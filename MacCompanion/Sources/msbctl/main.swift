@@ -15,6 +15,7 @@
 //                                  token out of the Keychain; --pair prints a pairing code;
 //                                  stdin also takes code, approve, deny and unpair;
 //                                  --auto-approve allows every pairing (scripted tests only)
+//   msbctl watch … --no-catalog    Music's own artwork only, no catalogue lookup
 //
 // None of these launch Music: every read is guarded by a process check first, and
 // raw events are addressed to Music's process id. `compare` also runs the
@@ -224,7 +225,8 @@ case "watch":
             transport = mock
         }
 
-        let companion = Companion(controller: MusicController(), transport: transport, store: store, device: device)
+        let lookup: (any CatalogArtworkLookup)? = arguments.contains("--no-catalog") ? nil : ITunesCatalogArtwork()
+        let companion = Companion(controller: MusicController(), transport: transport, store: store, device: device, artworkLookup: lookup)
         companion.onEvent = { print("\(stamp($0.date)) • \($0.text)") }
         companion.autoApprovePairing = arguments.contains("--auto-approve")
         if let account {
@@ -308,7 +310,7 @@ default:
            msbctl artwork [--out DIR]
            msbctl compare [ROUNDS]
            msbctl control play|pause|playpause|next|previous
-           msbctl watch [SECONDS] [--relay URL [--credentials FILE] [--pair] [--auto-approve]]
+           msbctl watch [SECONDS] [--no-catalog] [--relay URL [--credentials FILE] [--pair] [--auto-approve]]
     """)
     exit(arguments.isEmpty ? 0 : 2)
 }

@@ -11,7 +11,7 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 74 tests in 11 suites pass (`scripts/test.sh`, 10 November) |
+| Unit tests | 92 tests in 12 suites pass (`scripts/test.sh`, 10 November) |
 | Shared protocol | 56 tests in 10 suites pass (`scripts/test.sh`, 10 November); builds for iOS with `xcodebuild` |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
@@ -207,9 +207,9 @@ again only when that process has gone.
 - **Main-thread cost in daily use.** Measured per read, not over hours.
 - **Local files, radio, podcasts, AirPlay, tracks with several artworks.** The raw-event
   compare ran on a "shared track"; the afternoon's AppleScript checks were on "URL track".
-- **The keep-alive across a real network drop.** The fix for the 16:54 crash (below) is
-  unit-tested for repeated, late and missing pongs, and the app pinged through the deployed
-  relay for the whole phone run. No connection was dropped on the real network.
+- **The keep-alive across a real network drop.** The fix for the 16:54 crash (below) held
+  against a local relay that was killed, left half-alive and frozen, but this Mac's own network
+  was never turned off or slept.
 - **The pairing controls clicked in the running app.** Rendered offscreen in all four states
   against the live relay; the approval itself was given through `msbctl`.
 
@@ -255,9 +255,9 @@ Control Centre player while a script on the Mac recorded Music's state.
 | Play | Played on (paused at 16 s, 29 s when the script paused it) | Revision after 1.2 s; the button became Pause |
 
 Every command the phone sent got `200` from the relay. Previous restarted the current track
-instead of going back to the one before, although the app sends `previous track` (`Prev`),
-not `back track`. Not yet looked into: whether Music always does this a few seconds into a
-track, or only in this queue (an autoplay queue after Next).
+instead of going back to the one before. That is Music's own `previous track`: sent by
+`osascript` 6 s into a track, it restarted it, and sent again at 0 s it went to the track
+before. The app does what Music's Back button does.
 
 Two things came out of this:
 - **The app crashed at 16:54** in `RelayTransport.keepAlive`: URLSession called a pong handler
@@ -268,6 +268,47 @@ Two things came out of this:
 - **`build.sh` signs with the Apple Development identity** when there is one. With an ad-hoc
   signature each rebuild was a new app to macOS, which blocked the app at launch on a
   Keychain prompt for its relay credential.
+
+**Missing artwork is mostly Music's.** After a skip, `count of artworks of current track` was
+checked every 0.1 s for 4 s, paused and playing, on six tracks from an autoplay queue
+(`URL track`, not in the library, no current playlist). Three read 0 throughout, two read 1
+only in the first 0.1 s (likely the previous track's value) and then 0, and one went from 0
+to 1 within 0.1 s. One of them stayed at 0 for 25 s more. In an `msbctl` run, four more
+skipped tracks got no artwork step at all. With no artwork in Music, the companion sends the
+track without an `artworkID` and the phone shows none (seen on the phone as
+`Setting nowPlayingInfo artwork (id: (null))`). The two tracks in an `msbctl` run that had
+artwork were read, converted and announced within 100 ms of the skip. Where Music's count
+arrives late, the companion sends the artwork in a later state frame, which a locked phone
+only gets through a push.
+
+**Catalogue artwork since then.** When Music reports no artwork, the companion now asks
+Apple's public catalogue (`ITunesCatalogArtwork`, the iTunes Search API) once per track, off
+the serial chain, and sends the art in the next state frame. It only takes a result with the
+same title and artist, and the same album or a length within 3 s. Executed:
+- `msbctl watch` over five skips: the two tracks Music had no artwork for got catalogue art
+  0.7 and 0.9 s after the skip; "You Ain't the Problem" matched the album *KIWANUKA*, not
+  the remix or the radio edit. The other four used Music's own art and made no lookup.
+- On the phone, through the deployed relay: Music reported 0 artworks for "C-Side", and the
+  phone showed and downloaded (`200`) its catalogue art.
+- Opt out with `defaults write com.alistairmerritt.MusicStandBy.Mac catalogArtwork -bool false`.
+
+**The phone can ask for artwork before the relay has it.** After a Next on the phone, two
+artwork downloads started together: one got `404` and the other, 100 ms later, `200`. The
+relay asks the Mac for new artwork only when the state naming it arrives, and answered
+`404` at once until the Mac's upload landed. Fixed in the relay (`feature/relay`): such a GET
+now waits up to 3 s for the upload. Deployed as version `cb80f918`; afterwards, three Nexts
+from the phone gave two tracks whose two downloads each got `200`. The third, "Godspeed",
+showed no artwork: the phone read the state before its catalogue art arrived, and the
+follow-up state needs a push to reach it.
+
+The fixed keep-alive, executed afterwards with `msbctl watch --relay` against `npm run dev`:
+
+| Relay | Result |
+| --- | --- |
+| Killed with `kill -9` | Reconnecting at once, then retries with backoff up to 30 s. No crash |
+| Left as an orphaned `workerd` that accepts connections but never answers | Each attempt timed out after 15 s and was retried |
+| Restarted | Welcomed again within 0.1 s of the next attempt |
+| Frozen with `SIGSTOP`, so the socket stays open and pongs stop | Dropped 10.5 s after the next ping (connected 20:03:45.5, dropped 20:04:26.0); reconnected 1 s after `SIGCONT`. The old code waited on the frozen socket indefinitely |
 
 On this macOS, `lsof -i` doesn't list the app's WebSocket: the connection shows only as a
 `CHAN` descriptor. `nettop -p <pid>` shows its traffic, about 28 bytes of pongs every 30 s.

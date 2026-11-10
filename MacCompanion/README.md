@@ -10,7 +10,7 @@ What is verified, and how, is in **[STATUS.md](STATUS.md)**.
 
 | Path | What |
 | --- | --- |
-| `Sources/CompanionCore/Music/` | `MusicController` (an actor on its own queue), `RawEventRunner` (raw Apple Events by PID), `MusicProcess` (finding Music without events), `MusicMonitor` (notifications, lifecycle, poll), `MusicScripts` (the AppleScript reference), `ArtworkProcessor` |
+| `Sources/CompanionCore/Music/` | `MusicController` (an actor on its own queue), `RawEventRunner` (raw Apple Events by PID), `MusicProcess` (finding Music without events), `MusicMonitor` (notifications, lifecycle, poll), `MusicScripts` (the AppleScript reference), `ArtworkProcessor`, `CatalogArtwork` (art Music doesn't have) |
 | `Sources/CompanionCore/Companion/` | `Companion` (the engine), `PlaybackPublisher` (snapshots → `PlaybackMessage`), `CompanionStore` |
 | `Sources/CompanionCore/Transport/` | `CompanionTransport` and `MockRelayTransport` |
 | `Sources/MusicStandBy/` | The menu-bar app: `MenuBarExtra`, menu content, Launch at Login |
@@ -31,14 +31,29 @@ scripts/build.sh
 ```
 
 `build.sh` compiles with `swiftc` and assembles `build/Music StandBy.app`, signed with your
-Apple Development identity (ad-hoc if there is none, or with `MSB_SIGN_IDENTITY=-`), plus `.build/swiftc/msbctl`. Without a working Xcode it falls back to the Command Line
-Tools with a workaround for their broken module map (see `scripts/toolchain.sh`).
+Apple Development identity (ad-hoc if there is none, or with `MSB_SIGN_IDENTITY=-`), plus
+`.build/swiftc/msbctl`. Without a working Xcode it falls back to the Command Line Tools with
+a workaround for their broken module map (see `scripts/toolchain.sh`).
 SwiftPM alone can't make an `.app` with an `Info.plist`, which is why the script exists.
 An Xcode app project is still to do.
 
 With a development identity, Automation and Keychain approvals survive rebuilds. An ad-hoc
 signature changes with every build, so macOS asks for both again.
 Launch at Login needs the app in `/Applications`.
+
+## Artwork
+
+Music's own artwork comes first. Music often has none for streamed songs that aren't in the
+library, so for those the companion looks the song up once in Apple's public catalogue (the
+iTunes Search API, `CatalogArtwork.swift`), sending the artist, the title and the Mac's
+storefront. It uses a result only when the title and artist match and the album or the
+length (within 3 s) does too. To use Music's artwork only:
+
+```bash
+defaults write com.alistairmerritt.MusicStandBy.Mac catalogArtwork -bool false
+```
+
+`msbctl watch --no-catalog` does the same for a run.
 
 ## Checking against the real Music.app
 
