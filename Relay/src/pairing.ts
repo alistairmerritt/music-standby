@@ -75,14 +75,24 @@ interface RecordedPush {
 
 const ARTWORK_MAX_BYTES = 1024 * 1024;
 const ARTWORK_KEEP = 64;
+/**
+ * A GET for artwork the Mac was asked for this recently waits for the upload
+ * instead of answering 404 at once. The phone learns an artwork id from the
+ * same state that makes the relay ask, so it can ask first: seen on an
+ * iPhone, one download got 404 and another 100 ms later got the image.
+ */
+const ARTWORK_PENDING_MS = 10_000;
+const ARTWORK_UPLOAD_WAIT_MS = 3_000;
 const ACKS_KEEP = 50;
 const PUSHES_KEEP = 100;
 
 export class Pairing extends DurableObject<Env> {
   /** Commands waiting for the Mac's ack, by lowercased command id. */
   private waiters = new Map<string, { promise: Promise<CommandAck>; resolve: (ack: CommandAck) => void }>();
-  /** Artwork ids already asked for since this instance woke. */
-  private requested = new Set<string>();
+  /** Artwork ids asked for since this instance woke, with when. */
+  private requested = new Map<string, number>();
+  /** Artwork GETs waiting for the Mac's upload, by artwork id. */
+  private artworkWaiters = new Map<string, Set<() => void>>();
 
   private get ackTimeout(): number {
     return Number(this.env.ACK_TIMEOUT_MS ?? 1200);
@@ -306,8 +316,14 @@ export class Pairing extends DurableObject<Env> {
         return;
       case "pair-decision":
         return this.decide(String(frame.claimID), frame.approved === true);
-      case "artwork":
       case "error":
+        // The Mac can't supply artwork it was asked for: stop holding its GETs.
+        if (frame.error?.code === "artwork_unavailable" && typeof frame.error.message === "string") {
+          this.requested.delete(frame.error.message);
+          this.releaseArtworkWaiters(frame.error.message);
+        }
+        return;
+      case "artwork":
         return;
       default:
         // Unknown frame types are ignored (PROTOCOL.md §1).
@@ -345,7 +361,7 @@ export class Pairing extends DurableObject<Env> {
 
     const art = message.track?.artworkID;
     if (art && ARTWORK_ID.test(art) && !this.requested.has(art) && !(await this.ctx.storage.get(`art:${art}`))) {
-      this.requested.add(art);
+      this.requested.set(art, Date.now());
       this.send(ws, { type: "artwork-request", artworkID: art });
     }
 
@@ -626,7 +642,37 @@ export class Pairing extends DurableObject<Env> {
     index.push(artworkID);
     while (index.length > ARTWORK_KEEP) await this.ctx.storage.delete(`art:${index.shift()!}`);
     await this.ctx.storage.put("artIndex", index);
+    this.releaseArtworkWaiters(artworkID);
     return json(201, { artworkID, contentType, byteCount: data.byteLength });
+  }
+
+  /** True while the Mac has been asked for this artwork and could still upload it. */
+  private artworkUploadPending(artworkID: string): boolean {
+    const asked = this.requested.get(artworkID);
+    return asked !== undefined && Date.now() - asked < ARTWORK_PENDING_MS && this.macSocket() !== undefined;
+  }
+
+  /** Resolves when the upload lands, the Mac says it can't, or `ms` passes. */
+  private waitForArtwork(artworkID: string, ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const waiters = this.artworkWaiters.get(artworkID) ?? new Set<() => void>();
+      this.artworkWaiters.set(artworkID, waiters);
+      const finish = () => {
+        clearTimeout(timer);
+        waiters.delete(finish);
+        if (waiters.size === 0 && this.artworkWaiters.get(artworkID) === waiters) this.artworkWaiters.delete(artworkID);
+        resolve();
+      };
+      const timer = setTimeout(finish, ms);
+      waiters.add(finish);
+    });
+  }
+
+  private releaseArtworkWaiters(artworkID: string): void {
+    const waiters = this.artworkWaiters.get(artworkID);
+    if (!waiters) return;
+    this.artworkWaiters.delete(artworkID);
+    for (const finish of [...waiters]) finish();
   }
 
   private async getArtwork(request: Request, url: URL, record: PairingRecord, artworkID: string): Promise<Response> {
@@ -636,7 +682,11 @@ export class Pairing extends DurableObject<Env> {
       allowed = !!token && parseToken(token)?.kind === "phone" && sameHash(await sha256Hex(token), record.phoneTokenHash);
     }
     if (!allowed) throw new HttpError(401, "unauthorized");
-    const art = await this.ctx.storage.get<StoredArtwork>(`art:${artworkID}`);
+    let art = await this.ctx.storage.get<StoredArtwork>(`art:${artworkID}`);
+    if (!art && this.artworkUploadPending(artworkID)) {
+      await this.waitForArtwork(artworkID, ARTWORK_UPLOAD_WAIT_MS);
+      art = await this.ctx.storage.get<StoredArtwork>(`art:${artworkID}`);
+    }
     if (!art) throw new HttpError(404, "not_found");
     return new Response(art.data, {
       headers: {

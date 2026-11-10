@@ -205,6 +205,11 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   without a header. The same path also accepts `Authorization: Bearer <phoneToken>` with no
   `sig`. Responses are `Cache-Control: private, max-age=31536000, immutable`. The `sig`
   changes when the pairing does, so old URLs die with it.
+- **Artwork not uploaded yet:** the phone learns an id from the same state that makes the
+  relay ask the Mac for it, so it can ask first. If the relay sent `artwork-request` for the
+  id in the last 10 s and the Mac is connected, the GET waits up to 3 s for the upload,
+  answering as soon as it lands, or `404` as soon as the Mac answers `artwork_unavailable`.
+  Otherwise an unknown id is `404 not_found` at once.
 - **Tracks without artwork:** `attributes.track.artworkID` is `""` and there is no
   `artworkURL`. The iOS type declares `artworkID` non-optional, and a push the system can't
   decode is silently lost.

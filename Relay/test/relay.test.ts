@@ -482,6 +482,58 @@ describe("artwork", () => {
     expect((await call("GET", `/v1/artwork/${pairingID}/${"c".repeat(64)}`, { token: phoneToken })).status).toBe(404);
   });
 
+  describe("a GET that arrives before the Mac's upload", () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    async function askedFor(artworkID: string) {
+      const setup = await pairedSetup();
+      setup.mac.send({ type: "state", message: playback({ track: { id: "pid:P", title: "T", artist: "A", album: "B", duration: 1, artworkID } }) });
+      expect((await setup.mac.next("artwork-request")).artworkID).toBe(artworkID);
+      return setup;
+    }
+
+    it("waits for the upload and serves it", async () => {
+      const pending = "d".repeat(64);
+      const { macToken, phoneToken, pairingID } = await askedFor(pending);
+      const started = Date.now();
+      const get = call("GET", `/v1/artwork/${pairingID}/${pending}`, { token: phoneToken });
+      await sleep(300);
+      expect((await call("PUT", `/v1/artwork/${pending}`, { token: macToken, raw: jpeg, headers: { "Content-Type": "image/jpeg" } })).status).toBe(201);
+      const response = await get;
+      expect(response.status).toBe(200);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(jpeg);
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
+
+    it("answers 404 as soon as the Mac says it has no such artwork", async () => {
+      const pending = "e".repeat(64);
+      const { mac, phoneToken, pairingID } = await askedFor(pending);
+      const started = Date.now();
+      const get = call("GET", `/v1/artwork/${pairingID}/${pending}`, { token: phoneToken });
+      await sleep(100);
+      mac.send({ type: "error", error: { code: "artwork_unavailable", message: pending } });
+      expect((await get).status).toBe(404);
+      expect(Date.now() - started).toBeLessThan(1500);
+    });
+
+    it("does not wait for artwork the Mac was never asked for", async () => {
+      const { phoneToken, pairingID } = await pairedSetup();
+      const started = Date.now();
+      expect((await call("GET", `/v1/artwork/${pairingID}/${"f".repeat(64)}`, { token: phoneToken })).status).toBe(404);
+      expect(Date.now() - started).toBeLessThan(500);
+    });
+
+    it("gives up after 3 s", async () => {
+      const pending = "9".repeat(64);
+      const { phoneToken, pairingID } = await askedFor(pending);
+      const started = Date.now();
+      expect((await call("GET", `/v1/artwork/${pairingID}/${pending}`, { token: phoneToken })).status).toBe(404);
+      const waited = Date.now() - started;
+      expect(waited).toBeGreaterThanOrEqual(2900);
+      expect(waited).toBeLessThan(4500);
+    }, 10_000);
+  });
+
   it("refuses uploads that are too large or not what they claim", async () => {
     const { macToken, phoneToken } = await pairedSetup();
     const big = new Uint8Array(1024 * 1024 + 1);

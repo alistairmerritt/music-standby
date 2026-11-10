@@ -98,6 +98,11 @@ On 10 November it passed 19/19 read-only, then 29/29 with `--playback`: Next, Pa
 from the simulated iPhone changed the real Music.app through Cloudflare, acknowledged in
 62–156 ms round trip, and the artwork came through its signed URL.
 
+Later on 10 November the artwork wait (a GET for artwork the Mac was just asked for waits up to
+3 s for the upload instead of answering `404`) was deployed as version `cb80f918`, after
+`npm test` (48 tests) and the local harness with `--playback` (31/31) passed. A real iPhone
+then downloaded artwork for two new tracks with no `404`.
+
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
 ```bash
