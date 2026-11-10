@@ -18,7 +18,7 @@ Both appear in Diagnostics. `RelayPushTokenRegistrar` sends them to the relay on
 ## Setup
 
 1. Use a paid Apple Developer team.
-2. Register `com.alistairmerritt.MusicStandBy` with the Push Notifications capability, and the App Group `group.com.alistairmerritt.MusicStandBy` on both App IDs.
+2. Register `com.alistairmerritt.MusicStandBy` with the Push Notifications capability, and the App Group `group.com.alistairmerritt.MusicStandBy` on both App IDs. `xcodebuild -allowProvisioningUpdates` adds push by itself; the App Group has to be registered on the developer site or in Xcode.
 3. Create an APNs auth key (`.p8`) and keep it on the server only.
 4. `Signing/App.entitlements` sets `aps-environment` to `development`. Xcode switches this for distribution builds.
 
@@ -61,12 +61,19 @@ Send `start` to the push-to-start token, and `update` or `end` to the session to
 
 An `end` event needs only `id` in `attributes`. `artworkURL` is needed for songs whose artwork isn't already cached, since a push can't carry an image.
 
-## Open questions to settle on a device
+## On a device
 
-- Whether the extension needs its own `aps-environment` entitlement. Apple's docs list no extension entitlements.
-- Whether the system decodes dates as ISO-8601. Apple's sample payload implies it, and a unit test covers that shape.
+Settled on an iPhone 15 Pro, iOS 27.2, on 11 November 2026 (see [STATUS.md](STATUS.md)):
+
+- **The path.** `apsd` receives the push and hands it to `mediaremoted` ("Received push on topic …, environment: development"), which launches the extension if needed and calls its `updateSession`, with a 10 s watchdog. A change at the Mac reached the phone 1.4–3 s later.
+- **The extension needs no `aps-environment`.** Only the app has it.
+- **Dates.** The system's decoder could not read the relay's ISO-8601 time with milliseconds, and the error it then sent back over XPC aborted the extension. The attributes now code `timestamp` and `artworkURL` as strings themselves, so they don't depend on the decoder's settings.
+
+Still open:
+
 - Any push budget or rate limit. None is documented for `nowplaying`.
 - How long the system waits for an HTTPS call made inside a command handler. Calls of up to 250 ms worked on a real iPhone; no limit is documented. Commands go to the relay directly from the extension; see [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md).
+- Whether `AttributesDecodingFailure` crosses XPC without the abort.
 
 ## ActivityKit fallback
 

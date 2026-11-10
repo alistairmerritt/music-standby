@@ -6,7 +6,7 @@ You need a Mac with Xcode 27, an iPhone on iOS 27, and a charger that holds the 
 
 1. Open `iPhoneCompanion/MusicStandBy.xcodeproj`.
 2. For both the **MusicStandBy** and **MusicStandByNowPlaying** targets, open **Signing & Capabilities** and choose your team. Don't commit the team change.
-3. On a free Personal Team, remove `aps-environment` and the App Group from both files in `Signing/`, and don't commit that either. Personal Teams can't use push, and `xcodebuild` can't register the group. Keep `keychain-access-groups`.
+3. On a free Personal Team, remove `aps-environment` and the App Group from both files in `Signing/`, and don't commit that either. Personal Teams can't use push, and `xcodebuild` can't register the group. Keep `keychain-access-groups`. On the paid team, remove only the App Group, until it's registered on the developer site.
 4. Turn on Developer Mode, build and run, then trust your profile under Settings > General > VPN & Device Management.
 
 **Before installing a new build, tap Stop Showing, and open the app about a minute after the install.** Installing over a live session left an extension running from the old copy of the app, with every command failing.
@@ -28,7 +28,7 @@ xcodebuild … MSB_RELAY_HOST=<relay host> build
 5. On the Mac, click **Allow** in the menu.
 6. The iPhone shows the song. Tap **Show in Now Playing**.
 
-Without APNs, the Lock Screen can't change while the app isn't open. A command tapped there still reaches the Mac; the screen catches up when the app is next opened.
+Without APNs, the Lock Screen can't change while the app isn't open: a command tapped there still reaches the Mac, and the screen catches up when the app is next opened. With pushes (paid team, relay `PUSH_MODE=apns`), changes at the Mac reach a suspended app's session within about 3 s.
 
 | # | Do this | Expected |
 | --- | --- | --- |

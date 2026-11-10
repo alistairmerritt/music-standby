@@ -1,8 +1,24 @@
 # iOS status
 
-Last updated 9 November 2026, branch `feature/ios`.
+Last updated 11 November 2026, branch `feature/ios`.
 
 **A remote media session appears in landscape StandBy on a real iPhone, and the new extension sends HTTPS requests and reads a shared Keychain item when its controls are tapped.** All of this used the built-in mock transport. Nothing has talked to a real Mac or relay.
+
+## Pushes, 11 November 2026
+
+**Changes made at the Mac now reach a suspended phone by push.** The paid team (it kept the Personal Team's team ID), push on, built without the App Group, which isn't registered yet. iPhone 15 Pro, iOS 27.2, the deployed relay with `PUSH_MODE=apns`. "UI test" is an XCUITest that only reads Control Centre.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Real tokens reach the relay | Push-to-start and session tokens registered on launch | Relay log |
+| APNs accepts the relay's `update` pushes | `200` every time | Relay log |
+| Before the fix: app suspended, Mac skips and pauses | Each push woke the extension, which aborted. Control Centre never changed | Log, crash reports |
+| After the fix: app suspended 30 s, Mac skips, pauses, skips | Control Centre followed each change. The push reached the phone 1.4–3 s after the Mac command, and the extension handled it in under 0.1 s | Log, UI test |
+| The extension's own `aps-environment` | Not needed: only the app has it | Log |
+
+**Why pushes were lost.** `mediaremoted` decodes the push's `attributes` into `MacPlaybackAttributes` in the extension. That failed on the relay's timestamp (`2026-11-11T09:53:26.250Z`): a `JSONDecoder` with its default date strategy, or a property-list decoder, can't read an ISO-8601 string. NowPlaying then sends the `DecodingError` back over XPC, and NSXPC refuses it (its `userInfo` holds `CodingKey` values), so the extension aborts in `-[NSXPCEncoder _checkObject:]`. `MacPlaybackAttributes` and `SessionTrack` now read and write `timestamp` and `artworkURL` as strings themselves, whatever the decoder's settings. A failure is logged as `Couldn't decode attributes: <field>: <reason>` and thrown as `AttributesDecodingFailure`, which carries only a string. Not verified on a device: whether that error crosses XPC without the abort.
+
+The app registered its push-to-start token 6–13 times within a second of each launch. Harmless; not looked into.
 
 ## What exists
 
@@ -49,7 +65,7 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 
 **System Primary** read No once while the session was on screen. A later check reported no errors, but the value wasn't recorded. It hasn't affected StandBy or the Lock Screen.
 
-**Installing over a live session leaves a broken extension.** iOS relaunched the extension from the outgoing copy of the app at the moment of install. That process had its file writes denied, failed every command, and survived ending and restarting the session. Separately, a launch 5 s after an install failed, while one about 50 s later worked. Could affect real app updates. Not yet tested whether a phone restart clears it.
+**Installing over a live session leaves a broken extension.** iOS relaunched the extension from the outgoing copy of the app at the moment of install. That process had its file writes denied, failed every command, and survived ending and restarting the session. Separately, a launch 5 s after an install failed, while one about 50 s later worked. Could affect real app updates. Not yet tested whether a phone restart clears it. Seen again on 11 November: an extension launched 3 s before an install finished kept the old code (its debug dylib had the old build's UUID), and crashed on the new app's attributes. Once it had crashed, the next launch ran the new code.
 
 ## Still to test on a device
 
@@ -59,7 +75,7 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **134 tests**, macOS, Xcode 27.2. `Shared/StandByProtocol`: 49 tests.
+`swift test` from `iPhoneCompanion/StandByKit`: **175 tests**, macOS, Xcode 27.2. `Shared/StandByProtocol`: 56 tests.
 
 | Area | Covers |
 | --- | --- |
@@ -79,18 +95,11 @@ App and extension build for the iOS 27.2 device SDK, Debug and Release. `RemoteS
 
 ## Blocked
 
-**Solely by Apple Developer Program membership**
+- **App Group.** Register `group.com.alistairmerritt.MusicStandBy` on the developer site (Identifiers → App Groups) and add it to both App IDs; `xcodebuild` can't. Until then, build with temporary entitlements that leave it out. Only the mock route's command log and Diagnostics use it.
+- **TestFlight and distribution.** Not started. Builds signed by the paid team now last a year.
+- **Still to try by hand:** a locked phone and StandBy with pushes, and late artwork arriving by push.
 
-- APNs: start, update and end pushes, and token delivery.
-- Updating a locked phone. A session can only change while the app is open until then.
-- App Group. Only the mock route's command log and Diagnostics use it, so the relay path doesn't need it.
-- Builds lasting more than 7 days, TestFlight and distribution.
-
-**Solely by the unfinished relay**
-
-- Pairing with a real Mac, and Lock Screen controls reaching it.
-- Artwork from the relay.
-- Confirming [the endpoints](RELAY-CLIENT-CONTRACT.md), which are still assumptions.
+Pairing with a real Mac, Lock Screen controls reaching it, artwork from the relay and the relay endpoints were done on 10 November; see [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md).
 
 ## Decisions
 

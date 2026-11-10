@@ -82,6 +82,67 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
         #expect(decoded.canGoPrevious == false)
     }
 
+    /// What the relay really pushes: the Mac's time with milliseconds. On iOS
+    /// 27.2 every such push crashed the extension until the attributes read
+    /// their own dates, so this must decode whatever the system's decoder.
+    static let relayPushAttributes = """
+    {"canGoNext":true,"canGoPrevious":true,"elapsedTime":14,"id":"bc68e82f-4add-4ef8-bd21-37d326bcbb4c",
+     "isPlaying":true,"macName":"Alistair's MacBook Pro","revision":1794351143767,
+     "timestamp":"2026-11-11T09:53:26.250Z",
+     "track":{"album":"Six Songs - EP","artist":"Tom Misch","artworkID":"a1b2","artworkURL":"https://relay.example/v1/artwork/p/s",
+              "duration":195.2,"id":"pid:542CEB17C137B39E","title":"Insecure"}}
+    """
+
+    @Test(arguments: ["default", "iso8601", "wire"])
+    func decodesTheRelaysPushWithAnyJSONDateStrategy(_ strategy: String) throws {
+        let decoder: JSONDecoder
+        switch strategy {
+        case "iso8601": decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        case "wire": decoder = StandByWire.makeDecoder()
+        default: decoder = JSONDecoder()
+        }
+        let decoded = try decoder.decode(MacPlaybackAttributes.self, from: Data(Self.relayPushAttributes.utf8))
+        #expect(decoded.timestamp == StandByWire.parseDate("2026-11-11T09:53:26.250Z"))
+        #expect(decoded.revision == 1794351143767)
+        #expect(decoded.track?.title == "Insecure")
+        #expect(decoded.track?.artworkURL?.absoluteString == "https://relay.example/v1/artwork/p/s")
+    }
+
+    /// The push arrives as JSON but may reach the extension as a dictionary.
+    /// A property-list decoder reads URL and Date differently from JSONDecoder.
+    @Test func decodesTheRelaysPushAsAPropertyList() throws {
+        let object = try JSONSerialization.jsonObject(with: Data(Self.relayPushAttributes.utf8))
+        let plist = try PropertyListSerialization.data(fromPropertyList: object, format: .binary, options: 0)
+        let decoded = try PropertyListDecoder().decode(MacPlaybackAttributes.self, from: plist)
+        #expect(decoded.timestamp == StandByWire.parseDate("2026-11-11T09:53:26.250Z"))
+        #expect(decoded.track?.artworkURL?.absoluteString == "https://relay.example/v1/artwork/p/s")
+    }
+
+    @Test func roundTripsThroughJSONAndPropertyLists() throws {
+        var a = attributes(timestamp: Date(timeIntervalSince1970: 1_794_351_206.25))
+        a.track?.artworkURL = URL(string: "https://relay.example/v1/artwork/p/s")
+        #expect(try JSONDecoder().decode(MacPlaybackAttributes.self, from: JSONEncoder().encode(a)) == a)
+        #expect(try PropertyListDecoder().decode(MacPlaybackAttributes.self, from: PropertyListEncoder().encode(a)) == a)
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(a)) as? [String: Any]
+        #expect(json?["timestamp"] as? String == "2026-11-10T22:53:26.250Z")
+    }
+
+    /// A DecodingError carries CodingKey values that NSXPC can't encode; the
+    /// failure the system sees must carry only strings.
+    @Test func aDecodingFailureCanCrossXPC() throws {
+        let broken = Self.relayPushAttributes.replacingOccurrences(of: "2026-11-11T09:53:26.250Z", with: "yesterday")
+        do {
+            _ = try JSONDecoder().decode(MacPlaybackAttributes.self, from: Data(broken.utf8))
+            Issue.record("decoded a broken timestamp")
+        } catch let failure as AttributesDecodingFailure {
+            #expect(failure.description == "timestamp: Expected an ISO-8601 date, got yesterday")
+            let userInfo = (failure as NSError).userInfo
+            #expect(userInfo.values.allSatisfy { $0 is String })
+        }
+        let missing = Self.relayPushAttributes.replacingOccurrences(of: "\"macName\":\"Alistair's MacBook Pro\",", with: "")
+        #expect(throws: AttributesDecodingFailure.self) { try JSONDecoder().decode(MacPlaybackAttributes.self, from: Data(missing.utf8)) }
+    }
+
     @Test func staysWellInsideAPNsPayloadLimit() throws {
         let long = String(repeating: "x", count: 200)
         var a = attributes()
