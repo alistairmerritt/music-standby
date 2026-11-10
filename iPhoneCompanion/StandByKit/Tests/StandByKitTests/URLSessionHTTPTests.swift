@@ -188,6 +188,21 @@ private func relay(_ port: UInt16) -> RelayConfiguration {
         }
     }
 
+    @Test func aFreshConnectionPerRequestStillRoundTrips() async throws {
+        let command = RemoteCommand(kind: .pause)
+        let body = try StandByWire.makeEncoder().encode(CommandResponse(ack: .accepted(command.id, revision: 1)))
+        let server = try LoopbackServer { _ in
+            response(headers: ["Content-Type: application/json", "Content-Length: \(body.count)"], body: body)
+        }
+        let port = try await server.start()
+        defer { server.stop() }
+
+        let client = RelayClient(configuration: relay(port), http: URLSessionHTTP(reuseConnections: false), token: { "t" })
+        #expect(try await client.send(command, sessionID: "s1").accepted)
+        #expect(try await client.send(command, sessionID: "s1").accepted, "a second request after the first session is gone")
+        #expect(server.requests.count == 2)
+    }
+
     @Test func realArtworkIsFetchedAndValidated() async throws {
         let image = encodedImage(.jpeg)
         let server = try LoopbackServer { _ in

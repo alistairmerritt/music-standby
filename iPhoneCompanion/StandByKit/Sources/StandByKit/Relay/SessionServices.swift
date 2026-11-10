@@ -130,7 +130,7 @@ public struct ExtensionServices: Sendable {
     public static func make(
         container: SharedContainer,
         credentials: any CredentialStore,
-        http: any HTTPSending = URLSessionHTTP(),
+        http: any HTTPSending = URLSessionHTTP(reuseConnections: false),
         allowMock: Bool = BuildFlavor.isDebug
     ) -> ExtensionServices {
         let credential: RelayCredential?

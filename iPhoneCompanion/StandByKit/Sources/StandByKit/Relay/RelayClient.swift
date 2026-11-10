@@ -14,17 +14,33 @@ private final class RedirectRefusal: NSObject, URLSessionTaskDelegate, Sendable 
 }
 
 public struct URLSessionHTTP: HTTPSending {
-    private let session: URLSession
+    /// Nil when every request gets a session, and so a connection, of its own.
+    private let shared: URLSession?
 
-    public init() {
+    /// `reuseConnections: false` is for the Now Playing extension. iOS suspends
+    /// it between taps and kills its sockets, so on an iPhone a kept connection
+    /// was dead by the next tap whenever more than about 2 s had passed. A
+    /// fresh connection costs about 150 ms there, well inside the budget.
+    public init(reuseConnections: Bool = true) {
+        shared = reuseConnections ? URLSession(configuration: Self.configuration()) : nil
+    }
+
+    private static func configuration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
         configuration.waitsForConnectivity = false
-        session = URLSession(configuration: configuration)
+        return configuration
     }
 
     public func send(_ request: URLRequest, maxBytes: Int?) async throws -> (Data, HTTPURLResponse) {
+        if let shared { return try await send(request, maxBytes: maxBytes, on: shared) }
+        let session = URLSession(configuration: Self.configuration())
+        defer { session.finishTasksAndInvalidate() }
+        return try await send(request, maxBytes: maxBytes, on: session)
+    }
+
+    private func send(_ request: URLRequest, maxBytes: Int?, on session: URLSession) async throws -> (Data, HTTPURLResponse) {
         let delegate = RedirectRefusal()
         guard let maxBytes else {
             let (data, response) = try await session.data(for: request, delegate: delegate)

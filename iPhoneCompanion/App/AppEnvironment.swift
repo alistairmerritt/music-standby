@@ -29,10 +29,17 @@ enum AppEnvironment {
         let registrar: any PushTokenRegistrar
         if let relayConfiguration {
             let credentials = KeychainCredentialStore()
-            // A Mac remembered from the development mock, or from before a
-            // reinstall, has no relay credential behind it: pair again.
-            if case .success(nil) = Result(catching: { try credentials.load() }) {
-                PairingStore(defaults: defaults).pairedMac = nil
+            // Keep the remembered Mac in step with the relay credential: a Mac
+            // left over from the development mock has none, so pair again.
+            let pairing = PairingStore(defaults: defaults)
+            switch Result(catching: { try credentials.load() }) {
+            case .success(nil):
+                pairing.pairedMac = nil
+            case .success(let credential?) where pairing.pairedMac == nil:
+                // The Keychain outlives a deleted app; its settings don't.
+                pairing.pairedMac = credential.mac
+            default:
+                break
             }
             let http = URLSessionHTTP()
             let device = currentDevice(defaults: defaults)
