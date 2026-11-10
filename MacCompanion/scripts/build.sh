@@ -5,8 +5,8 @@
 #   scripts/build.sh core       StandByProtocol and CompanionCore only
 #
 # Output in MacCompanion/.build/swiftc; the app at MacCompanion/build/Music StandBy.app,
-# ad-hoc signed. Each rebuild changes the signature, so macOS asks for
-# Automation permission again.
+# signed with your Apple Development identity so keychain and Automation
+# approvals survive rebuilds (ad-hoc when there is none; see the codesign step).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -49,5 +49,11 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$out/MusicStandBy" "$app/Contents/MacOS/MusicStandBy"
 cp "$root/Resources/Info.plist" "$app/Contents/Info.plist"
 printf 'APPL????' > "$app/Contents/PkgInfo"
-codesign --force --sign - --entitlements "$root/Resources/MusicStandBy.entitlements" "$app" 2>&1 | grep -v "replacing existing signature" || true
+# Signed with the first Apple Development identity when there is one: an ad-hoc
+# signature is a new identity every build, so macOS asks again for the keychain
+# item and for Automation of Music after each rebuild. MSB_SIGN_IDENTITY
+# overrides it; "-" forces ad-hoc.
+identity=${MSB_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development: / { print $2; exit }')}
+codesign --force --sign "${identity:--}" --entitlements "$root/Resources/MusicStandBy.entitlements" "$app" 2>&1 | grep -v "replacing existing signature" || true
+codesign --verify "$app"
 echo "› $app"

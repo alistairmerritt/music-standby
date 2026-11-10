@@ -1,6 +1,6 @@
 # Mac companion — status
 
-9 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
+10 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
 SDK), Music.app 1.7.
 
 **Executed** means run on this Mac with output recorded. **Not verified** means written and
@@ -11,12 +11,12 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 67 tests in 10 suites pass (`swift test`) |
-| Shared protocol | 49 tests pass under `swift test`; builds for iOS with `xcodebuild` |
+| Unit tests | 74 tests in 11 suites pass (`scripts/test.sh`, 10 November) |
+| Shared protocol | 56 tests in 10 suites pass (`scripts/test.sh`, 10 November); builds for iOS with `xcodebuild` |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
-| Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. The menu has never been clicked by hand |
-| Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone (below) |
+| Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. On 10 November it drove real Music from a real iPhone through the deployed relay (below). The menu has never been clicked by hand |
+| Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
 
 ## Raw Apple Events
@@ -195,9 +195,6 @@ again only when that process has gone.
 
 ## Not verified
 
-- **The menu-bar app with raw events.** Built, not launched: a rebuilt app asks for
-  Automation permission again, which needs someone at the Mac. `msbctl` exercised the same
-  `CompanionCore` code.
 - **The first-run Automation prompt**, with either runner. Every check ran with this shell's
   existing permission. The `automation_denied` path is unit-tested only. Whether raw events
   bring up the prompt the way NSAppleScript does is untested.
@@ -210,15 +207,11 @@ again only when that process has gone.
 - **Main-thread cost in daily use.** Measured per read, not over hours.
 - **Local files, radio, podcasts, AirPlay, tracks with several artworks.** The raw-event
   compare ran on a "shared track"; the afternoon's AppleScript checks were on "URL track".
-- **A real iPhone on the relay.** Only the simulated iPhone (`Relay/tools/mock-phone.mjs`) has
-  talked to it, first under `wrangler dev` on this Mac and, on 10 November, on the deployed
-  relay: 29/29, including Next, pause and play changing the real Music.app through
-  Cloudflare, acknowledged in 62–156 ms round trip.
+- **The keep-alive across a real network drop.** The fix for the 16:54 crash (below) is
+  unit-tested for repeated, late and missing pongs, and the app pinged through the deployed
+  relay for the whole phone run. No connection was dropped on the real network.
 - **The pairing controls clicked in the running app.** Rendered offscreen in all four states
   against the live relay; the approval itself was given through `msbctl`.
-- **Reading Music from inside the app with raw events.** The relay-build app was launched
-  from the shell, so it used this shell's Automation permission. Music was paused and nothing
-  checked the app's reads.
 
 ## Relay connection (night of 9 November)
 
@@ -246,6 +239,39 @@ Two changes came out of this:
 - The listening session is saved, so restarting the companion mid-song doesn't give the phone
   a new Now Playing session.
 
+## A real iPhone through the deployed relay (10 November)
+
+Executed on this Mac with the menu-bar app launched from `build/`, real Music at volume 0,
+and an iPhone 15 Pro running the `feature/ios` build. A UI test on the phone tapped the
+Control Centre player while a script on the Mac recorded Music's state.
+
+| Tap on the phone | Music on the Mac | The phone afterwards |
+| --- | --- | --- |
+| Pause | Paused about 2.1 s after the tap | Showed the Mac's new revision after 1.4 s; the button became Play |
+| Play | Playing after about 1.3 s | Revision after 1.2 s; the button became Pause |
+| Next | Next track after about 2.7 s | Revision after 1.9 s; new title |
+| Previous | Restarted the track, 14 s in, after about 2.6 s | Revision after 1.9 s |
+| Pause | Paused after about 1.8 s | Revision after 2.2 s; the button became Play |
+| Play | Played on (paused at 16 s, 29 s when the script paused it) | Revision after 1.2 s; the button became Pause |
+
+Every command the phone sent got `200` from the relay. Previous restarted the current track
+instead of going back to the one before, although the app sends `previous track` (`Prev`),
+not `back track`. Not yet looked into: whether Music always does this a few seconds into a
+track, or only in this queue (an autoplay queue after Next).
+
+Two things came out of this:
+- **The app crashed at 16:54** in `RelayTransport.keepAlive`: URLSession called a pong handler
+  twice, and the second call resumed a continuation already resumed. The pong deadline also
+  didn't work, because the task group waited for the ping's handler however long it took.
+  Now the first of the pong, the deadline and cancellation settles each ping
+  (`RelayTransport.ping`, `RelayPingTests`).
+- **`build.sh` signs with the Apple Development identity** when there is one. With an ad-hoc
+  signature each rebuild was a new app to macOS, which blocked the app at launch on a
+  Keychain prompt for its relay credential.
+
+On this macOS, `lsof -i` doesn't list the app's WebSocket: the connection shows only as a
+`CHAN` descriptor. `nettop -p <pid>` shows its traffic, about 28 bytes of pongs every 30 s.
+
 ## For the relay design
 
 - `not_running` arrives within about 0.8 s of `terminate()`, so the relay can end the Now
@@ -265,5 +291,6 @@ Two changes came out of this:
 2. Done on 10 November: the relay is deployed to `workers.dev`, and its APNs probe got
    APNs' own `403 InvalidProviderToken`, so Cloudflare reaches APNs over HTTP/2. The
    `--playback` harness passed 29/29 against the deployment.
-3. The iOS side adopts the contract (docs/relay/API-v1.md §13). Then a real phone can
-   replace the mock.
+3. Done on 10 November: the iOS side adopted the contract, and a real iPhone drove Music
+   through the deployed relay (above). Changes made at the Mac still reach a locked phone
+   only through a push.

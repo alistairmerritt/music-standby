@@ -30,13 +30,14 @@ swift test
 scripts/build.sh
 ```
 
-`build.sh` compiles with `swiftc` and assembles `build/Music StandBy.app`, ad-hoc signed,
-plus `.build/swiftc/msbctl`. Without a working Xcode it falls back to the Command Line
+`build.sh` compiles with `swiftc` and assembles `build/Music StandBy.app`, signed with your
+Apple Development identity (ad-hoc if there is none, or with `MSB_SIGN_IDENTITY=-`), plus `.build/swiftc/msbctl`. Without a working Xcode it falls back to the Command Line
 Tools with a workaround for their broken module map (see `scripts/toolchain.sh`).
 SwiftPM alone can't make an `.app` with an `Info.plist`, which is why the script exists.
 An Xcode app project is still to do.
 
-Each rebuild changes the ad-hoc signature, so macOS asks for Automation permission again.
+With a development identity, Automation and Keychain approvals survive rebuilds. An ad-hoc
+signature changes with every build, so macOS asks for both again.
 Launch at Login needs the app in `/Applications`.
 
 ## Checking against the real Music.app

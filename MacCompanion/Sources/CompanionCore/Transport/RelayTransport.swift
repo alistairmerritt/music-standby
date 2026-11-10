@@ -1,4 +1,5 @@
 import Foundation
+import os
 import StandByProtocol
 
 /// The Mac's WebSocket to the relay (docs/relay/API-v1.md §5).
@@ -161,25 +162,49 @@ public actor RelayTransport: CompanionTransport {
         while !Task.isCancelled {
             try? await Task.sleep(for: pingInterval)
             guard !Task.isCancelled else { return }
-            let answered = await withTaskGroup(of: Bool.self) { group in
-                group.addTask {
-                    await withCheckedContinuation { continuation in
-                        socket.sendPing { error in continuation.resume(returning: error == nil) }
-                    }
-                }
-                group.addTask { [pongDeadline] in
-                    try? await Task.sleep(for: pongDeadline)
-                    return false
-                }
-                let first = await group.next() ?? false
-                group.cancelAll()
-                return first
-            }
+            let answered = await Self.ping(deadline: pongDeadline) { socket.sendPing(pongReceiveHandler: $0) }
+            guard !Task.isCancelled else { return }
             if !answered {
                 socket.cancel(with: .goingAway, reason: nil)
                 return
             }
         }
+    }
+
+    /// Sends one ping through `send` and answers true only for a pong within `deadline`.
+    ///
+    /// The first of the pong, the deadline and cancellation settles the answer;
+    /// anything after it is ignored. URLSession can call a pong handler more than
+    /// once (again as the socket is torn down), which crashed the app when this
+    /// resumed a continuation directly, and may never call it on a dead connection,
+    /// which left the old deadline waiting on the ping anyway.
+    static func ping(
+        deadline: Duration,
+        send: (@escaping @Sendable (Error?) -> Void) -> Void
+    ) async -> Bool {
+        let pending = OSAllocatedUnfairLock<CheckedContinuation<Bool, Never>?>(initialState: nil)
+        let settle: @Sendable (Bool) -> Void = { answer in
+            let waiting = pending.withLock { continuation -> CheckedContinuation<Bool, Never>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            waiting?.resume(returning: answer)
+        }
+        var timer: Task<Void, Never>?
+        let answered = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                pending.withLock { $0 = continuation }
+                timer = Task {
+                    try? await Task.sleep(for: deadline)
+                    settle(false)
+                }
+                send { error in settle(error == nil) }
+            }
+        } onCancel: {
+            settle(false)
+        }
+        timer?.cancel()
+        return answered
     }
 
     private func describe(_ error: Error, status: Int?, close: Int) -> String {
