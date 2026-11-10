@@ -1,0 +1,45 @@
+{
+  "sessionID": "9d0f3c2a-6b1e-4f7d-8a5c-2e4b6d8f0a1c",
+  "mac": {
+    "id": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+    "name": "Studio Mac"
+  },
+  "macConnected": true,
+  "playback": {
+    "revision": 1794207600001,
+    "state": "playing",
+    "isPlaying": true,
+    "elapsedTime": 251.5,
+    "capturedAt": "2026-11-09T07:00:00.250Z",
+    "track": {
+      "id": "pid:542CEB17C137B39E",
+      "title": "Losing My Edge",
+      "artist": "LCD Soundsystem",
+      "album": "LCD Soundsystem",
+      "duration": 473.114,
+      "artworkID": "70d7210ced944748a7993e51335d627d93bebede61315de62de3314c2413397d"
+    },
+    "canGoNext": true,
+    "canGoPrevious": true,
+    "listeningSessionID": "0C7E4A52-3D2B-4F3E-9A61-6B1F2E8D9C10"
+  },
+  "attributes": {
+    "id": "9d0f3c2a-6b1e-4f7d-8a5c-2e4b6d8f0a1c",
+    "macName": "Studio Mac",
+    "revision": 1794207600001,
+    "isPlaying": true,
+    "elapsedTime": 251.5,
+    "timestamp": "2026-11-09T07:00:00.250Z",
+    "track": {
+      "id": "pid:542CEB17C137B39E",
+      "title": "Losing My Edge",
+      "artist": "LCD Soundsystem",
+      "album": "LCD Soundsystem",
+      "duration": 473.114,
+      "artworkID": "70d7210ced944748a7993e51335d627d93bebede61315de62de3314c2413397d",
+      "artworkURL": "https://relay.example.workers.dev/v1/artwork/3f6c1d2e9a8b47c5b0e1f2a3b4c5d6e7/70d7210ced944748a7993e51335d627d93bebede61315de62de3314c2413397d?sig=b1Y8kQ3nR7tW2xZ5cV9mL4pA"
+    },
+    "canGoNext": true,
+    "canGoPrevious": true
+  }
+}
