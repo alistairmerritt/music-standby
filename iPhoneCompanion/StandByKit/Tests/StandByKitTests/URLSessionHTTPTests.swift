@@ -87,7 +87,7 @@ private func relay(_ port: UInt16) -> RelayConfiguration {
         defer { server.stop() }
 
         let client = RelayClient(configuration: relay(port), http: URLSessionHTTP(), token: { "secret" })
-        let ack = try await client.send(command)
+        let ack = try await client.send(command, sessionID: "s1")
         #expect(ack.accepted)
         #expect(ack.revision == 9)
 
@@ -171,7 +171,7 @@ private func relay(_ port: UInt16) -> RelayConfiguration {
         let client = RelayClient(configuration: relay(port), http: URLSessionHTTP(), token: { "t" })
         let started = Date()
         await #expect(throws: TransportError.macUnreachable) {
-            _ = try await client.send(RemoteCommand(kind: .play))
+            _ = try await client.send(RemoteCommand(kind: .play), sessionID: "s1")
         }
         #expect(Date().timeIntervalSince(started) < 5, "a command must not hang")
     }
@@ -196,8 +196,10 @@ private func relay(_ port: UInt16) -> RelayConfiguration {
         let port = try await server.start()
         defer { server.stop() }
 
-        let client = RelayClient(configuration: relay(port), http: URLSessionHTTP(), token: { "t" })
+        let client = RelayClient(configuration: relay(port), http: URLSessionHTTP(), pairingID: "p1", token: { "t" })
         #expect(try await client.fetch(id: String(repeating: "c", count: 64)) == image)
+        let head = try #require(server.requests.first)
+        #expect(head.hasPrefix("GET /v1/artwork/p1/\(String(repeating: "c", count: 64)) HTTP/1.1"))
     }
 }
 

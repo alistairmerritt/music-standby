@@ -50,6 +50,20 @@ private func bodyOf<T: Decodable>(_ request: URLRequest, as type: T.Type) throws
     try StandByWire.makeDecoder().decode(type, from: try #require(request.httpBody))
 }
 
+let studioMac = PairedMac(id: "m", name: "Studio Mac")
+
+func sessionState(_ id: String?, revision: UInt64 = 42, macConnected: Bool = true) -> SessionState {
+    SessionState(sessionID: id, mac: studioMac, macConnected: macConnected, playback: id == nil ? nil : message(revision: revision), attributes: nil)
+}
+
+/// What a pairing reported while it waited.
+final class ProgressLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [PairingProgress] = []
+    var all: [PairingProgress] { lock.withLock { values } }
+    func append(_ value: PairingProgress) { lock.withLock { values.append(value) } }
+}
+
 private func sessionAttributes() -> MacPlaybackAttributes {
     MacPlaybackAttributes(mac: PairedMac(id: "m", name: "Studio Mac"), message: message(revision: 7), sessionID: "s1")
 }
@@ -98,7 +112,7 @@ final class RecordingSleeper: @unchecked Sendable {
     @Test func postsTheSharedProtocolShape() async throws {
         let command = RemoteCommand(kind: .pause, issuedAt: Date(timeIntervalSince1970: 1_000))
         let http = FakeHTTP([ackBody(command.id)])
-        let ack = try await client(http).send(command)
+        let ack = try await client(http).send(command, sessionID: "s1")
         #expect(ack.accepted)
         #expect(ack.revision == 43)
 
@@ -116,7 +130,7 @@ final class RecordingSleeper: @unchecked Sendable {
     @Test func rejectionFromTheMacIsReturnedForTheCallerToReport() async throws {
         let command = RemoteCommand(kind: .next)
         let http = FakeHTTP([.json(CommandResponse(ack: .rejected(command.id, revision: 1, ProtocolError(.noCurrentTrack))))])
-        let ack = try await client(http).send(command)
+        let ack = try await client(http).send(command, sessionID: "s1")
         #expect(!ack.accepted)
         #expect(ack.error?.code == .noCurrentTrack)
     }
@@ -124,39 +138,39 @@ final class RecordingSleeper: @unchecked Sendable {
     @Test func anAckForAnotherCommandIsNotBelieved() async {
         let http = FakeHTTP([.json(CommandResponse(ack: .accepted(UUID(), revision: 1)))])
         await #expect(throws: TransportError.malformedResponse) {
-            _ = try await client(http).send(RemoteCommand(kind: .play))
+            _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1")
         }
     }
 
     @Test func macUnreachableMapsFrom504() async {
         let http = FakeHTTP([.failure(.macUnreachable, status: 504)])
-        await #expect(throws: TransportError.macUnreachable) { _ = try await client(http).send(RemoteCommand(kind: .play)) }
+        await #expect(throws: TransportError.macUnreachable) { _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1") }
     }
 
     @Test func aTimeoutMeansTheMacDidNotAnswer() async {
         let http = FakeHTTP([.network(.timedOut)])
-        await #expect(throws: TransportError.macUnreachable) { _ = try await client(http).send(RemoteCommand(kind: .play)) }
+        await #expect(throws: TransportError.macUnreachable) { _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1") }
     }
 
     @Test func revokedPairingMapsFrom401() async {
         let http = FakeHTTP([.failure(.pairingRevoked, status: 401)])
-        await #expect(throws: TransportError.pairingRevoked) { _ = try await client(http).send(RemoteCommand(kind: .play)) }
+        await #expect(throws: TransportError.pairingRevoked) { _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1") }
     }
 
     @Test func rateLimitCarriesTheRetryTime() async {
         let http = FakeHTTP([.failure(.rateLimited, status: 429, retryAfter: 60)])
-        await #expect(throws: TransportError.rateLimited(retryAfter: 60)) { _ = try await client(http).send(RemoteCommand(kind: .play)) }
+        await #expect(throws: TransportError.rateLimited(retryAfter: 60)) { _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1") }
     }
 
     @Test func offlineIsANetworkError() async {
         let http = FakeHTTP([.network(.notConnectedToInternet)])
-        await #expect(throws: TransportError.self) { _ = try await client(http).send(RemoteCommand(kind: .play)) }
+        await #expect(throws: TransportError.self) { _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1") }
     }
 
     @Test func noCredentialMeansNoRequest() async {
         let http = FakeHTTP()
         let unauthenticated = RelayClient(configuration: relayConfiguration, http: http, token: { nil })
-        await #expect(throws: TransportError.notPaired) { _ = try await unauthenticated.send(RemoteCommand(kind: .play)) }
+        await #expect(throws: TransportError.notPaired) { _ = try await unauthenticated.send(RemoteCommand(kind: .play), sessionID: "s1") }
         #expect(await http.requests.isEmpty)
     }
 
@@ -165,13 +179,35 @@ final class RecordingSleeper: @unchecked Sendable {
         reply.headers = ["X-Protocol-Version": "2"]
         let http = FakeHTTP([reply])
         await #expect(throws: TransportError.commandRejected(.unsupportedProtocolVersion)) {
-            _ = try await client(http).send(RemoteCommand(kind: .play))
+            _ = try await client(http).send(RemoteCommand(kind: .play), sessionID: "s1")
         }
+    }
+
+    @Test func aCommandForAnEndedSessionIsRefusedNotRetried() async {
+        let http = FakeHTTP([.failure(.sessionMismatch, status: 409)])
+        await #expect(throws: TransportError.commandRejected(.sessionMismatch)) {
+            _ = try await client(http).send(RemoteCommand(kind: .next), sessionID: "old")
+        }
+        #expect(await http.requests.count == 1)
+    }
+
+    @Test func theRelaysUnauthorisedCodeEndsThePairing() async {
+        let http = FakeHTTP([.failure(.unauthorized, status: 401)])
+        await #expect(throws: TransportError.pairingRevoked) { _ = try await client(http).fetchSession() }
+    }
+
+    @Test func endingASessionNamesIt() async throws {
+        let http = FakeHTTP([.noContent])
+        try await client(http).endSession(sessionID: "s1")
+        let request = try #require(await http.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path() == "/v1/session/end")
+        #expect(try bodyOf(request, as: SessionEndRequest.self) == SessionEndRequest(sessionID: "s1"))
     }
 
     @Test func aBaseURLWithATrailingSlashStillBuildsCleanPaths() async throws {
         let config = try #require(RelayConfiguration(baseURL: URL(string: "https://relay.example.com/")!))
-        let http = FakeHTTP([.json(RelaySessionResponse(session: nil))])
+        let http = FakeHTTP([.json(sessionState(nil))])
         _ = try await RelayClient(configuration: config, http: http, token: { "t" }).fetchSession()
         #expect(await http.requests.first?.url?.absoluteString == "https://relay.example.com/v1/session")
     }
@@ -197,8 +233,11 @@ final class RecordingSleeper: @unchecked Sendable {
         _ = try? await services.commands.perform(.pause, on: attributes, at: date)
         let sent = try #require(await http.requests.first)
         #expect(sent.url?.path() == "/v1/commands")
-        #expect(try bodyOf(sent, as: CommandRequest.self).command.kind == .pause)
-        #expect(try bodyOf(sent, as: CommandRequest.self).command.issuedAt == date)
+        let body = try bodyOf(sent, as: CommandRequest.self)
+        #expect(body.command.kind == .pause)
+        #expect(body.command.issuedAt == date)
+        #expect(body.sessionID == "s1", "the session on screen, so the relay can refuse a stale one")
+        #expect(sent.value(forHTTPHeaderField: "Idempotency-Key") == body.command.id.uuidString)
     }
 
     @Test func aRefusedCommandThrowsSoTheSystemKnows() async {
@@ -279,7 +318,7 @@ func unwritableContainer() -> SharedContainer {
 private struct AckingSender: CommandSender {
     var refusing: ErrorCode?
     var failing: TransportError?
-    func send(_ command: RemoteCommand) async throws -> CommandAck {
+    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
         if let failing { throw failing }
         if let refusing { return .rejected(command.id, revision: 1, ProtocolError(refusing)) }
         return .accepted(command.id, revision: 1)
@@ -295,48 +334,108 @@ private struct FailingCredentialStore: CredentialStore {
 // MARK: - Pairing and credentials
 
 @Suite struct RelayPairingTests {
-    private func transport(_ http: FakeHTTP, store: any CredentialStore, sleeper: RecordingSleeper = RecordingSleeper(stopAfter: 1)) -> RelayTransport {
-        RelayTransport(configuration: relayConfiguration, credentials: store, http: http, device: { testDevice }, sleep: { try await sleeper.sleep($0) }, jitter: { 0 })
+    private let claim = PairingClaimResponse(claimID: "c1", claimSecret: "msb1.claim.p.secret", expiresAt: Date(timeIntervalSince1970: 2_000), mac: studioMac)
+    private var approved: FakeHTTP.Reply {
+        .json(PairingClaimStatus(status: .approved, pairingID: "p", phoneToken: "tok", mac: studioMac))
     }
 
-    @Test func claimStoresTheCredentialSecurely() async throws {
-        let grant = PairingGrant(pairingID: "p", phoneToken: "tok", mac: PairedMac(id: "m", name: "Studio Mac"))
-        let http = FakeHTTP([.json(grant)])
-        let store = InMemoryCredentialStore()
-        let mac = try await transport(http, store: store).pair(code: try #require(PairingCode("472915")))
-        #expect(mac.name == "Studio Mac")
-        #expect(store.load()?.token == "tok")
+    private func transport(_ http: FakeHTTP, store: any CredentialStore, sleeper: RecordingSleeper = RecordingSleeper(), now: Date = Date(timeIntervalSince1970: 1_000)) -> RelayTransport {
+        RelayTransport(configuration: relayConfiguration, credentials: store, http: http, device: { testDevice }, now: { now }, sleep: { try await sleeper.sleep($0) }, jitter: { 0 })
+    }
 
-        let request = try #require(await http.requests.first)
-        #expect(request.url?.path() == "/v1/pair/claim")
-        #expect(request.value(forHTTPHeaderField: "Authorization") == nil, "claiming needs no credential")
-        let claim = try bodyOf(request, as: PairingClaim.self)
-        #expect(claim.code == "472915")
-        #expect(claim.deviceName == "Test iPhone")
-        #expect(claim.device == testDevice)
+    @Test func aClaimWaitsForTheMacThenStoresTheCredential() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .json(PairingClaimStatus(status: .pending)), approved])
+        let store = InMemoryCredentialStore()
+        let sleeper = RecordingSleeper()
+        let heard = ProgressLog()
+        let mac = try await transport(http, store: store, sleeper: sleeper).pair(code: try #require(PairingCode("472915"))) { heard.append($0) }
+        #expect(mac == studioMac)
+        #expect(heard.all == [.waitingForApproval(studioMac)])
+        #expect(store.load() == RelayCredential(configuration: relayConfiguration, pairingID: "p", token: "tok", mac: studioMac))
+        #expect(sleeper.recorded == [2, 2], "a claim poll every 2 s (API-v1 §4)")
+
+        let requests = await http.requests
+        #expect(requests[0].httpMethod == "POST")
+        #expect(requests[0].url?.path() == "/v1/pairing/claim")
+        #expect(requests[0].value(forHTTPHeaderField: "Authorization") == nil, "claiming needs no credential")
+        #expect(try bodyOf(requests[0], as: PairingClaimRequest.self) == PairingClaimRequest(code: "472915", phone: testDevice))
+        #expect(requests[1].httpMethod == "GET")
+        #expect(requests[1].url?.path() == "/v1/pairing/claim/c1")
+        #expect(requests[1].value(forHTTPHeaderField: "Authorization") == "Bearer msb1.claim.p.secret", "polled with the claim's own secret")
     }
 
     @Test func aWrongCodeIsRejected() async throws {
-        let http = FakeHTTP([.init(status: 404)])
+        let http = FakeHTTP([.failure(.pairingCodeInvalid, status: 404)])
         let store = InMemoryCredentialStore()
         await #expect(throws: TransportError.pairingRejected) {
-            _ = try await transport(http, store: store).pair(code: try #require(PairingCode("000001")))
+            _ = try await transport(http, store: store).pair(code: try #require(PairingCode("000001"))) { _ in }
         }
         #expect(store.load() == nil)
+        #expect(await http.requests.count == 1, "no polling for a code that was never accepted")
     }
 
     @Test func anUnknownErrorCodeFromClaimIsARejection() async throws {
         let http = FakeHTTP([.failure("unknown_or_expired_code", status: 404)])
         await #expect(throws: TransportError.pairingRejected) {
-            _ = try await transport(http, store: InMemoryCredentialStore()).pair(code: try #require(PairingCode("000001")))
+            _ = try await transport(http, store: InMemoryCredentialStore()).pair(code: try #require(PairingCode("000001"))) { _ in }
         }
     }
 
     @Test func tooManyAttemptsIsReported() async throws {
         let http = FakeHTTP([.failure(.rateLimited, status: 429, retryAfter: 60)])
         await #expect(throws: TransportError.rateLimited(retryAfter: 60)) {
-            _ = try await transport(http, store: InMemoryCredentialStore()).pair(code: try #require(PairingCode("123456")))
+            _ = try await transport(http, store: InMemoryCredentialStore()).pair(code: try #require(PairingCode("123456"))) { _ in }
         }
+    }
+
+    @Test func theMacSayingNoStoresNothing() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .json(PairingClaimStatus(status: .denied))])
+        let store = InMemoryCredentialStore()
+        await #expect(throws: TransportError.pairingDenied) {
+            _ = try await transport(http, store: store).pair(code: try #require(PairingCode("472915"))) { _ in }
+        }
+        #expect(store.load() == nil)
+    }
+
+    @Test func aClaimTheRelayHasForgottenHasExpired() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .failure(.claimExpired, status: 410)])
+        await #expect(throws: TransportError.pairingExpired) {
+            _ = try await transport(http, store: InMemoryCredentialStore()).pair(code: try #require(PairingCode("472915"))) { _ in }
+        }
+    }
+
+    @Test func waitingStopsWhenTheCodeExpires() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .json(PairingClaimStatus(status: .pending))])
+        await #expect(throws: TransportError.pairingExpired) {
+            _ = try await transport(http, store: InMemoryCredentialStore(), now: Date(timeIntervalSince1970: 2_001)).pair(code: try #require(PairingCode("472915"))) { _ in }
+        }
+        #expect(await http.requests.count == 1)
+    }
+
+    @Test func aBriefDropWhileWaitingIsRetried() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .network(.networkConnectionLost), approved])
+        let store = InMemoryCredentialStore()
+        _ = try await transport(http, store: store).pair(code: try #require(PairingCode("472915"))) { _ in }
+        #expect(store.load()?.token == "tok")
+    }
+
+    @Test func cancellingStopsWaiting() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .json(PairingClaimStatus(status: .pending))])
+        let store = InMemoryCredentialStore()
+        await #expect(throws: CancellationError.self) {
+            _ = try await transport(http, store: store, sleeper: RecordingSleeper(stopAfter: 1)).pair(code: try #require(PairingCode("472915"))) { _ in }
+        }
+        #expect(store.load() == nil)
+        #expect(await http.requests.count == 1)
+    }
+
+    @Test func anApprovalWithoutATokenIsNotAPairing() async throws {
+        let http = FakeHTTP([.json(claim, status: 202), .json(PairingClaimStatus(status: .approved))])
+        let store = InMemoryCredentialStore()
+        await #expect(throws: TransportError.malformedResponse) {
+            _ = try await transport(http, store: store).pair(code: try #require(PairingCode("472915"))) { _ in }
+        }
+        #expect(store.load() == nil)
     }
 
     @Test func unpairTellsTheRelayAndForgetsEvenIfTheRelayIsDown() async throws {
@@ -372,10 +471,12 @@ private struct FailingCredentialStore: CredentialStore {
         #expect(registrar.current().sessions.isEmpty)
 
         let requests = await http.requests
+        #expect(requests[0].httpMethod == "PUT")
         #expect(requests[0].url?.path() == "/v1/tokens/start")
-        #expect(try bodyOf(requests[0], as: StartTokenRegistration.self).pushToStartToken == "aa")
+        #expect(try bodyOf(requests[0], as: PushToStartTokenRegistration.self) == PushToStartTokenRegistration(token: "aa"))
+        #expect(requests[1].httpMethod == "PUT")
         #expect(requests[1].url?.path() == "/v1/tokens/session")
-        #expect(try bodyOf(requests[1], as: SessionTokenRegistration.self) == SessionTokenRegistration(sessionID: "s/1", pushToken: "bb"))
+        #expect(try bodyOf(requests[1], as: SessionPushTokenRegistration.self) == SessionPushTokenRegistration(sessionID: "s/1", token: "bb"))
         #expect(requests[2].httpMethod == "DELETE")
         #expect(requests[2].url?.absoluteString == "https://relay.example.com/v1/tokens/session/s%2F1")
     }
@@ -407,6 +508,15 @@ private struct FailingCredentialStore: CredentialStore {
         try await registrar.registerUpdateToken("bb", forSessionID: "s")
         try await registrar.invalidate(sessionID: "s")
         #expect(await http.requests.count == 2)
+    }
+
+    @Test func aTokenForASessionTheRelayHasEndedIsDropped() async throws {
+        let http = FakeHTTP([.network(.notConnectedToInternet)])
+        let registrar = RelayPushTokenRegistrar(container: container(), client: { client(http) })
+        try? await registrar.registerUpdateToken("bb", forSessionID: "old")
+        await http.script([.failure(.sessionMismatch, status: 409)])
+        try await registrar.uploadStored()
+        #expect(registrar.current().sessions.isEmpty)
     }
 
     @Test func mockRegistrarHasNothingToUpload() async throws {
@@ -445,6 +555,7 @@ private final class ClientBox: @unchecked Sendable {
         case .connection(.disconnected): "disconnected"
         case .connection(.connecting): "connecting"
         case .connection(.connected(let name)): "connected:\(name)"
+        case .connection(.macOffline(let name)): "offline:\(name)"
         case .connection(.reconnecting): "reconnecting"
         case .connection(.failed): "failed"
         case .playback(let message): "playback:\(message.revision)"
@@ -453,7 +564,7 @@ private final class ClientBox: @unchecked Sendable {
         }
     }
 
-    private let live = FakeHTTP.Reply.json(RelaySessionResponse(session: RelaySession(sessionID: "s1", playback: message(revision: 42))))
+    private let live = FakeHTTP.Reply.json(sessionState("s1"))
 
     @Test func connectAppliesTheAuthoritativeSession() async throws {
         let http = FakeHTTP([live])
@@ -467,7 +578,7 @@ private final class ClientBox: @unchecked Sendable {
     }
 
     @Test func anUnchangedSessionIsNotReemitted() async {
-        let http = FakeHTTP([live, live, .json(RelaySessionResponse(session: RelaySession(sessionID: "s1", playback: message(revision: 43))))])
+        let http = FakeHTTP([live, live, .json(sessionState("s1", revision: 43))])
         let transport = make(http, sleeper: RecordingSleeper(stopAfter: 3))
         let stream = await transport.subscribe()
         await transport.connect()
@@ -489,7 +600,7 @@ private final class ClientBox: @unchecked Sendable {
     }
 
     @Test func theRelayReportingNoSessionEndsIt() async {
-        let http = FakeHTTP([live, .json(RelaySessionResponse(session: nil))])
+        let http = FakeHTTP([live, .json(sessionState(nil))])
         let transport = make(http, sleeper: RecordingSleeper(stopAfter: 2))
         let stream = await transport.subscribe()
         await transport.connect()
@@ -498,7 +609,7 @@ private final class ClientBox: @unchecked Sendable {
     }
 
     @Test func noSessionFromTheStartIsNotAnEnding() async {
-        let http = FakeHTTP([.json(RelaySessionResponse(session: nil))])
+        let http = FakeHTTP([.json(sessionState(nil))])
         let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1))
         let stream = await transport.subscribe()
         await transport.connect()
@@ -554,9 +665,78 @@ private final class ClientBox: @unchecked Sendable {
         let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1))
         #expect(try await transport.artwork(id: id) == image)
         let request = try #require(await http.requests.first)
-        #expect(request.url?.path() == "/v1/artwork/\(id)")
+        #expect(request.url?.path() == "/v1/artwork/p1/\(id)", "the bearer form names the pairing (API-v1 §8)")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret-token")
     }
+
+    @Test func aSignedArtworkURLOnTheRelayIsFetched() async throws {
+        let image = encodedImage(.png)
+        let http = FakeHTTP([FakeHTTP.Reply(status: 200, body: image, headers: ["Content-Type": "image/png"])])
+        let url = URL(string: "https://relay.example.com/v1/artwork/p1/\(String(repeating: "c", count: 64))?sig=abc")!
+        #expect(try await client(http).fetch(url: url) == image)
+        #expect(await http.requests.first?.url == url, "the signature is kept")
+    }
+
+    @Test func refusedArtworkIsMissingArtworkNotARevokedPairing() async throws {
+        let http = FakeHTTP([.failure(.unauthorized, status: 401)])
+        let store = InMemoryCredentialStore(testCredential)
+        let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1), store: store)
+        await #expect(throws: TransportError.artworkUnavailable) {
+            _ = try await transport.artwork(id: String(repeating: "b", count: 64))
+        }
+        #expect(store.load() == testCredential)
+    }
+
+    @Test func theRelayReachableWithoutTheMacIsReportedAsSuch() async {
+        let http = FakeHTTP([.json(sessionState("s1", macConnected: false))])
+        let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1))
+        let stream = await transport.subscribe()
+        await transport.connect()
+        let events = await collect(stream, count: 5)
+        #expect(events == ["disconnected", "connecting", "offline:Studio Mac", "assigned:s1", "playback:42"])
+    }
+
+    @Test func anEndedSessionIsNotReplayedToALaterConsumer() async {
+        let http = FakeHTTP([live, .json(sessionState(nil))])
+        let transport = make(http, sleeper: RecordingSleeper(stopAfter: 2))
+        let first = await transport.subscribe()
+        await transport.connect()
+        _ = await collect(first, count: 6)
+        let second = await transport.subscribe()
+        await transport.disconnect()
+        #expect(await collect(second, count: 2) == ["connected:Studio Mac", "disconnected"])
+    }
+
+    @Test func aCommandCarriesTheRelaysSessionAndIsFollowedByARead() async throws {
+        let command = RemoteCommand(kind: .next)
+        let http = FakeHTTP([live, .json(CommandResponse(ack: .accepted(command.id, revision: 42))), .json(sessionState("s1", revision: 43))])
+        let transport = RelayTransport(configuration: relayConfiguration, credentials: InMemoryCredentialStore(testCredential), http: http, device: { testDevice },
+                                       sleep: { seconds in
+                                           // Polls wait for the test to end; the read after a command doesn't.
+                                           if seconds == 5 { try await Task.sleep(for: .seconds(3600)) }
+                                       }, jitter: { 0 })
+        let stream = await transport.subscribe()
+        await transport.connect()
+        _ = await collect(stream, count: 5)
+        let ack = try await transport.send(command)
+        #expect(ack.accepted)
+        #expect(await collect(stream, count: 1) == ["playback:43"])
+        await transport.disconnect()
+
+        let sent = await http.requests[1]
+        #expect(sent.url?.path() == "/v1/commands")
+        #expect(try bodyOf(sent, as: CommandRequest.self).sessionID == "s1")
+    }
+
+    @Test func noSessionMeansNoCommand() async throws {
+        let http = FakeHTTP([.json(sessionState(nil))])
+        let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1))
+        await #expect(throws: TransportError.commandRejected(.noSession)) {
+            _ = try await transport.send(RemoteCommand(kind: .play))
+        }
+        #expect(await http.requests.isEmpty)
+    }
+
 
     @Test func artworkThatIsNotAnImageIsRefused() async {
         let id = String(repeating: "b", count: 64)
@@ -619,5 +799,63 @@ private final class ClientBox: @unchecked Sendable {
         let sent = try #require(await h.transport.sent.first)
         #expect(sent.kind == .pause)
         #expect(sent.issuedAt == h.clock.now)
+    }
+}
+
+@MainActor
+@Suite struct RelaySessionNamingTests {
+    @Test func nothingIsShownUntilTheRelayNamesTheSession() async {
+        let h = Harness(relayNamesSessions: true)
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        await h.transport.emit(.connection(.connected(macName: "Studio Mac")))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(h.controller.activations.isEmpty, "a made-up session name would get every command refused")
+        #expect(h.model.attributes == nil)
+
+        await h.transport.emit(.sessionAssigned("relay-1"))
+        await h.transport.emit(.playback(message(revision: 2)))
+        await eventually("active") { h.controller.isActive }
+        #expect(h.controller.sessionID == "relay-1")
+    }
+
+    @Test func theMacGoingOfflineLeavesTheSessionToTheRelay() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.play()
+        await h.transport.emit(.connection(.macOffline(macName: "Studio Mac")))
+        await eventually("offline") { h.model.connection == .macOffline(macName: "Studio Mac") }
+        h.clock.advance(120)
+        await h.model.sceneDidBecomeActive()
+        #expect(h.controller.isActive, "the relay ends it after its own grace period, and says so")
+        #expect(h.sleeper.pending == 0, "no local countdown")
+    }
+
+    @Test func pairingSaysWhoItIsWaitingFor() async throws {
+        let h = Harness(paired: false)
+        try await h.model.pair(rawCode: "472915")
+        #expect(h.model.log.contains { $0.message == "Waiting for Studio Mac to allow this iPhone" })
+        #expect(h.model.pairingAwaitingMac == nil, "cleared once pairing finishes")
+        #expect(h.model.pairedMac?.name == "Studio Mac")
+    }
+}
+
+@Suite struct EmptyArtworkTests {
+    @Test func anEmptyArtworkIDMeansNoArtwork() throws {
+        let fromPush = try StandByWire.makeDecoder().decode(SessionTrack.self, from: Data(#"{"id":"t","title":"T","artist":"A","album":"B","duration":1,"artworkID":""}"#.utf8))
+        #expect(fromPush.artworkReference == nil)
+        let absent = SessionTrack(id: "t", title: "T", artist: "A", album: "B", duration: 1, artworkID: nil)
+        #expect(absent.artworkReference == nil)
+        let real = String(repeating: "a", count: 64)
+        #expect(SessionTrack(id: "t", title: "T", artist: "A", album: "B", duration: 1, artworkID: real).artworkReference == real)
+    }
+
+    @Test func theMacSendingAnEmptyIDIsNotArtwork() {
+        let attributes = MacPlaybackAttributes(mac: studioMac, message: message(track: track(artworkID: "")), sessionID: "s1")
+        #expect(attributes.track?.artworkID == nil)
     }
 }

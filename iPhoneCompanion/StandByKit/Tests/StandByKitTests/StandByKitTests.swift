@@ -186,9 +186,9 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
         let transport = MockTransport()
         let good = try #require(PairingCode("123456"))
         let bad = try #require(PairingCode(MockTransport.rejectedCode))
-        #expect(try await transport.pair(code: good).name == "Mock Mac")
+        #expect(try await transport.pair(code: good) { _ in }.name == "Mock Mac")
         await #expect(throws: TransportError.pairingRejected) {
-            _ = try await transport.pair(code: bad)
+            _ = try await transport.pair(code: bad) { _ in }
         }
     }
 }

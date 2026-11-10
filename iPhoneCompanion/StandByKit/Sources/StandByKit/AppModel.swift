@@ -20,6 +20,8 @@ public final class AppModel {
     public private(set) var commandsFromSystem: [CommandRecord] = []
     public private(set) var log: [DiagnosticEntry] = []
     public private(set) var isNowPlayingEnabled: Bool
+    /// Set while pairing waits for the person at the Mac to allow this phone.
+    public private(set) var pairingAwaitingMac: PairedMac?
 
     public let sessionController: any RemoteSessionControlling
     public let container: SharedContainer
@@ -129,12 +131,23 @@ public final class AppModel {
 
     public func pair(rawCode: String) async throws {
         guard let code = PairingCode(rawCode) else { throw TransportError.pairingRejected }
-        let mac = try await transport.pair(code: code)
+        defer { pairingAwaitingMac = nil }
+        let mac = try await transport.pair(code: code) { [weak self] progress in
+            await self?.show(progress)
+        }
         pairingStore.pairedMac = mac
         pairedMac = mac
         record("Paired with \(mac.name)")
         await uploadTokens()
         await transport.connect()
+    }
+
+    private func show(_ progress: PairingProgress) {
+        switch progress {
+        case .waitingForApproval(let mac):
+            pairingAwaitingMac = mac
+            record("Waiting for \(mac.name) to allow this iPhone")
+        }
     }
 
     public func reconnect() async {
@@ -236,15 +249,18 @@ public final class AppModel {
 
     private func apply(playback message: PlaybackMessage) async {
         guard let mac = pairedMac else { return }
+        // A relay names every session. Showing one under a made-up name would
+        // leave the Lock Screen with controls the relay refuses.
+        if transport.issuesSessionIDs, assignedSessionID == nil { return }
         if let latestMessage, !latestMessage.isSuperseded(by: message) {
             record("Ignored stale revision \(message.revision)")
             return
         }
         latestMessage = message
         let updated = MacPlaybackAttributes(mac: mac, message: message, sessionID: assignedSessionID)
-        let previousArtworkID = attributes?.track?.artworkID
+        let previousArtworkID = attributes?.track?.artworkReference
         attributes = updated
-        let artworkID = updated.track?.artworkID
+        let artworkID = updated.track?.artworkReference
         if artworkID != previousArtworkID {
             if let artworkID {
                 await loadArtwork(id: artworkID)
@@ -266,8 +282,10 @@ public final class AppModel {
     /// that is merely inside its grace period still counts.
     private var shouldShowSession: Bool {
         guard isNowPlayingEnabled, latestMessage?.state.continuesSession != false else { return false }
-        if case .connected = connection { return true }
-        return graceDeadline != nil
+        switch connection {
+        case .connected, .macOffline: return true
+        default: return graceDeadline != nil
+        }
     }
 
     private func activate(with attributes: MacPlaybackAttributes) async {

@@ -42,7 +42,7 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             albumName: track.album,
             type: .audio,
             duration: .finite(track.duration),
-            artwork: track.artworkID.map { artworkID in
+            artwork: track.artworkReference.map { artworkID in
                 Artwork(id: artworkID) { _ in
                     // PNG encoding never finished inside this extension on iOS 27.2 and the
                     // system kept relaunching it, so generated art skips the encoder.

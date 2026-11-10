@@ -4,6 +4,9 @@ public enum ConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
     case connected(macName: String)
+    /// The relay answers but the Mac isn't connected to it. The relay decides
+    /// when that ends the session, and says so.
+    case macOffline(macName: String)
     /// The link dropped and the transport is retrying. Temporary: a session
     /// survives this for the grace period in `SessionLifecyclePolicy`.
     case reconnecting
@@ -36,6 +39,10 @@ public enum TransportEvent: Sendable {
 
 public enum TransportError: Error, Equatable, Sendable, LocalizedError {
     case pairingRejected
+    /// The person at the Mac refused this phone.
+    case pairingDenied
+    /// The code or the wait for the Mac ran out.
+    case pairingExpired
     case notConnected
     case artworkUnavailable
     case notPaired
@@ -51,11 +58,14 @@ public enum TransportError: Error, Equatable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .pairingRejected: "That code wasn’t accepted. Check the code shown on your Mac."
+        case .pairingDenied: "Your Mac didn’t allow this iPhone."
+        case .pairingExpired: "The code expired before your Mac allowed this iPhone. Get a new code and try again."
         case .notConnected: "Your Mac isn’t connected."
         case .artworkUnavailable: "Artwork isn’t available."
         case .notPaired: "This iPhone isn’t paired with a Mac."
         case .rateLimited: "Too many attempts. Try again shortly."
         case .pairingRevoked: "This pairing has ended. Pair with your Mac again."
+        case .commandRejected(.sessionMismatch), .commandRejected(.noSession): "That session has ended on your Mac."
         case .commandRejected(let code): "Your Mac refused that command (\(code.rawValue))."
         case .macUnreachable: "Your Mac didn’t respond."
         case .network(let detail): "Network problem: \(detail)"
@@ -66,8 +76,17 @@ public enum TransportError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
+/// What pairing is waiting for, so the screen can say so.
+public enum PairingProgress: Equatable, Sendable {
+    /// The code was accepted. Nothing is granted until the person at this Mac allows it.
+    case waitingForApproval(PairedMac)
+}
+
 /// How the app talks to a Mac.
 public protocol PlaybackTransport: Sendable {
+    /// True when the far side names each Now Playing session, as the relay does.
+    /// The app then shows nothing until it has a name, and sends it with commands.
+    var issuesSessionIDs: Bool { get }
     /// A fresh event stream. It finishes any earlier stream and starts with the
     /// transport's current state, so a consumer that was cancelled can restart
     /// without missing where things stand.
@@ -78,10 +97,15 @@ public protocol PlaybackTransport: Sendable {
     /// so a Now Playing session survives it.
     func reconnect() async
     func disconnect() async
-    func pair(code: PairingCode) async throws -> PairedMac
+    /// Returns once the pairing is complete. `progress` hears about any wait.
+    func pair(code: PairingCode, progress: @escaping @Sendable (PairingProgress) async -> Void) async throws -> PairedMac
     func unpair() async
     func send(_ command: RemoteCommand) async throws -> CommandAck
     func artwork(id: String) async throws -> Data
+}
+
+extension PlaybackTransport {
+    public var issuesSessionIDs: Bool { false }
 }
 
 /// Delivers events to the current subscriber and remembers enough to bring a
@@ -124,7 +148,7 @@ public struct TransportEventHub: Sendable {
 
     private var isLinkUp: Bool {
         switch connection {
-        case .connected, .reconnecting: true
+        case .connected, .macOffline, .reconnecting: true
         case .disconnected, .connecting, .failed: false
         }
     }

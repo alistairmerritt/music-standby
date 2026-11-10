@@ -49,7 +49,8 @@ public struct SessionLifecyclePolicy: Equatable, Sendable {
 
     public func decision(from previous: ConnectionState, to next: ConnectionState) -> Decision {
         switch next {
-        case .connected:
+        case .connected, .macOffline:
+            // The relay answered, and it owns the session's lifetime from here.
             return .cancelGrace
         case .connecting:
             return .keep

@@ -18,7 +18,8 @@ public struct RelayCommandHandler: SessionCommandHandling {
     }
 
     public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
-        let ack = try await sender.send(RemoteCommand(kind: kind, issuedAt: date))
+        // The session on screen, so the relay can refuse a tap on a stale one.
+        let ack = try await sender.send(RemoteCommand(kind: kind, issuedAt: date), sessionID: attributes.id)
         guard ack.accepted else { throw TransportError.commandRejected(ack.error?.code ?? .commandFailed) }
         return nil
     }
@@ -91,7 +92,14 @@ public struct RelayPushTokenRegistrar: PushTokenRegistrar {
         guard let client = client() else { return }
         let tokens = local.current()
         if let start = tokens.pushToStart { try await client.registerStartToken(start) }
-        for (id, hex) in tokens.sessions { try await client.registerSessionToken(hex, sessionID: id) }
+        for (id, hex) in tokens.sessions {
+            do {
+                try await client.registerSessionToken(hex, sessionID: id)
+            } catch TransportError.commandRejected(.sessionMismatch) {
+                // That session is over at the relay. Its token is no use to anyone.
+                try? await local.invalidate(sessionID: id)
+            }
+        }
     }
 }
 

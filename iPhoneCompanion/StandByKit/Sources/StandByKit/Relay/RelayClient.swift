@@ -52,46 +52,67 @@ public struct URLSessionHTTP: HTTPSending {
 
 /// Sends a command and waits for the Mac's answer.
 public protocol CommandSender: Sendable {
-    func send(_ command: RemoteCommand) async throws -> CommandAck
+    /// `sessionID` is the Now Playing session the command came from. The relay
+    /// refuses a command for any other session.
+    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck
 }
 
 /// Authenticated HTTPS calls to the relay. Plain data and no process state, so
 /// the extension can use it while the main app is suspended or gone.
 public struct RelayClient: CommandSender, Sendable {
-    /// Apple documents no time budget for a command handler. The relay proposal
-    /// chose 1.5 s, just past its own 1.2 s wait for the Mac. Unmeasured.
+    /// Apple documents no time budget for a command handler. API-v1 §7 sets
+    /// 1.5 s, just past the relay's own 1.2 s wait for the Mac. Unmeasured.
     public static let commandTimeout: TimeInterval = 1.5
     public static let defaultTimeout: TimeInterval = 10
 
     public let configuration: RelayConfiguration
+    /// Needed only for the bearer form of the artwork path.
+    public let pairingID: String?
     private let http: any HTTPSending
     private let token: @Sendable () -> String?
     private let artworkPolicy: ArtworkPolicy
 
-    public init(configuration: RelayConfiguration, http: any HTTPSending, artworkPolicy: ArtworkPolicy = ArtworkPolicy(), token: @escaping @Sendable () -> String?) {
+    public init(configuration: RelayConfiguration, http: any HTTPSending, artworkPolicy: ArtworkPolicy = ArtworkPolicy(), pairingID: String? = nil, token: @escaping @Sendable () -> String?) {
         self.configuration = configuration
         self.http = http
         self.artworkPolicy = artworkPolicy
+        self.pairingID = pairingID
         self.token = token
     }
 
-    // MARK: Endpoints
+    // MARK: Pairing
 
-    /// Trades a six-digit code for a phone token. Needs no authorisation.
-    public func claimPairing(code: PairingCode, device: DeviceIdentity) async throws -> PairingGrant {
-        var request = try makeRequest(RelayPath.claimPairing, method: "POST", authenticated: false)
-        try attach(PairingClaim(code: code.value, device: device), to: &request)
+    /// Offers a six-digit code. Grants nothing: the person at the Mac must allow
+    /// this phone, which `claimStatus(_:)` reports.
+    public func claimPairing(code: PairingCode, device: DeviceIdentity) async throws -> PairingClaimResponse {
+        var request = try makeRequest(RelayPath.claimPairing, method: "POST", bearer: nil)
+        try attach(PairingClaimRequest(code: code.value, phone: device), to: &request)
         do {
-            return try decode(PairingGrant.self, from: try await perform(request).0)
+            return try decode(PairingClaimResponse.self, from: try await perform(request).0)
         } catch TransportError.httpStatus(404), TransportError.commandRejected {
+            // Whatever the relay calls it, a refused code is a refused code.
             throw TransportError.pairingRejected
         }
     }
 
-    public func send(_ command: RemoteCommand) async throws -> CommandAck {
+    /// One poll of a claim, authenticated by its own secret. `approved` carries
+    /// the phone token, once.
+    public func claimStatus(_ claim: PairingClaimResponse) async throws -> PairingClaimStatus {
+        let request = try makeRequest(RelayPath.claimStatus(id: claim.claimID), method: "GET", bearer: claim.claimSecret)
+        do {
+            return try decode(PairingClaimStatus.self, from: try await perform(request).0)
+        } catch TransportError.pairingRevoked, TransportError.httpStatus(410) {
+            // An unknown claim secret means the claim is gone.
+            throw TransportError.pairingExpired
+        }
+    }
+
+    // MARK: Session
+
+    public func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
         var request = try makeRequest(RelayPath.commands, method: "POST", timeout: Self.commandTimeout)
         request.setValue(command.id.uuidString, forHTTPHeaderField: "Idempotency-Key")
-        try attach(CommandRequest(command: command), to: &request)
+        try attach(CommandRequest(command: command, sessionID: sessionID), to: &request)
         let response: CommandResponse
         do {
             response = try decode(CommandResponse.self, from: try await perform(request).0)
@@ -102,15 +123,34 @@ public struct RelayClient: CommandSender, Sendable {
         return response.ack
     }
 
+    /// What the relay holds now: the session, if any, and the Mac's last state.
+    public func fetchSession() async throws -> SessionState {
+        try decode(SessionState.self, from: try await perform(try makeRequest(RelayPath.session, method: "GET")).0)
+    }
+
+    /// Ends the session at the relay. It then starts no new one for the same
+    /// listening session on the Mac (API-v1 §6).
+    public func endSession(sessionID: String) async throws {
+        var request = try makeRequest(RelayPath.endSession, method: "POST")
+        try attach(SessionEndRequest(sessionID: sessionID), to: &request)
+        _ = try await perform(request)
+    }
+
+    public func deletePairing() async throws {
+        _ = try await perform(try makeRequest(RelayPath.pairing, method: "DELETE"))
+    }
+
+    // MARK: Push tokens
+
     public func registerStartToken(_ hex: String) async throws {
-        var request = try makeRequest(RelayPath.startToken, method: "POST")
-        try attach(StartTokenRegistration(pushToStartToken: hex), to: &request)
+        var request = try makeRequest(RelayPath.startToken, method: "PUT")
+        try attach(PushToStartTokenRegistration(token: hex), to: &request)
         _ = try await perform(request)
     }
 
     public func registerSessionToken(_ hex: String, sessionID: String) async throws {
-        var request = try makeRequest(RelayPath.sessionToken, method: "POST")
-        try attach(SessionTokenRegistration(sessionID: sessionID, pushToken: hex), to: &request)
+        var request = try makeRequest(RelayPath.sessionToken, method: "PUT")
+        try attach(SessionPushTokenRegistration(sessionID: sessionID, token: hex), to: &request)
         _ = try await perform(request)
     }
 
@@ -118,33 +158,27 @@ public struct RelayClient: CommandSender, Sendable {
         _ = try await perform(try makeRequest(RelayPath.sessionToken(id: sessionID), method: "DELETE"))
     }
 
-    /// The authoritative state, or nil when the relay holds no session.
-    public func fetchSession() async throws -> RelaySession? {
-        let (data, response) = try await perform(try makeRequest(RelayPath.session, method: "GET"))
-        if response.statusCode == 204 { return nil }
-        return try decode(RelaySessionResponse.self, from: data).session
-    }
-
-    public func deletePairing() async throws {
-        _ = try await perform(try makeRequest(RelayPath.pairing, method: "DELETE"))
-    }
-
     // MARK: Requests
 
-    func makeRequest(_ path: String, method: String, authenticated: Bool = true, timeout: TimeInterval = RelayClient.defaultTimeout) throws -> URLRequest {
+    /// Authenticated with the phone token unless `bearer` says otherwise.
+    func makeRequest(_ path: String, method: String, timeout: TimeInterval = RelayClient.defaultTimeout) throws -> URLRequest {
+        guard let token = token() else { throw TransportError.notPaired }
+        return try makeRequest(path, method: method, bearer: token, timeout: timeout)
+    }
+
+    func makeRequest(_ path: String, method: String, bearer: String?, timeout: TimeInterval = RelayClient.defaultTimeout) throws -> URLRequest {
         var base = configuration.baseURL.absoluteString
         while base.hasSuffix("/") { base.removeLast() }
         guard let url = URL(string: "\(base)/\(path)") else { throw TransportError.malformedResponse }
-        return try makeRequest(url: url, method: method, authenticated: authenticated, timeout: timeout)
+        return makeRequest(url: url, method: method, bearer: bearer, timeout: timeout)
     }
 
-    private func makeRequest(url: URL, method: String, authenticated: Bool, timeout: TimeInterval) throws -> URLRequest {
+    private func makeRequest(url: URL, method: String, bearer: String?, timeout: TimeInterval) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         request.setValue(String(StandByWire.version), forHTTPHeaderField: "X-Protocol-Version")
-        if authenticated {
-            guard let token = token() else { throw TransportError.notPaired }
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let bearer {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
         return request
     }
@@ -188,14 +222,18 @@ public struct RelayClient: CommandSender, Sendable {
     private static func error(for response: HTTPURLResponse, body: Data) -> TransportError {
         let detail = try? StandByWire.makeDecoder().decode(ErrorResponse.self, from: body).error
         switch (response.statusCode, detail?.code) {
-        case (401, _), (_, .pairingRevoked?):
+        case (401, _), (_, .unauthorized?), (_, .pairingRevoked?):
             return .pairingRevoked
         case (429, _), (_, .rateLimited?):
             return .rateLimited(retryAfter: detail?.retryAfter ?? response.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init))
         case (504, _), (_, .macUnreachable?):
             return .macUnreachable
-        case (_, .pairingRejected?):
+        case (_, .pairingRejected?), (_, .pairingCodeInvalid?):
             return .pairingRejected
+        case (_, .claimExpired?):
+            return .pairingExpired
+        case (_, .claimDenied?):
+            return .pairingDenied
         case (_, let code?):
             return .commandRejected(code)
         default:
@@ -207,20 +245,30 @@ public struct RelayClient: CommandSender, Sendable {
 // MARK: - Artwork
 
 extension RelayClient: ArtworkFetching {
+    /// A signed capability URL from the relay. Only its own host is trusted, and
+    /// the phone token rides along so an expired signature still works.
     public func fetch(url: URL) async throws -> Data {
         try artworkPolicy.validate(url: url, allowedHost: configuration.host)
-        return try await fetchArtwork(try makeRequest(url: url, method: "GET", authenticated: true, timeout: artworkPolicy.timeout))
+        return try await fetchArtwork(makeRequest(url: url, method: "GET", bearer: token(), timeout: artworkPolicy.timeout))
     }
 
+    /// The bearer form, for when there is no signed URL to hand.
     public func fetch(id: String) async throws -> Data {
-        guard ArtworkID.isValid(id) else { throw TransportError.artworkUnavailable }
-        return try await fetchArtwork(try makeRequest(RelayPath.artwork(id: id), method: "GET", timeout: artworkPolicy.timeout))
+        guard ArtworkID.isValid(id), let pairingID else { throw TransportError.artworkUnavailable }
+        return try await fetchArtwork(try makeRequest(RelayPath.artwork(pairingID: pairingID, artworkID: id), method: "GET", timeout: artworkPolicy.timeout))
     }
 
     private func fetchArtwork(_ source: URLRequest) async throws -> Data {
         var request = source
         request.setValue("\(ArtworkFormat.png.rawValue), \(ArtworkFormat.jpeg.rawValue)", forHTTPHeaderField: "Accept")
-        let (data, response) = try await perform(request, maxBytes: artworkPolicy.maximumByteCount)
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await perform(request, maxBytes: artworkPolicy.maximumByteCount)
+        } catch TransportError.pairingRevoked {
+            // A bad signature also answers 401. Missing artwork never ends a pairing.
+            throw TransportError.artworkUnavailable
+        }
         try artworkPolicy.validate(data: data, contentType: response.value(forHTTPHeaderField: "Content-Type"))
         return data
     }

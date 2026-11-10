@@ -52,7 +52,7 @@ public actor MockTransport: PlaybackTransport {
         hub.reset()
     }
 
-    public func pair(code: PairingCode) async throws -> PairedMac {
+    public func pair(code: PairingCode, progress: @escaping @Sendable (PairingProgress) async -> Void) async throws -> PairedMac {
         guard code.value != Self.rejectedCode else { throw TransportError.pairingRejected }
         return mac
     }

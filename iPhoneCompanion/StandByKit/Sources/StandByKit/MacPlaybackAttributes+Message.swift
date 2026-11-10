@@ -12,7 +12,7 @@ extension MacPlaybackAttributes {
             elapsedTime: message.elapsedTime,
             timestamp: message.capturedAt,
             track: message.track.map {
-                SessionTrack(id: $0.id, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration, artworkID: $0.artworkID)
+                SessionTrack(id: $0.id, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration, artworkID: $0.artworkID.flatMap { $0.isEmpty ? nil : $0 })
             },
             canGoNext: message.canGoNext,
             canGoPrevious: message.canGoPrevious

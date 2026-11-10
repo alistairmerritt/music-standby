@@ -21,6 +21,13 @@ public struct SessionTrack: Codable, Equatable, Sendable {
         self.artworkID = artworkID
         self.artworkURL = artworkURL
     }
+
+    /// The artwork to show, if any. The relay sends `""` for a track without
+    /// artwork, because a field the system can't decode loses the whole push.
+    public var artworkReference: String? {
+        guard let artworkID, !artworkID.isEmpty else { return nil }
+        return artworkID
+    }
 }
 
 /// The state handed to the system and decoded by the Now Playing extension.

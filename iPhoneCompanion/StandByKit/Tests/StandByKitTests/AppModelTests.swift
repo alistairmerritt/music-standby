@@ -6,6 +6,8 @@ import Testing
 
 actor FakeTransport: PlaybackTransport {
     private var hub = TransportEventHub()
+    nonisolated let issuesSessionIDs: Bool
+    init(issuesSessionIDs: Bool = false) { self.issuesSessionIDs = issuesSessionIDs }
     private(set) var subscribeCount = 0
     private(set) var connectCount = 0
     private(set) var reconnectCount = 0
@@ -24,7 +26,11 @@ actor FakeTransport: PlaybackTransport {
         hub.send(.connection(.connected(macName: "Studio Mac")))
     }
     func disconnect() { hub.send(.connection(.disconnected)) }
-    func pair(code: PairingCode) -> PairedMac { PairedMac(id: "a", name: "Studio Mac") }
+    func pair(code: PairingCode, progress: @escaping @Sendable (PairingProgress) async -> Void) async -> PairedMac {
+        let mac = PairedMac(id: "a", name: "Studio Mac")
+        await progress(.waitingForApproval(mac))
+        return mac
+    }
     func unpair() {
         unpairCount += 1
         hub.send(.connection(.disconnected))
@@ -132,7 +138,7 @@ func message(revision: UInt64 = 1, state: PlaybackState = .playing, track trackV
 
 @MainActor
 struct Harness {
-    let transport = FakeTransport()
+    let transport: FakeTransport
     let controller = FakeSessionController()
     let sleeper = ManualSleeper()
     let clock = MutableClock()
@@ -140,7 +146,9 @@ struct Harness {
     let model: AppModel
     let defaults: UserDefaults
 
-    init(paired: Bool = true, nowPlayingEnabled: Bool = true) {
+    init(paired: Bool = true, nowPlayingEnabled: Bool = true, relayNamesSessions: Bool = false) {
+        let transport = FakeTransport(issuesSessionIDs: relayNamesSessions)
+        self.transport = transport
         let suite = "test-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         self.defaults = defaults

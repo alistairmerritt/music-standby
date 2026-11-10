@@ -5,14 +5,20 @@ import UIKit
 /// Assembles the app's dependencies.
 @MainActor
 enum AppEnvironment {
-    /// The relay to use. None exists yet, so Debug builds run on the mock.
-    /// A Debug launch can point at a development relay with `MSB_RELAY_URL`.
+    /// The relay to use. A build gets it from the `MSB_RELAY_HOST` build setting,
+    /// which the repository leaves empty; pass it to `xcodebuild` or set it
+    /// locally. Without one, Debug builds run on the mock. A Debug launch from
+    /// Xcode can point at a development relay with the `MSB_RELAY_URL`
+    /// environment variable, such as `http://127.0.0.1:8787`.
     private static var relayConfiguration: RelayConfiguration? {
         #if DEBUG
         if let raw = ProcessInfo.processInfo.environment["MSB_RELAY_URL"], let url = URL(string: raw) {
             return RelayConfiguration(baseURL: url)
         }
         #endif
+        if let host = Bundle.main.object(forInfoDictionaryKey: "MSBRelayHost") as? String {
+            return RelayConfiguration(host: host)
+        }
         return nil
     }
 
@@ -51,6 +57,7 @@ enum AppEnvironment {
         let key = "deviceIdentifier"
         let id = defaults.string(forKey: key) ?? UUID().uuidString
         defaults.set(id, forKey: key)
-        return DeviceIdentity(id: id, name: UIDevice.current.name, kind: .iPhone, osVersion: UIDevice.current.systemVersion)
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return DeviceIdentity(id: id, name: UIDevice.current.name, kind: .iPhone, appVersion: version, osVersion: UIDevice.current.systemVersion)
     }
 }
