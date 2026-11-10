@@ -3,7 +3,7 @@
 The server between the Mac companion and the iPhone. It implements
 **[docs/relay/API-v1.md](../docs/relay/API-v1.md)**. It is a Cloudflare Worker with one Durable Object per
 pairing. It runs locally under `wrangler dev`, the same `workerd` runtime Cloudflare uses,
-and is deployed to a `workers.dev` hostname with pushes still mocked (see
+and is deployed to a `workers.dev` hostname, sending real APNs pushes (see
 [Deployment](#deployment)).
 
 | File | What |
@@ -69,7 +69,7 @@ To drive it by hand, run `npm run dev`, then
 
 | Variable | Default | |
 | --- | --- | --- |
-| `PUSH_MODE` | `mock` | `apns` sends real pushes; needs the three secrets below |
+| `PUSH_MODE` | `apns` | Sends real pushes with the three secrets below; without them, and with `mock`, it records them instead |
 | `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID` | — | Secrets (`wrangler secret put`). Never in `wrangler.toml` |
 | `APNS_ENVIRONMENT` | `development` | `production` uses `api.push.apple.com` |
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
@@ -87,7 +87,7 @@ Durable Objects are on Cloudflare's free plan.
 npm run deploy
 ```
 
-That deploys `wrangler.toml` as it stands: `PUSH_MODE=mock`, `DEV_ENDPOINTS=0`. Against the
+That deploys `wrangler.toml` as it stands: `PUSH_MODE=apns`, `DEV_ENDPOINTS=0`. Against the
 deployment, the harness skips the relay restart and unpairs its test Mac when it finishes:
 
 ```bash
@@ -102,6 +102,15 @@ Later on 10 November the artwork wait (a GET for artwork the Mac was just asked 
 3 s for the upload instead of answering `404`) was deployed as version `cb80f918`, after
 `npm test` (48 tests) and the local harness with `--playback` (31/31) passed. A real iPhone
 then downloaded artwork for two new tracks with no `404`.
+
+On 11 November real pushes were turned on, as version `1eec6457`. The secrets were set with
+`wrangler secret put` (`APNS_KEY_P8` from the `.p8` file, `APNS_KEY_ID`, `APNS_TEAM_ID`); the
+key was first checked against APNs' sandbox, which answered `BadDeviceToken` for a dummy
+device, so the provider token, team and topic were accepted. Two bugs that had never run
+were fixed first, with tests (52 in all): the sender called the global `fetch` as a method,
+which Workers reject with "Illegal invocation", and it signed a new provider token for every
+push, which APNs refuses more than once every 20 minutes. On a real iPhone, every `update`
+push got `200` and reached the phone 1.4–3 s after the change at the Mac.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
@@ -123,26 +132,24 @@ npx wrangler deploy
 
 ## APNs status
 
-- **Mocked by default.** `/v1/dev/pushes` shows what would have been sent. The `start`,
-  `update` and `end` payloads, headers and ES256 provider token are unit-tested against
-  Apple's documented format, including verifying the JWT signature, but have never reached
-  APNs.
-- **Locally, `workerd` can't reach APNs.** `GET /v1/dev/apns-probe` gets "Network connection
-  lost". `curl --http2` from the same Mac gets APNs' `403 InvalidProviderToken`; `curl
-  --http1.1` fails just as `workerd` does. That fits `workerd` having no HTTP/2 client.
-- **A deployed Worker does reach APNs.** On 10 November the probe from the deployment got
-  APNs' own `403 InvalidProviderToken`, with an `apns-id`, three times out of three: 687 ms
-  cold, then about 170 ms. APNs answers only over HTTP/2, so the Worker can send pushes
-  itself, with no separate push service. Real pushes still need an APNs key from the paid
-  Apple Developer Program.
+- **Live since 11 November.** `APNsPushSender` sends `start`, `update` and `end` pushes to the
+  sandbox (`APNS_ENVIRONMENT=development`, for Xcode-signed builds). The provider token is
+  stored in the pairing's Durable Object and reused for 30 minutes, so an evicted object
+  doesn't sign a new one; APNs' `ExpiredProviderToken` drops it.
+- **Tokens APNs rejects are forgotten.** A start push to a token from an older build got
+  `400 BadDeviceToken`, and the relay dropped it; the phone then registered fresh tokens.
+- **Locally, `workerd` can't reach APNs**: it has no HTTP/2 client. `npm run dev` and the
+  tests have no secrets, so they record pushes (`/v1/dev/pushes`) instead.
 
 ## Known limits
 
 Deliberate for version 1, and fine for one Mac and one phone:
 
 - **Push pacing.** There's no one-per-second cap. The Mac already sends only visible changes,
-  and the relay pushes once per accepted state. `apns-collapse-id` isn't set. Revisit after
-  real APNs testing.
+  and the relay pushes once per accepted state. `apns-collapse-id` isn't set. A skip, a pause
+  and a skip gave four pushes, all delivered.
+- **One provider token per pairing.** Fine for one Mac; many pairings sharing a key would
+  need one token between them.
 - **Artwork** lives in Durable Object storage: up to 1 MB each, the 64 most recent per
   pairing. R2 is the move if that's ever too small.
 - **One phone per Mac.** Approving a new phone revokes the old phone's credential and ends

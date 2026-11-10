@@ -20,7 +20,7 @@ import {
   type RelayFrame,
   type RemoteCommand,
 } from "./protocol";
-import { APNsPushSender, MockPushSender, makePush, tokenIsDead, type Push, type PushEvent, type PushSender } from "./push";
+import { APNsPushSender, MockPushSender, makePush, tokenIsDead, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
 
 // One Durable Object per pairing (one Mac, at most one phone). It holds the
 // credentials' hashes, the Mac's WebSocket, the latest playback, the Now
@@ -93,6 +93,8 @@ export class Pairing extends DurableObject<Env> {
   private requested = new Map<string, number>();
   /** Artwork GETs waiting for the Mac's upload, by artwork id. */
   private artworkWaiters = new Map<string, Set<() => void>>();
+  /** Kept so pushes reuse one provider token; see ProviderTokenStore. */
+  private apns?: APNsPushSender;
 
   private get ackTimeout(): number {
     return Number(this.env.ACK_TIMEOUT_MS ?? 1200);
@@ -606,13 +608,21 @@ export class Pairing extends DurableObject<Env> {
   private pushSender(): PushSender {
     const env = this.env;
     if (env.PUSH_MODE === "apns" && env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APNS_TEAM_ID) {
-      return new APNsPushSender({
-        keyP8: env.APNS_KEY_P8,
-        keyID: env.APNS_KEY_ID,
-        teamID: env.APNS_TEAM_ID,
-        topic: env.APNS_TOPIC ?? "com.alistairmerritt.MusicStandBy.push-type.nowplaying",
-        environment: env.APNS_ENVIRONMENT === "production" ? "production" : "development",
-      });
+      this.apns ??= new APNsPushSender(
+        {
+          keyP8: env.APNS_KEY_P8,
+          keyID: env.APNS_KEY_ID,
+          teamID: env.APNS_TEAM_ID,
+          topic: env.APNS_TOPIC ?? "com.alistairmerritt.MusicStandBy.push-type.nowplaying",
+          environment: env.APNS_ENVIRONMENT === "production" ? "production" : "development",
+        },
+        undefined,
+        {
+          get: () => this.ctx.storage.get<ProviderToken>("apnsProviderToken"),
+          put: (token) => (token ? this.ctx.storage.put("apnsProviderToken", token) : this.ctx.storage.delete("apnsProviderToken").then(() => {})),
+        },
+      );
+      return this.apns;
     }
     return new MockPushSender(async (push) => {
       const pushes = (await this.ctx.storage.get<RecordedPush[]>("pushes")) ?? [];

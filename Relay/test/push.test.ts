@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { APNsPushSender, makePush, tokenIsDead } from "../src/push";
+import { afterEach, describe, expect, it } from "vitest";
+import { APNsPushSender, makePush, tokenIsDead, type ProviderToken, type ProviderTokenStore } from "../src/push";
 import type { NowPlayingAttributes } from "../src/protocol";
 
 const attributes: NowPlayingAttributes = {
@@ -88,5 +88,85 @@ describe("APNsPushSender", () => {
     const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "production" }, fetcher);
     expect(sender.host).toBe("https://api.push.apple.com");
     expect(await sender.send(makePush("end", "ff", attributes))).toEqual({ status: 400, reason: "BadDeviceToken" });
+  });
+
+  describe("the global fetch", () => {
+    const realFetch = globalThis.fetch;
+    afterEach(() => {
+      globalThis.fetch = realFetch;
+    });
+
+    it("is called without a this, as Workers require", async () => {
+      // A deployed Worker throws "Illegal invocation" when fetch is called as a
+      // method of another object; this stand-in does the same.
+      const { pem } = await testKey();
+      let calls = 0;
+      globalThis.fetch = function (this: unknown) {
+        if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+        calls += 1;
+        return Promise.resolve(new Response(null, { status: 200 }));
+      } as typeof fetch;
+      const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" });
+      expect(await sender.send(makePush("update", "ab", attributes))).toEqual({ status: 200 });
+      expect(calls).toBe(1);
+    });
+  });
+
+  describe("the provider token", () => {
+    const t0 = 1794207600000;
+    function memoryStore(): ProviderTokenStore & { saved?: ProviderToken; puts: number } {
+      const store = {
+        saved: undefined as ProviderToken | undefined,
+        puts: 0,
+        get: async () => store.saved,
+        put: async (token: ProviderToken | undefined) => {
+          store.saved = token;
+          store.puts += 1;
+        },
+      };
+      return store;
+    }
+
+    it("outlives the sender, so a woken Durable Object doesn't sign a new one", async () => {
+      const { pem } = await testKey();
+      const config = { keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" as const };
+      const store = memoryStore();
+      const jwt = await new APNsPushSender(config, undefined, store).providerToken(t0);
+      expect(store.saved).toEqual({ token: jwt, issuedAt: t0, keyID: "K", teamID: "T" });
+      expect(await new APNsPushSender(config, undefined, store).providerToken(t0 + 25 * 60_000)).toBe(jwt);
+      expect(store.puts).toBe(1);
+      // Past 30 minutes a new one is signed and stored.
+      const renewed = await new APNsPushSender(config, undefined, store).providerToken(t0 + 31 * 60_000);
+      expect(renewed).not.toBe(jwt);
+      expect(store.saved?.token).toBe(renewed);
+    });
+
+    it("isn't reused for a different key or team", async () => {
+      const { pem } = await testKey();
+      const store = memoryStore();
+      const jwt = await new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" }, undefined, store).providerToken(t0);
+      const otherKey = await new APNsPushSender({ keyP8: pem, keyID: "K2", teamID: "T", topic: "t", environment: "development" }, undefined, store).providerToken(t0 + 60_000);
+      expect(otherKey).not.toBe(jwt);
+      const otherTeam = await new APNsPushSender({ keyP8: pem, keyID: "K2", teamID: "T2", topic: "t", environment: "development" }, undefined, store).providerToken(t0 + 120_000);
+      expect(otherTeam).not.toBe(otherKey);
+    });
+
+    it("is dropped when APNs says it expired", async () => {
+      const { pem } = await testKey();
+      const store = memoryStore();
+      const seen: string[] = [];
+      let answer = new Response(JSON.stringify({ reason: "ExpiredProviderToken" }), { status: 403 });
+      const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(new Request(input, init).headers.get("authorization") ?? "");
+        return answer;
+      }) as typeof fetch;
+      const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" }, fetcher, store);
+      expect(await sender.send(makePush("update", "ab", attributes))).toEqual({ status: 403, reason: "ExpiredProviderToken" });
+      expect(store.saved).toBeUndefined();
+      answer = new Response(null, { status: 200 });
+      expect(await sender.send(makePush("update", "ab", attributes))).toEqual({ status: 200 });
+      expect(seen[1]).not.toBe(seen[0]);
+      expect(store.saved?.token).toBe(seen[1].replace("bearer ", ""));
+    });
   });
 });

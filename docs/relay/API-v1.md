@@ -238,10 +238,12 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   Example: `Examples/apns-update-payload.json`. `aps.timestamp` is integer seconds;
   dates inside `attributes` are ISO-8601 strings, as in Apple's examples.
 - **The APNs key lives only in the relay's secrets.** Neither app ever sees it.
-- **Version 1 ships with pushes mocked.** The relay records what it would send. Live APNs needs
-  the paid developer programme for a key. Cloudflare `fetch()` does speak HTTP/2 to APNs (relay
-  design §8): a probe from the deployed relay on 10 November 2026 got APNs' own
-  `403 InvalidProviderToken` with an `apns-id`, so the relay can send pushes itself.
+- **Live APNs since 11 November 2026.** Cloudflare `fetch()` speaks HTTP/2 to APNs (relay
+  design §8), so the relay sends pushes itself. Without the APNs secrets (`npm run dev`, the
+  tests) it records what it would send instead.
+- **The phone decodes `attributes` itself.** iOS 27.2's decoder couldn't read the ISO-8601
+  `timestamp` with milliseconds, so the iOS client reads it, and `artworkURL`, as strings. Keep
+  them strings.
 
 ---
 

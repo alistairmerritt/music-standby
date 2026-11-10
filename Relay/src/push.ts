@@ -2,9 +2,8 @@
 // push type `nowplaying`, topic `<bundle id>.push-type.nowplaying`, `start` to
 // the push-to-start token, `update` and `end` to the session's own token.
 //
-// Version 1 runs with MockPushSender. APNsPushSender is written to Apple's
-// documentation but has never reached APNs: that needs a key from the paid
-// developer programme and a deployed Worker (workerd has no HTTP/2 client).
+// MockPushSender records pushes; APNsPushSender sends them. APNs answers only
+// over HTTP/2, which a deployed Worker has and local workerd doesn't.
 
 import { base64url } from "./crypto";
 import type { NowPlayingAttributes } from "./protocol";
@@ -66,12 +65,36 @@ export interface APNsConfig {
   environment: "development" | "production";
 }
 
+/** A signed provider token, with what it was signed for and when. */
+export interface ProviderToken {
+  token: string;
+  issuedAt: number;
+  keyID: string;
+  teamID: string;
+}
+
+/**
+ * Keeps the provider token across instances. A Durable Object is evicted
+ * between pushes; without this, each wake would sign a new token, and APNs
+ * answers 429 TooManyProviderTokenUpdates to more than one every 20 minutes.
+ */
+export interface ProviderTokenStore {
+  get(): Promise<ProviderToken | undefined>;
+  put(token: ProviderToken | undefined): Promise<void>;
+}
+
+/** Apple: refresh no more than once every 20 minutes, and within 60. */
+const PROVIDER_TOKEN_REUSE_MS = 30 * 60 * 1000;
+
 export class APNsPushSender implements PushSender {
-  private jwt?: { token: string; issuedAt: number };
+  private jwt?: ProviderToken;
 
   constructor(
     private readonly config: APNsConfig,
-    private readonly fetcher: typeof fetch = fetch,
+    // Called through a wrapper: Workers throw "Illegal invocation" when the
+    // global fetch is called as a method of another object.
+    private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
+    private readonly store?: ProviderTokenStore,
   ) {}
 
   get host(): string {
@@ -91,6 +114,10 @@ export class APNsPushSender implements PushSender {
     } catch {
       // APNs always sends JSON on failure; anything else is a transport problem.
     }
+    if (response.status === 403 && reason === "ExpiredProviderToken") {
+      this.jwt = undefined;
+      await this.store?.put(undefined);
+    }
     return { status: response.status, reason };
   }
 
@@ -106,17 +133,29 @@ export class APNsPushSender implements PushSender {
     };
   }
 
-  /** ES256 JWT, reused for 30 minutes (Apple: refresh every 20–60). */
+  /** ES256 JWT, reused for 30 minutes, from memory or the store. */
   async providerToken(now = Date.now()): Promise<string> {
-    if (this.jwt && now - this.jwt.issuedAt < 30 * 60 * 1000) return this.jwt.token;
+    if (this.usable(this.jwt, now)) return this.jwt.token;
+    const stored = await this.store?.get();
+    if (this.usable(stored, now)) {
+      this.jwt = stored;
+      return stored.token;
+    }
     const header = base64url(new TextEncoder().encode(JSON.stringify({ alg: "ES256", kid: this.config.keyID })));
     const claims = base64url(new TextEncoder().encode(JSON.stringify({ iss: this.config.teamID, iat: Math.floor(now / 1000) })));
     const key = await crypto.subtle.importKey("pkcs8", pemToBytes(this.config.keyP8), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
     // Web Crypto gives the raw r‖s signature JWS wants.
     const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(`${header}.${claims}`));
     const token = `${header}.${claims}.${base64url(signature)}`;
-    this.jwt = { token, issuedAt: now };
+    this.jwt = { token, issuedAt: now, keyID: this.config.keyID, teamID: this.config.teamID };
+    await this.store?.put(this.jwt);
     return token;
+  }
+
+  private usable(token: ProviderToken | undefined, now: number): token is ProviderToken {
+    if (!token || token.keyID !== this.config.keyID || token.teamID !== this.config.teamID) return false;
+    const age = now - token.issuedAt;
+    return age >= 0 && age < PROVIDER_TOKEN_REUSE_MS;
   }
 }
 
