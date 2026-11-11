@@ -13,7 +13,7 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 100 tests in 12 suites pass (`swift test`, 11 November) |
+| Unit tests | 105 tests in 12 suites pass (`swift test`, 11 November) |
 | Shared protocol | 56 tests in 10 suites pass (`scripts/test.sh`, 10 November); builds for iOS with `xcodebuild` |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
@@ -352,6 +352,17 @@ of time. The companion now uploads a new song's artwork before sending that stat
 connection, and waits at most 2 s (`uploadAheadLimit`) before sending the state anyway. The
 upload carries on in the background, and `artwork-request` remains the fallback. Together with
 the phone and relay changes (iOS STATUS, relay README), the artwork showed on the iPhone. 100 tests.
+
+**Artwork sooner (11 November).** The wait before trusting Music's artwork after a track
+change is now 0.75 s, down from 1.5 s. The previous song's image from another album is still
+caught and read again, now 0.5 s later rather than on the next poll. The next song from the same
+album (same name and album artist, or artist) shows the previous song's artwork at once, until
+Music's own is read. Executed with `msbctl watch` over 8 skips of an autoplay queue at volume 0:
+8 songs, 8 different images, each about 1.0 s after the title (1.7 s before). The phone handed
+each image over 0.25–0.55 s after the update reached it. All 8 songs were from different
+albums, so the same-album case has only unit tests. Seen in passing, and older than this change:
+just before a skip takes effect, Music can report the outgoing song with no artwork for about
+0.25 s. That sends one state without artwork and an unneeded catalogue lookup. 105 tests.
 
 ## For the relay design
 

@@ -37,8 +37,13 @@ public final class Companion {
     /// Wait between a command and re-reading Music. 0.4 s was verified enough.
     @ObservationIgnored public var settleDelay: Duration = .milliseconds(400)
     /// How long after a track change Music's artwork isn't trusted. Music can
-    /// report the previous track's image in that time, then none at all.
-    @ObservationIgnored public var artworkSettle: TimeInterval = 1.5
+    /// report the previous track's image in that time, then none at all. Was
+    /// 1.5 s; 0.75 s since 11 Nov 2026, as the previous track's image from
+    /// another album is caught and read again anyway (`isStale`).
+    @ObservationIgnored public var artworkSettle: TimeInterval = 0.75
+    /// How soon Music is asked again after handing out the previous track's
+    /// image, rather than waiting for the next poll.
+    static let staleArtworkRetry: TimeInterval = 0.5
     @ObservationIgnored private var settleRead: Task<Void, Never>?
     /// Artwork the relay has from this connection, so it isn't sent twice.
     @ObservationIgnored private var uploadedArtwork: Set<String> = []
@@ -60,9 +65,10 @@ public final class Companion {
     @ObservationIgnored private var publisher: PlaybackPublisher
     @ObservationIgnored private var artworkByTrack: [String: ArtworkEntry] = [:]
     /// The track whose artwork is being shown, and since when.
-    @ObservationIgnored private var shownTrack: (id: String, album: String, since: Date)?
-    /// The artwork the previous track had, to catch Music still handing it out.
-    @ObservationIgnored private var previousArtwork: (trackID: String, album: String, artworkID: String)?
+    @ObservationIgnored private var shownTrack: (id: String, album: String, albumKey: String?, since: Date)?
+    /// The artwork the previous track had, to catch Music still handing it out,
+    /// and to stand in for the next song from the same album.
+    @ObservationIgnored private var previousArtwork: (trackID: String, album: String, albumKey: String?, artworkID: String)?
     /// After a skip Music can go on returning the previous track's image for
     /// the new one: for 0.9 s once, for a whole track another time (11 Nov
     /// 2026). An identical image from a different album is read again during
@@ -346,9 +352,9 @@ public final class Companion {
         }
         if shownTrack?.id != track.trackID {
             if let shown = shownTrack, let art = artwork {
-                previousArtwork = (shown.id, shown.album, art.artworkID)
+                previousArtwork = (shown.id, shown.album, shown.albumKey, art.artworkID)
             }
-            shownTrack = (track.trackID, track.album, now())
+            shownTrack = (track.trackID, track.album, Self.albumKey(track), now())
         }
         let processed: ProcessedArtwork?
         switch await musicArtwork(for: track) {
@@ -380,7 +386,13 @@ public final class Companion {
             return .none
         }
         if let shown = shownTrack, shown.id == key, now().timeIntervalSince(shown.since) < artworkSettle {
-            readAgainAfterSettling(key, since: shown.since)
+            readAgain(key, after: artworkSettle - now().timeIntervalSince(shown.since))
+            // Songs from one album share artwork, so the previous song's stands
+            // in until Music's can be trusted. Not cached: that read replaces it.
+            if let previous = previousArtwork, previous.trackID != key, let album = shown.albumKey,
+               previous.albumKey == album, let art = artworkByID[previous.artworkID] {
+                return .found(art)
+            }
             return .unavailable   // not read, not cached: too soon to trust
         }
         let started = now()
@@ -402,6 +414,7 @@ public final class Companion {
         if let processed, isStale(processed, for: track) {
             if let shown = shownTrack, now().timeIntervalSince(shown.since) < Self.staleArtworkWindow {
                 record("artwork matches the previous track's; will read it again")
+                readAgain(key, after: Self.staleArtworkRetry)
                 return .unavailable   // not cached: the next read tries again
             }
             record("artwork still matches the previous track's; using the catalogue instead")
@@ -422,10 +435,19 @@ public final class Companion {
         return .found(processed)
     }
 
-    /// One read once Music has had time to settle on the new track's artwork.
-    private func readAgainAfterSettling(_ key: String, since: Date) {
+    /// The album a track's artwork belongs to: its name and album artist (or
+    /// artist, as streamed tracks report no album artist). Nil without a name.
+    static func albumKey(_ track: MusicTrack) -> String? {
+        guard !track.album.isEmpty else { return nil }
+        let artist = track.albumArtist.flatMap { $0.isEmpty ? nil : $0 } ?? track.artist
+        return "\(track.album)\u{1F}\(artist)"
+    }
+
+    /// One more read of the track, `after` seconds from now: once Music has had
+    /// time to settle on the new track's artwork, or to stop handing out the old.
+    private func readAgain(_ key: String, after delay: TimeInterval) {
         settleRead?.cancel()
-        let wait = max(0, artworkSettle - now().timeIntervalSince(since)) + 0.05
+        let wait = max(0, delay) + 0.05
         settleRead = Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
             guard !Task.isCancelled, let self, self.snapshot?.track?.trackID == key else { return }

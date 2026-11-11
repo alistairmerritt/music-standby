@@ -311,6 +311,68 @@ import StandByProtocol
         #expect(!r.companion.events.contains { $0.text.hasPrefix("artwork matches the previous track's") })
     }
 
+    /// The next song from the same album shows the album's artwork with its
+    /// title, before Music's own can be trusted.
+    @Test func theNextSongFromTheSameAlbumGetsItsArtworkAtOnce() async throws {
+        let art = FakeMusic.png(side: 500)
+        let a = FakeMusic.Track(title: "Sea Wall", artist: "Glass Animals", album: "Dreamland", duration: 200, pid: "542CEB17C137B3B1", artwork: art)
+        let b = FakeMusic.Track(title: "Dreamland", artist: "Glass Animals", album: "Dreamland", duration: 214, pid: "542CEB17C137B3B2", artwork: art)
+        let r = await rig(tracks: [a, b])
+        r.companion.artworkSettle = 0.5
+        let reads = r.music.scripts.filter { if case .artwork = $0 { true } else { false } }.count
+        await skip(r)
+        await eventually { await states(r.relay).contains { $0.track?.title == "Dreamland" } }
+        let first = try #require(await states(r.relay).first { $0.track?.title == "Dreamland" })
+        #expect(first.track?.artworkID == ArtworkID.make(sourceBytes: art))
+        #expect(r.music.scripts.filter { if case .artwork = $0 { true } else { false } }.count == reads, "Music not asked yet")
+    }
+
+    /// The stand-in is replaced once Music's own artwork can be read.
+    @Test func aSameAlbumStandInGivesWayToTheSongsOwnArtwork() async throws {
+        let a = FakeMusic.Track(title: "Sea Wall", artist: "Glass Animals", album: "Dreamland", duration: 200, pid: "542CEB17C137B3B1", artwork: FakeMusic.png(side: 500))
+        let b = FakeMusic.Track(title: "Dreamland", artist: "Glass Animals", album: "Dreamland", duration: 214, pid: "542CEB17C137B3B2", artwork: FakeMusic.png(side: 300))
+        let r = await rig(tracks: [a, b])
+        r.companion.artworkSettle = 0.3
+        await skip(r)
+        await eventually { await states(r.relay).last?.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 300)) }
+        let first = try #require(await states(r.relay).first { $0.track?.title == "Dreamland" })
+        #expect(first.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 500)))
+    }
+
+    /// Same album name, another artist: not the same album, so no stand-in.
+    @Test func anAlbumOfTheSameNameByAnotherArtistWaitsForMusic() async throws {
+        let a = FakeMusic.Track(title: "Heroes", artist: "David Bowie", album: "Greatest Hits", duration: 200, pid: "542CEB17C137B3C1", artwork: FakeMusic.png(side: 500))
+        let b = FakeMusic.Track(title: "Dancing Queen", artist: "ABBA", album: "Greatest Hits", duration: 230, pid: "542CEB17C137B3C2", artwork: FakeMusic.png(side: 300))
+        let r = await rig(tracks: [a, b])
+        r.companion.artworkSettle = 0.5
+        await skip(r)
+        await eventually { await states(r.relay).contains { $0.track?.title == "Dancing Queen" } }
+        let first = try #require(await states(r.relay).first { $0.track?.title == "Dancing Queen" })
+        #expect(first.track?.artworkID == nil)
+        await eventually { await states(r.relay).last?.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 300)) }
+    }
+
+    /// Music handing out the previous song's image is asked again soon, not on
+    /// the next poll (which these tests put an hour away).
+    @Test func thePreviousSongsArtworkIsReadAgainWithoutWaitingForAPoll() async throws {
+        let a = FakeMusic.Track(title: "Losing My Edge", artist: "LCD Soundsystem", album: "LCD Soundsystem", duration: 473, pid: "542CEB17C137B39E", artwork: FakeMusic.png(side: 800))
+        let c = FakeMusic.Track(title: "Dreamland", artist: "Glass Animals", album: "Dreamland", duration: 214, pid: "542CEB17C137B3AC", artwork: FakeMusic.png(side: 300))
+        let r = await rig(tracks: [a, c])
+        r.music.returnPreviousArtworkAfterSkip(reads: 1)
+        let skipped = ContinuousClock.now
+        await skip(r)
+        await eventually { await states(r.relay).last?.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 300)) }
+        #expect(ContinuousClock.now - skipped < .milliseconds(1500), "about half a second, not a poll later")
+        #expect(r.companion.events.contains { $0.text.hasPrefix("artwork matches the previous track's") })
+    }
+
+    @Test func albumKeyUsesTheAlbumArtistWhenThereIsOne() {
+        let feat = MusicTrack(title: "a", artist: "X feat. Y", album: "Album", albumArtist: "X", duration: 1)
+        let plain = MusicTrack(title: "b", artist: "X", album: "Album", albumArtist: "", duration: 1)
+        #expect(Companion.albumKey(feat) == Companion.albumKey(plain))
+        #expect(Companion.albumKey(MusicTrack(title: "c", artist: "X", album: "", duration: 1)) == nil)
+    }
+
     /// The phone's extension gets about a second after an update to fetch the
     /// image; the relay must already have it.
     @Test func artworkIsUploadedBeforeTheStateThatNamesIt() async throws {
