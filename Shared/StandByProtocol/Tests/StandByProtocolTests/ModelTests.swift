@@ -147,6 +147,42 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
         #expect(message().hasVisibleChange(from: nil))
     }
 
+    @Test func volumeAndOutputsRoundTripAndAreOmittedWhenUnknown() throws {
+        let outputs = [AudioOutput(id: "name:Alistair's MacBook Pro", name: "Alistair's MacBook Pro", kind: .computer, isSelected: true),
+                       AudioOutput(id: "e4:6e:91:c0:a6:d2", name: "Living Room", kind: .homePod, isSelected: false)]
+        var m = message()
+        m.volume = 0.65
+        m.outputs = outputs
+        let data = try StandByWire.makeEncoder().encode(m)
+        let decoded = try StandByWire.makeDecoder().decode(PlaybackMessage.self, from: data)
+        #expect(decoded.volume == 0.65)
+        #expect(decoded.outputs == outputs)
+        let object = try #require(try JSONSerialization.jsonObject(with: StandByWire.makeEncoder().encode(message())) as? [String: Any])
+        #expect(object["volume"] == nil && object["outputs"] == nil, "a Mac that doesn't report them sends nothing")
+        let unknownKind = #"{"id":"x","name":"X","kind":"hologram","isSelected":false,"isAvailable":true}"#
+        #expect(try StandByWire.makeDecoder().decode(AudioOutput.self, from: Data(unknownKind.utf8)).kind.rawValue == "hologram")
+        #expect(AudioOutput.makeID(networkAddress: " AA:BB ", name: "n") == "aa:bb")
+        #expect(AudioOutput.makeID(networkAddress: nil, name: "Study HomePod") == "name:Study HomePod")
+    }
+
+    @Test func volumeAndOutputChangesAreVisible() {
+        var first = message()
+        first.volume = 0.5
+        first.outputs = [AudioOutput(id: "a", name: "A", kind: .computer, isSelected: true)]
+        var louder = message(revision: 2)
+        louder.volume = 0.6
+        louder.outputs = first.outputs
+        #expect(louder.hasVisibleChange(from: first))
+        var moved = message(revision: 2)
+        moved.volume = 0.5
+        moved.outputs = [AudioOutput(id: "a", name: "A", kind: .computer, isSelected: false)]
+        #expect(moved.hasVisibleChange(from: first))
+        var same = message(revision: 2, elapsed: 11, at: 1001)
+        same.volume = 0.5
+        same.outputs = first.outputs
+        #expect(!same.hasVisibleChange(from: first))
+    }
+
     @Test func positionIsIgnoredWhenNothingIsLoaded() {
         let first = message(state: .stopped, elapsed: 0, track: nil, session: nil)
         #expect(!message(revision: 2, state: .stopped, elapsed: 99, track: nil, session: nil).hasVisibleChange(from: first))
@@ -206,6 +242,26 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
         #expect(!RemoteCommand(kind: .play).isExpired(at: .distantFuture))
     }
 
+    @Test func valueCommandsCarryTheirValueAndCheckIt() throws {
+        let seek = RemoteCommand.seek(to: 120.5, id: Fixture.commandID)
+        let data = try StandByWire.makeEncoder().encode(seek)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["kind"] as? String == "seek")
+        #expect(object["position"] as? Double == 120.5)
+        #expect(object["level"] == nil && object["outputID"] == nil)
+        #expect(try StandByWire.makeDecoder().decode(RemoteCommand.self, from: data) == seek)
+        #expect(seek.hasRequiredValue)
+        #expect(RemoteCommand.setVolume(0.3).hasRequiredValue)
+        #expect(RemoteCommand.selectOutput("aa:bb").hasRequiredValue)
+        #expect(RemoteCommand(kind: .play).hasRequiredValue)
+        #expect(!RemoteCommand(kind: .seek).hasRequiredValue)
+        #expect(!RemoteCommand(kind: .setVolume, level: .nan).hasRequiredValue)
+        #expect(!RemoteCommand(kind: .selectOutput, outputID: "").hasRequiredValue)
+        #expect(CommandKind.seek.requiredValue == "position" && CommandKind.next.requiredValue == nil)
+        let json = #"{"id":"5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F","kind":"play","position":1}"#
+        #expect(try StandByWire.makeDecoder().decode(RemoteCommand.self, from: Data(json.utf8)).position == 1, "a stray value is kept, and ignored by the Mac")
+    }
+
     @Test func temporaryContractCommandStillDecodes() throws {
         let json = #"{"id":"5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F","kind":"next"}"#
         let command = try StandByWire.makeDecoder().decode(RemoteCommand.self, from: Data(json.utf8))
@@ -239,9 +295,9 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
     }
 
     @Test func commandWithUnknownKindCanStillBeRejectedByID() throws {
-        let json = #"{"type":"command","command":{"id":"5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F","kind":"seek"}}"#
+        let json = #"{"type":"command","command":{"id":"5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F","kind":"shuffle"}}"#
         let frame = try RelayFrame.decode(Data(json.utf8))
-        #expect(frame == .unsupportedCommand(id: Fixture.commandID, kind: "seek"))
+        #expect(frame == .unsupportedCommand(id: Fixture.commandID, kind: "shuffle"))
         #expect(try Fixture.sameJSON(frame.encoded(), Data(json.utf8)))
     }
 
