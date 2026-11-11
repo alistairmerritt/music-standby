@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import StandByProtocol
 
 /// The Mac companion's engine. Watches Music, publishes `PlaybackMessage`s
@@ -39,6 +40,12 @@ public final class Companion {
     /// report the previous track's image in that time, then none at all.
     @ObservationIgnored public var artworkSettle: TimeInterval = 1.5
     @ObservationIgnored private var settleRead: Task<Void, Never>?
+    /// Artwork the relay has from this connection, so it isn't sent twice.
+    @ObservationIgnored private var uploadedArtwork: Set<String> = []
+    /// How long a state waits for its artwork's upload. The phone gets about
+    /// a second after each update to fetch the image, so the relay should
+    /// already have it; past this the state goes anyway and the relay asks.
+    static let uploadAheadLimit: Duration = .seconds(2)
     /// Called for every event as well as appending it to `events`.
     @ObservationIgnored public var onEvent: ((CompanionEvent) -> Void)?
     /// Called once when the relay refuses or revokes this Mac's credential, so
@@ -317,11 +324,13 @@ public final class Companion {
         store.lastRevision = message.revision
         store.saveListeningSession(message.listeningSessionID, now: now())
         self.message = message
+        await uploadAhead(message)
         await send(.state(message))
     }
 
     private func sendCurrentState() async {
         if let message = publisher.lastSent {
+            await uploadAhead(message)
             await send(.state(message))   // same revision: a re-send, not a change
         } else {
             await ingest(await monitor.read(.start), trigger: .start)
@@ -493,9 +502,59 @@ public final class Companion {
         }
         do {
             try await transport.uploadArtwork(art.image, descriptor: art.descriptor)
+            uploadedArtwork.insert(id)
             await send(.artwork(art.descriptor))
         } catch {
             record("artwork upload failed: \(error)")
+        }
+    }
+
+    /// Uploads the artwork a state names before the state goes out. iOS gives
+    /// the phone's extension about a second after each update, and a fetch
+    /// that waits on an upload the relay asked for only then ran out of time:
+    /// the image never arrived (seen on an iPhone, 11 Nov 2026).
+    private func uploadAhead(_ message: PlaybackMessage) async {
+        guard connection.phase == .connected, let id = message.track?.artworkID,
+              !uploadedArtwork.contains(id), let art = artworkByID[id] else { return }
+        let transport = self.transport
+        let image = art.image, descriptor = art.descriptor
+        let outcome = await Self.waitAtMost(Self.uploadAheadLimit) { () -> String? in
+            do {
+                try await transport.uploadArtwork(image, descriptor: descriptor)
+                return nil
+            } catch {
+                return String(describing: error)
+            }
+        }
+        switch outcome {
+        case .some(nil):
+            if uploadedArtwork.count > 64 { uploadedArtwork.removeAll() }
+            uploadedArtwork.insert(id)
+            await send(.artwork(descriptor))
+        case .some(let error?):
+            record("artwork upload failed: \(error)")
+        case nil:
+            record("artwork upload still going after \(Self.uploadAheadLimit); sending the state anyway")
+        }
+    }
+
+    /// `work`'s result, or nil once `limit` passes; the work carries on.
+    static func waitAtMost<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async -> T) async -> T? {
+        let pending = OSAllocatedUnfairLock<CheckedContinuation<T?, Never>?>(initialState: nil)
+        let settle: @Sendable (T?) -> Void = { value in
+            let waiting = pending.withLock { continuation -> CheckedContinuation<T?, Never>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            waiting?.resume(returning: value)
+        }
+        return await withCheckedContinuation { continuation in
+            pending.withLock { $0 = continuation }
+            Task { settle(await work()) }
+            Task {
+                try? await Task.sleep(for: limit)
+                settle(nil)
+            }
         }
     }
 
@@ -509,6 +568,7 @@ public final class Companion {
 
     private func connectionChanged(_ status: ConnectionStatus) {
         connection = status
+        if status.phase != .connected { uploadedArtwork.removeAll() }
         if status.phase == .failed, let code = status.error?.code, code == .unauthorized || code == .pairingRevoked {
             pairedPhone = nil
             pairRequests.removeAll()

@@ -13,7 +13,7 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 92 tests in 12 suites pass (`scripts/test.sh`, 10 November) |
+| Unit tests | 100 tests in 12 suites pass (`swift test`, 11 November) |
 | Shared protocol | 56 tests in 10 suites pass (`scripts/test.sh`, 10 November); builds for iOS with `xcodebuild` |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
@@ -343,6 +343,15 @@ another album is read again, then replaced by the catalogue's after 4 s. Execute
 `msbctl watch` over 8 autoplay skips at volume 0: 9 songs, 9 different images; Music's own
 art about 1.7 s after each skip; one song that kept the previous image fell back to the
 catalogue. 98 tests.
+
+**Artwork uploaded before the state that names it (11 November).** After the fix above, the
+phone showed no artwork at all. The companion uploaded an image only when the relay asked for
+it, which it does on seeing the state that names it. By then the phone's extension, which iOS
+suspends about a second after each update, had already tried to fetch the image and run out
+of time. The companion now uploads a new song's artwork before sending that state, once per
+connection, and waits at most 2 s (`uploadAheadLimit`) before sending the state anyway. The
+upload carries on in the background, and `artwork-request` remains the fallback. Together with
+the phone and relay changes (iOS STATUS, relay README), the artwork showed on the iPhone. 100 tests.
 
 ## For the relay design
 

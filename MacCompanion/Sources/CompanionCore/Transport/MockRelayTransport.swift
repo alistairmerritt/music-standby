@@ -21,6 +21,8 @@ public actor MockRelayTransport: CompanionTransport {
     /// The JSON actually produced, one line per frame.
     public private(set) var sentJSON: [String] = []
     public private(set) var uploads: [String: ArtworkDescriptor] = [:]
+    /// Uploads and states in the order they arrived: "upload <id>", "state <id or ->".
+    public private(set) var timeline: [String] = []
     public private(set) var isConnected = false
     public var requestsArtwork: Bool
     private var requested: Set<String> = []
@@ -56,6 +58,7 @@ public actor MockRelayTransport: CompanionTransport {
             throw ProtocolError(.invalidFrame, message: "frame changed in a JSON round trip")
         }
         sent.append(decoded)
+        if case .state(let message) = decoded { timeline.append("state \(message.track?.artworkID ?? "-")") }
         let json = String(decoding: data, as: UTF8.self)
         sentJSON.append(json)
         log?("→ \(json)")
@@ -73,6 +76,7 @@ public actor MockRelayTransport: CompanionTransport {
             throw ProtocolError(.invalidFrame, message: "artwork size mismatch or over the cap")
         }
         uploads[descriptor.artworkID] = descriptor
+        timeline.append("upload \(descriptor.artworkID)")
         log?("⇡ artwork \(descriptor.artworkID) \(descriptor.byteCount) bytes")
     }
 

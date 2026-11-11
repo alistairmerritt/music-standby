@@ -311,6 +311,29 @@ import StandByProtocol
         #expect(!r.companion.events.contains { $0.text.hasPrefix("artwork matches the previous track's") })
     }
 
+    /// The phone's extension gets about a second after an update to fetch the
+    /// image; the relay must already have it.
+    @Test func artworkIsUploadedBeforeTheStateThatNamesIt() async throws {
+        let r = await rig()
+        let id = ArtworkID.make(sourceBytes: r.music.current.artwork!)
+        await eventually { await r.relay.uploads[id] != nil }
+        let timeline = await r.relay.timeline
+        let upload = try #require(timeline.firstIndex(of: "upload \(id)"))
+        let state = try #require(timeline.firstIndex(of: "state \(id)"))
+        #expect(upload < state)
+        #expect(!(await r.relay.sent).contains { if case .error = $0 { true } else { false } })
+        #expect(timeline.filter { $0 == "upload \(id)" }.count == 1, "sent once, not again when the relay would ask")
+    }
+
+    @Test func waitAtMostGivesUpButLetsTheWorkFinish() async {
+        let slow = await Companion.waitAtMost(.milliseconds(50)) { () -> Int in
+            try? await Task.sleep(for: .milliseconds(500))
+            return 1
+        }
+        #expect(slow == nil)
+        #expect(await Companion.waitAtMost(.seconds(1)) { 7 } == 7)
+    }
+
     @Test func unknownArtworkRequestGetsAnError() async {
         let r = await rig()
         await r.relay.simulate(.artworkRequest(artworkID: String(repeating: "0", count: 64)))
