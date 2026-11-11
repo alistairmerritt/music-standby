@@ -322,6 +322,13 @@ the fixes were in the relay's APNs sender (`feature/relay`) and in how the phone
 push (`feature/ios`, docs/ios/STATUS.md). Not yet tried: a locked phone and StandBy by hand,
 and late catalogue artwork (the "Godspeed" case) arriving by push.
 
+**One session for the whole pairing (11 November).** A session the relay started by push,
+after Music stopped and played again, never appeared on the phone: iOS shows only a session
+the app asked for while open. The relay and the phone now keep one session through stops,
+quits, long pauses and the Mac going away, showing the last track paused. The companion's
+`listeningSessionID` no longer changes what the phone sees. Executed on the iPhone with the
+app in the background: stop, play, quit Music, relaunch and play; the phone followed each.
+
 ## For the relay design
 
 - `not_running` arrives within about 0.8 s of `terminate()`, so the relay can end the Now
