@@ -49,6 +49,16 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$out/MusicStandBy" "$app/Contents/MacOS/MusicStandBy"
 cp "$root/Resources/Info.plist" "$app/Contents/Info.plist"
 printf 'APPL????' > "$app/Contents/PkgInfo"
+# The icon is an Icon Composer document; actool, which only Xcode has, turns it
+# into Assets.car (macOS 26 and later) and AppIcon.icns (earlier systems).
+if xcrun --find actool >/dev/null 2>&1; then
+  xcrun actool "$root/Resources/AppIcon.icon" --compile "$app/Contents/Resources" \
+    --platform macosx --target-device mac --minimum-deployment-target 14.0 --app-icon AppIcon \
+    --output-partial-info-plist "$out/AppIcon-Info.plist" --output-format human-readable-text \
+    | grep -E "error|warning" || true
+else
+  echo "› no actool (Command Line Tools only): the app has no icon"
+fi
 # Signed with the first Apple Development identity when there is one: an ad-hoc
 # signature is a new identity every build, so macOS asks again for the keychain
 # item and for Automation of Music after each rebuild. MSB_SIGN_IDENTITY
