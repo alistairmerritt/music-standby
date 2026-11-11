@@ -22,9 +22,10 @@ public protocol RemoteSessionControlling: AnyObject {
 
 /// When a Now Playing session should end.
 ///
-/// The rule is to end on what is known and wait out what is only suspected. A
-/// paused song and a dropped socket are both ordinary, and neither says the
-/// music has finished.
+/// Music stopping or quitting on the Mac doesn't end it: the session stays,
+/// showing the last track paused, because iOS shows only a session the app
+/// asked for while open. It ends when the user stops showing it, unpairs, or
+/// the relay has no session. A dropped socket is waited out.
 public struct SessionLifecyclePolicy: Equatable, Sendable {
     /// How long a lost link may last before the session is treated as dead.
     /// Matches the relay proposal's 60 s. Chosen by judgement, not measured.
@@ -39,12 +40,6 @@ public struct SessionLifecyclePolicy: Equatable, Sendable {
         case startGrace
         case cancelGrace
         case end(SessionEndReason)
-    }
-
-    /// `paused` and `error` keep the session. `stopped`, `not_running` and
-    /// `automation_denied` are the Mac confirming playback is over.
-    public func endsSession(_ state: PlaybackState) -> Bool {
-        !state.continuesSession
     }
 
     public func decision(from previous: ConnectionState, to next: ConnectionState) -> Decision {

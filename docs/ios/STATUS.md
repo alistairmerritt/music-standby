@@ -20,6 +20,10 @@ Last updated 11 November 2026, branch `feature/ios`.
 
 The app registered its push-to-start token 6–13 times within a second of each launch. Harmless; not looked into.
 
+**A session started by push stays hidden.** When Music stopped and played again, the relay ended its session and sent a `start` push for a new one. The phone created it (`Session created`, `Registered session … with 1 device(s)`) and took its updates, but neither Control Centre nor the Lock Screen showed it: iOS shows only a session the app asked for while open (`requestToBecomeSystemPrimary`, which isn't available in the extension). So one session now lasts as long as the pairing. The relay keeps it when Music stops, quits or the Mac goes away, and the app keeps it on `stopped`, `not_running` and `automation_denied`, both showing the last track paused. Tested on the iPhone after opening the app once, then with it in the background: stop, play, quit Music, relaunch, play a new song, pause. Control Centre followed each within about 6 s. Not tried: whether a long-paused session stays on the Lock Screen, and the Mac asleep overnight.
+
+**Apple Watch (by hand, 11 November).** The session appears in the Watch's Now Playing, and its skip buttons work. The Digital Crown does nothing: the session's `MediaDevice` declares no capabilities. NowPlaying offers `absoluteVolume` and `relativeVolume` if Mac volume control is wanted.
+
 ## What exists
 
 | Area | Location |

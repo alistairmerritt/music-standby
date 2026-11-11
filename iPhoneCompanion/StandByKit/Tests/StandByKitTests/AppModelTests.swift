@@ -194,16 +194,6 @@ struct Harness {
 
 @MainActor
 @Suite struct SessionLifecycleTests {
-    @Test func policyEndsOnlyOnConfirmedStates() {
-        let policy = SessionLifecyclePolicy()
-        #expect(!policy.endsSession(.playing))
-        #expect(!policy.endsSession(.paused))
-        #expect(!policy.endsSession(.error))
-        #expect(policy.endsSession(.stopped))
-        #expect(policy.endsSession(.notRunning))
-        #expect(policy.endsSession(.automationDenied))
-    }
-
     @Test func policySeparatesTemporaryFromDeliberateDisconnection() {
         let policy = SessionLifecyclePolicy()
         let up = ConnectionState.connected(macName: "M")
@@ -238,31 +228,38 @@ struct Harness {
         #expect(h.controller.deactivations == 0)
     }
 
+    /// iOS shows only a session the app asked for while open, so a stop or a
+    /// quit keeps this one, with its token, showing the last track paused.
     @Test(arguments: [PlaybackState.stopped, .notRunning, .automationDenied])
-    func confirmedTerminationEndsTheSessionAndItsToken(state: PlaybackState) async throws {
+    func aStoppedMacKeepsTheSessionWithItsLastTrack(state: PlaybackState) async throws {
         let h = Harness()
         let task = await h.run()
         defer { task.cancel() }
         await h.connected()
         await h.play()
         let id = try #require(h.controller.sessionID)
+        let title = try #require(h.controller.activations.last?.track?.title)
         try await h.registrar.registerUpdateToken("aa", forSessionID: id)
         await h.transport.emit(.playback(message(revision: 2, state: state, track: nil)))
-        await eventually("ended") { !h.controller.isActive }
-        #expect(h.controller.deactivations == 1)
-        #expect(h.registrar.current().sessions[id] == nil)
+        await eventually("published paused") { h.controller.published.last?.isPlaying == false }
+        #expect(h.controller.published.last?.track?.title == title)
+        #expect(h.controller.isActive)
+        #expect(h.controller.deactivations == 0)
+        #expect(h.registrar.current().sessions[id] != nil)
     }
 
-    @Test func playbackAfterAStopStartsANewSession() async {
+    @Test func playbackAfterAStopContinuesTheSameSession() async {
         let h = Harness()
         let task = await h.run()
         defer { task.cancel() }
         await h.connected()
         await h.play(revision: 1)
         await h.transport.emit(.playback(message(revision: 2, state: .stopped, track: nil)))
-        await eventually("ended") { !h.controller.isActive }
-        await h.play(revision: 3)
-        #expect(h.controller.activations.count == 2)
+        await eventually("published paused") { h.controller.published.last?.isPlaying == false }
+        await h.transport.emit(.playback(message(revision: 3)))
+        await eventually("published playing") { h.controller.published.last?.isPlaying == true }
+        #expect(h.controller.activations.count == 1)
+        #expect(h.controller.deactivations == 0)
     }
 
     @Test func briefInterruptionKeepsTheSession() async {
@@ -556,7 +553,7 @@ struct Harness {
         #expect(h.model.log.filter { $0.message.contains("Now Playing failed") }.count == 1)
     }
 
-    @Test func foregroundDoesNotActivateWhenPlaybackHasEnded() async {
+    @Test func foregroundDoesNotActivateBeforeAnyTrack() async {
         let h = Harness()
         let task = await h.run()
         defer { task.cancel() }

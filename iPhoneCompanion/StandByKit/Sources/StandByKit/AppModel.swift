@@ -265,7 +265,12 @@ public final class AppModel {
             return
         }
         latestMessage = message
-        let updated = MacPlaybackAttributes(mac: mac, message: message, sessionID: assignedSessionID)
+        var updated = MacPlaybackAttributes(mac: mac, message: message, sessionID: assignedSessionID)
+        // Once Music stops or quits the Mac reports no track. Keep the last one,
+        // paused, in the same session: iOS shows only a session the app asked
+        // for while open, so ending this one would leave the next song hidden
+        // until the app is opened again.
+        if updated.track == nil, let previous = attributes?.track { updated.track = previous }
         let previousArtworkID = attributes?.track?.artworkReference
         attributes = updated
         let artworkID = updated.track?.artworkReference
@@ -276,9 +281,7 @@ public final class AppModel {
                 artwork = nil
             }
         }
-        if policy.endsSession(message.state) {
-            await endSession(.playbackEnded)
-        } else if isNowPlayingEnabled, !sessionController.isActive {
+        if isNowPlayingEnabled, !sessionController.isActive, updated.track != nil {
             // Includes a previous activation that failed: every update retries it.
             await activate(with: updated)
         } else {
@@ -289,7 +292,7 @@ public final class AppModel {
     /// Whether a session ought to exist given the latest facts. A connection
     /// that is merely inside its grace period still counts.
     private var shouldShowSession: Bool {
-        guard isNowPlayingEnabled, latestMessage?.state.continuesSession != false else { return false }
+        guard isNowPlayingEnabled, attributes?.track != nil else { return false }
         switch connection {
         case .connected, .macOffline: return true
         default: return graceDeadline != nil
