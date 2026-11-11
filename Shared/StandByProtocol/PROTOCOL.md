@@ -24,7 +24,7 @@ deployed. The relay is still a proposal (`docs/ios/RELAY-DESIGN-8-NOV-2026.md` o
 | Unknown keys | Ignored |
 | Unknown frame `type` | Decodes as `.unknown` and is ignored |
 | Open string sets | `ErrorCode` and `DeviceKind` keep values they don't recognise |
-| Closed enums | `PlaybackState` and `CommandKind`. A new case needs a version bump |
+| Closed enums | `PlaybackState`. A new case needs a version bump. `CommandKind` grows without one: the Mac has rejected an unknown kind by id since version 1 (§5), and the relay passes `kind` through |
 
 **Versioning.** `StandByWire.version` is `1`. A new optional field, frame type, error
 code or device kind does not change it. Anything an older peer would misread does. The
@@ -123,8 +123,17 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 | Field | Notes |
 | --- | --- |
 | `id` | UUID. Also the idempotency key: a repeated id must not act twice |
-| `kind` | `play`, `pause`, `next`, `previous` — unchanged |
+| `kind` | `play`, `pause`, `next`, `previous`, and since 11 November 2026 `seek`, `setVolume`, `selectOutput` |
 | `issuedAt` | New, optional. The Mac rejects commands older than 10 s with `command_expired` |
+| `position` | Seconds into the track, for `seek`. Clamped to the track by the Mac |
+| `level` | Music's own output volume, 0 to 1, for `setVolume`. Clamped by the Mac. Not the Mac's system volume |
+| `outputID` | An `AudioOutput.id` from the last state, for `selectOutput`. Music then plays to that device alone |
+
+The three value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,
+or with a non-finite number, the Mac answers `invalid_request`. The result reaches the phone as
+the next state: `volume`, `outputs` and `elapsedTime` on `PlaybackMessage`, which carries them
+from the same date. A Mac that doesn't report `volume` or `outputs` leaves them out, and the
+phone then offers no volume slider and no output list.
 
 `CommandAck` keeps `commandID`, `accepted`, `revision` and adds an optional `error`.
 `accepted: true` means Music took the command. The resulting state follows separately.
@@ -137,7 +146,8 @@ Mac-side rejections:
 | --- | --- |
 | `music_not_running` | Music is closed. The Mac does not launch it |
 | `automation_denied` | Permission refused |
-| `no_current_track` | `next`/`previous` with nothing loaded |
+| `no_current_track` | `next`/`previous`/`seek` with nothing loaded |
+| `invalid_request` | A value command without its value, or `selectOutput` naming an output that isn't in Music's list |
 | `command_expired` | `issuedAt` older than 10 s |
 | `unsupported_command` | A `kind` this build doesn't know. `RelayFrame.unsupportedCommand` keeps the id so it can still be rejected |
 | `command_failed` | AppleScript ran and failed |
@@ -261,5 +271,5 @@ version 1.
 
 ## 10. Not in version 1
 
-- Volume, seek, shuffle and repeat.
+- Shuffle and repeat. (Volume, seek and output selection were added on 11 November 2026, §5.)
 - The artwork upload itself (`PUT /v1/artwork/{id}`), which is HTTP, not a frame.
