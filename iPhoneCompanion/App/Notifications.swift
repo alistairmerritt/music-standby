@@ -39,7 +39,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     nonisolated static let reminderThread = "mac-playing"
 }
 
-/// Alerts only: the reminder is meant to be seen, not heard.
+/// Alerts only: the reminder is meant to be seen, not heard. It arrives as
+/// Time Sensitive (the relay sets `interruption-level`, and the app has the
+/// entitlement), so a Focus or a scheduled Summary doesn't hold it back.
+/// That's not an authorisation option: the person controls it per app and
+/// per Focus in Settings.
 struct SystemNotificationPermission: NotificationPermission {
     func request() async -> Bool {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert])) ?? false

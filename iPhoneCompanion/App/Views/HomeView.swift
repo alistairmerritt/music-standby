@@ -86,7 +86,7 @@ struct HomeView: View {
             ))
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("If you’ve dismissed Second Chair from your Lock Screen or StandBy, get a quiet notification when your Mac starts playing music again. Tap it to bring the player back.")
+                Text("If you’ve dismissed Second Chair from your Lock Screen or StandBy, get a silent notification when your Mac starts playing music again. It shows during a Focus too. Tap it to bring the player back.")
                 if let problem = reminders.problem {
                     Text(problem).foregroundStyle(.red)
                 }
