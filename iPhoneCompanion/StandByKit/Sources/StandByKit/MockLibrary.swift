@@ -31,18 +31,34 @@ public struct MockLibrary: Sendable {
     /// result immediately. The revision is left alone on purpose: the next
     /// authoritative update from the app or a push always wins.
     public func applying(_ kind: CommandKind, to attributes: MacPlaybackAttributes, at date: Date) -> MacPlaybackAttributes {
+        applying(RemoteCommand(kind: kind, issuedAt: date), to: attributes, at: date)
+    }
+
+    /// The mock Mac's guess at the result of a command. An output change shows
+    /// nothing here: outputs live on the transport, not in the attributes.
+    public func applying(_ command: RemoteCommand, to attributes: MacPlaybackAttributes, at date: Date) -> MacPlaybackAttributes {
         var result = attributes
-        switch kind {
+        switch command.kind {
         case .play, .pause:
             result.elapsedTime = attributes.elapsed(at: date)
             result.timestamp = date
-            result.isPlaying = kind == .play
+            result.isPlaying = command.kind == .play
         case .next, .previous:
             guard let id = attributes.track?.id, let current = trackIndex(id: id) else { return attributes }
-            let target = tracks[kind == .next ? index(after: current) : index(before: current)]
+            let target = tracks[command.kind == .next ? index(after: current) : index(before: current)]
             result.track = SessionTrack(id: target.id, title: target.title, artist: target.artist, album: target.album, duration: target.duration, artworkID: target.artworkID)
             result.elapsedTime = 0
             result.timestamp = date
+        case .seek:
+            guard let position = command.position else { return attributes }
+            let duration = attributes.track?.duration ?? 0
+            result.elapsedTime = max(0, duration > 0 ? min(position, duration) : position)
+            result.timestamp = date
+        case .setVolume:
+            guard let level = command.level else { return attributes }
+            result.volume = min(1, max(0, level))
+        case .selectOutput:
+            break
         }
         return result
     }

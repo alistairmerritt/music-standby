@@ -125,29 +125,56 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
 
     var commands: [MediaCommand] {
         [
-            .play { try await self.handle(.play) },
-            .pause { try await self.handle(.pause) },
-            .next { try await self.handle(.next) }.enabled(attributes.canGoNext),
-            .previous { try await self.handle(.previous) }.enabled(attributes.canGoPrevious),
+            .play { try await self.handle(RemoteCommand(kind: .play, issuedAt: Date())) },
+            .pause { try await self.handle(RemoteCommand(kind: .pause, issuedAt: Date())) },
+            .next { try await self.handle(RemoteCommand(kind: .next, issuedAt: Date())) }.enabled(attributes.canGoNext),
+            .previous { try await self.handle(RemoteCommand(kind: .previous, issuedAt: Date())) }.enabled(attributes.canGoPrevious),
+            // Dragging the Lock Screen's progress bar. Added 11 November 2026.
+            .seekToPosition { seconds in try await self.handle(.seek(to: seconds, issuedAt: Date())) }
+                .enabled((attributes.track?.duration ?? 0) > 0),
         ]
     }
 
+    /// The Mac, with a volume slider when it reports Music's volume. The
+    /// slider sets Music's own output volume, not the Mac's.
     var devices: [MediaDevice] {
-        [MediaDevice(id: id, name: attributes.macName, type: .desktop, capabilities: [])]
+        let capabilities: [MediaDevice.Capability] = attributes.volume.map { level in
+            [.absoluteVolume(Float(level)) { [weak self] newLevel in
+                try await self?.setVolume(Double(newLevel))
+            }]
+        } ?? []
+        return [MediaDevice(id: id, name: attributes.macName, type: .desktop, capabilities: capabilities)]
+    }
+
+    @ObservationIgnored private var volumeInFlight = false
+    @ObservationIgnored private var pendingVolume: Double?
+
+    /// A slider sends many levels in a row. One command is in flight at a
+    /// time; the newest level waits and the ones between are dropped.
+    private func setVolume(_ level: Double) async throws {
+        pendingVolume = level
+        guard !volumeInFlight else { return }
+        volumeInFlight = true
+        defer { volumeInFlight = false }
+        while let next = pendingVolume {
+            pendingVolume = nil
+            try await handle(.setVolume(next, issuedAt: Date()))
+        }
     }
 
     /// Sends the command from here, so it works while the main app is suspended.
     /// Throwing tells the system it failed. On the relay route the screen shows
     /// the Mac's own result once the relay has it; only the development mock guesses.
-    private func handle(_ kind: CommandKind) async throws {
-        logger.log("Received command: \(kind.rawValue, privacy: .public), relay: \(self.services.usesRelay)")
+    private func handle(_ command: RemoteCommand) async throws {
+        let name = command.kind.rawValue
+        logger.log("Received command: \(name, privacy: .public), relay: \(self.services.usesRelay)")
         let started = Date()
         do {
-            if let result = try await services.commands.perform(kind, on: attributes, at: started) {
+            if let result = try await services.commands.perform(command, on: attributes) {
                 update(result)
-                logger.log("Showing revision \(result.revision) after \(kind.rawValue, privacy: .public), \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+                logger.log("Showing revision \(result.revision) after \(name, privacy: .public), \(Int(Date().timeIntervalSince(started) * 1000)) ms")
             } else {
-                logger.log("Sent \(kind.rawValue, privacy: .public), no newer state yet, \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+                logger.log("Sent \(name, privacy: .public), no newer state yet, \(Int(Date().timeIntervalSince(started) * 1000)) ms")
             }
         } catch {
             logger.error("Command failed: \(error.localizedDescription, privacy: .public)")

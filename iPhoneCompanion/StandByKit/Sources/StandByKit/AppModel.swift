@@ -15,6 +15,8 @@ public final class AppModel {
     public private(set) var pairedMac: PairedMac?
     public private(set) var connection: ConnectionState = .disconnected
     public private(set) var attributes: MacPlaybackAttributes?
+    /// Where the Mac can play to, from its last state. Empty when it doesn't say.
+    public private(set) var outputs: [AudioOutput] = []
     public private(set) var artwork: CGImage?
     public private(set) var pushTokens = PushTokens()
     public private(set) var commandsFromSystem: [CommandRecord] = []
@@ -199,15 +201,35 @@ public final class AppModel {
     }
 
     public func send(_ kind: CommandKind) async {
+        await send(RemoteCommand(kind: kind, issuedAt: now()))
+    }
+
+    /// Jump to `seconds` into the current track on the Mac.
+    public func seek(to seconds: TimeInterval) async {
+        await send(.seek(to: seconds, issuedAt: now()))
+    }
+
+    /// Set Music's own output volume on the Mac, 0 to 1.
+    public func setVolume(_ level: Double) async {
+        await send(.setVolume(level, issuedAt: now()))
+    }
+
+    /// Play to this output alone. `id` is an `AudioOutput.id` from `outputs`.
+    public func selectOutput(_ id: String) async {
+        await send(.selectOutput(id, issuedAt: now()))
+    }
+
+    public func send(_ command: RemoteCommand) async {
+        let name = command.kind.rawValue
         do {
-            let ack = try await transport.send(RemoteCommand(kind: kind, issuedAt: now()))
+            let ack = try await transport.send(command)
             if ack.accepted {
-                record("Sent \(kind.rawValue); acknowledged at revision \(ack.revision)")
+                record("Sent \(name); acknowledged at revision \(ack.revision)")
             } else {
-                record("Command \(kind.rawValue) refused: \(ack.error?.code.rawValue ?? "no reason given")")
+                record("Command \(name) refused: \(ack.error?.code.rawValue ?? "no reason given")")
             }
         } catch {
-            record("Command \(kind.rawValue) failed: \(error.localizedDescription)")
+            record("Command \(name) failed: \(error.localizedDescription)")
         }
     }
 
@@ -267,6 +289,7 @@ public final class AppModel {
             return
         }
         latestMessage = message
+        outputs = message.outputs ?? []
         var updated = MacPlaybackAttributes(mac: mac, message: message, sessionID: assignedSessionID)
         // Once Music stops or quits the Mac reports no track. Keep the last one,
         // paused, in the same session: iOS shows only a session the app asked

@@ -11,6 +11,7 @@ The contract is [docs/relay/API-v1.md](../relay/API-v1.md), merged into `feature
 | Pair | `POST /v1/pairing/claim`, then `GET /v1/pairing/claim/{id}` every 2 s with the claim secret until approved, denied or expired | App |
 | Reconcile | `GET /v1/session` on launch and every 5 s while the app is in the foreground, plus once 0.7 s after an in-app command | App |
 | Command | `POST /v1/commands` with the session on screen and `Idempotency-Key`, 1.5 s timeout | Extension, directly; the app for its own buttons |
+| Seek, volume, output | The same call with `seek` + `position`, `setVolume` + `level` (0–1), `selectOutput` + `outputID`; `playback.outputs` lists the ids. Since 11 November | Extension (seek and volume); the app (all three) |
 | Push tokens | `PUT /v1/tokens/start`, `PUT /v1/tokens/session`, `DELETE /v1/tokens/session/{id}` | App and extension |
 | Reminders (opt-in) | `PUT /v1/tokens/alert`, `DELETE /v1/tokens/alert` | App |
 | Artwork | The signed `artworkURL`, or `/v1/artwork/{pairingID}/{artworkID}` with the bearer | Extension and app |

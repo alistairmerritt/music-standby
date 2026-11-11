@@ -15,6 +15,12 @@ public actor MockTransport: PlaybackTransport {
     private var elapsed: TimeInterval = 0
     private var anchor: Date
     private var revision: UInt64 = 0
+    private var volume = 0.5
+    private var outputs = [
+        AudioOutput(id: "name:Mock Mac", name: "Mock Mac", kind: .computer, isSelected: true),
+        AudioOutput(id: "aa:bb:cc:dd:ee:01", name: "Kitchen HomePod", kind: .homePod, isSelected: false),
+        AudioOutput(id: "aa:bb:cc:dd:ee:02", name: "Living Room Apple TV", kind: .appleTV, isSelected: false, isAvailable: false),
+    ]
 
     public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"), now: @escaping @Sendable () -> Date = { Date() }) {
         self.library = library
@@ -70,10 +76,25 @@ public actor MockTransport: PlaybackTransport {
         case .previous:
             index = library.index(before: index)
             elapsed = 0
+        case .seek:
+            guard let position = command.position else { return rejected(command) }
+            elapsed = min(max(0, position), library.tracks[index].duration)
+        case .setVolume:
+            guard let level = command.level else { return rejected(command) }
+            elapsed = position(at: date)
+            volume = min(1, max(0, level))
+        case .selectOutput:
+            guard let id = command.outputID, let chosen = outputs.firstIndex(where: { $0.id == id }) else { return rejected(command) }
+            elapsed = position(at: date)
+            for i in outputs.indices { outputs[i].isSelected = i == chosen }
         }
         anchor = date
         emitPlayback()
         return CommandAck(commandID: command.id, accepted: true, revision: revision)
+    }
+
+    private func rejected(_ command: RemoteCommand) -> CommandAck {
+        .rejected(command.id, revision: revision, ProtocolError(.invalidRequest, message: "\(command.kind.rawValue) needs its value"))
     }
 
     public func artwork(id: String) async throws -> Data {
@@ -90,12 +111,14 @@ public actor MockTransport: PlaybackTransport {
         revision += 1
         hub.send(.playback(PlaybackMessage(
             revision: revision,
-            isPlaying: isPlaying,
+            state: isPlaying ? .playing : .paused,
             elapsedTime: elapsed,
             capturedAt: anchor,
             track: library.tracks[index],
             canGoNext: true,
-            canGoPrevious: true
+            canGoPrevious: true,
+            volume: volume,
+            outputs: outputs
         )))
     }
 }

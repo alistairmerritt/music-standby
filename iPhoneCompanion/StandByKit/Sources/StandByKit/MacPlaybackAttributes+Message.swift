@@ -15,7 +15,8 @@ extension MacPlaybackAttributes {
                 SessionTrack(id: $0.id, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration, artworkID: $0.artworkID.flatMap { $0.isEmpty ? nil : $0 })
             },
             canGoNext: message.canGoNext,
-            canGoPrevious: message.canGoPrevious
+            canGoPrevious: message.canGoPrevious,
+            volume: message.volume
         )
     }
 }

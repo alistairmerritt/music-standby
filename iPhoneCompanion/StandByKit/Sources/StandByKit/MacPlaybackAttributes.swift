@@ -85,8 +85,12 @@ public struct MacPlaybackAttributes: Codable, Equatable, Sendable, Identifiable 
     public var track: SessionTrack?
     public var canGoNext: Bool
     public var canGoPrevious: Bool
+    /// Music's own output volume, 0 to 1. Nil from a Mac or relay that doesn't
+    /// send it; the Lock Screen then offers no volume slider.
+    public var volume: Double?
 
-    public init(id: String, macName: String, revision: UInt64, isPlaying: Bool, elapsedTime: TimeInterval, timestamp: Date, track: SessionTrack?, canGoNext: Bool, canGoPrevious: Bool) {
+    public init(id: String, macName: String, revision: UInt64, isPlaying: Bool, elapsedTime: TimeInterval, timestamp: Date, track: SessionTrack?,
+                canGoNext: Bool, canGoPrevious: Bool, volume: Double? = nil) {
         self.id = id
         self.macName = macName
         self.revision = revision
@@ -96,6 +100,7 @@ public struct MacPlaybackAttributes: Codable, Equatable, Sendable, Identifiable 
         self.track = track
         self.canGoNext = canGoNext
         self.canGoPrevious = canGoPrevious
+        self.volume = volume
     }
 
     /// Position at `date`, extrapolated while playing and clamped to the track.
@@ -112,7 +117,7 @@ public struct MacPlaybackAttributes: Codable, Equatable, Sendable, Identifiable 
         incoming.revision >= revision || incoming.timestamp > timestamp.addingTimeInterval(restartTolerance)
     }
 
-    private enum CodingKeys: String, CodingKey { case id, macName, revision, isPlaying, elapsedTime, timestamp, track, canGoNext, canGoPrevious }
+    private enum CodingKeys: String, CodingKey { case id, macName, revision, isPlaying, elapsedTime, timestamp, track, canGoNext, canGoPrevious, volume }
 
     private static let logger = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "attributes")
 
@@ -133,6 +138,7 @@ public struct MacPlaybackAttributes: Codable, Equatable, Sendable, Identifiable 
             track = try c.decodeIfPresent(SessionTrack.self, forKey: .track)
             canGoNext = try c.decode(Bool.self, forKey: .canGoNext)
             canGoPrevious = try c.decode(Bool.self, forKey: .canGoPrevious)
+            volume = try c.decodeIfPresent(Double.self, forKey: .volume)
         } catch {
             let reason = Self.explain(error)
             Self.logger.error("Couldn't decode attributes: \(reason, privacy: .public)")
@@ -151,6 +157,7 @@ public struct MacPlaybackAttributes: Codable, Equatable, Sendable, Identifiable 
         try c.encodeIfPresent(track, forKey: .track)
         try c.encode(canGoNext, forKey: .canGoNext)
         try c.encode(canGoPrevious, forKey: .canGoPrevious)
+        try c.encodeIfPresent(volume, forKey: .volume)
     }
 
     /// An ISO-8601 string, with or without fractional seconds; otherwise a

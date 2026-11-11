@@ -4,7 +4,15 @@ import Foundation
 public protocol SessionCommandHandling: Sendable {
     /// Returns attributes to show straight away, or nil to wait for the
     /// authoritative update. Throwing tells the system the command failed.
-    func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes?
+    /// `command.issuedAt` is when the control was used.
+    func perform(_ command: RemoteCommand, on attributes: MacPlaybackAttributes) async throws -> MacPlaybackAttributes?
+}
+
+extension SessionCommandHandling {
+    /// A plain command (play, pause, next, previous) used at `date`.
+    public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
+        try await perform(RemoteCommand(kind: kind, issuedAt: date), on: attributes)
+    }
 }
 
 /// Reads what the relay holds now.
@@ -44,9 +52,9 @@ public struct RelayCommandHandler: SessionCommandHandling {
         self.sleep = sleep
     }
 
-    public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
+    public func perform(_ command: RemoteCommand, on attributes: MacPlaybackAttributes) async throws -> MacPlaybackAttributes? {
         // The session on screen, so the relay can refuse a tap on a stale one.
-        let ack = try await sender.send(RemoteCommand(kind: kind, issuedAt: date), sessionID: attributes.id)
+        let ack = try await sender.send(command, sessionID: attributes.id)
         guard ack.accepted else { throw TransportError.commandRejected(ack.error?.code ?? .commandFailed) }
         guard let reader else { return nil }
         // The command has worked by now. Failing to see its result changes nothing.
@@ -77,7 +85,8 @@ extension MacPlaybackAttributes {
                              artworkID: $0.artworkID.isEmpty ? nil : $0.artworkID, artworkURL: $0.artworkURL)
             },
             canGoNext: relay.canGoNext,
-            canGoPrevious: relay.canGoPrevious
+            canGoPrevious: relay.canGoPrevious,
+            volume: relay.volume
         )
     }
 }
@@ -93,11 +102,12 @@ public struct MockCommandHandler: SessionCommandHandling {
         log = CommandLog(container: container)
     }
 
-    public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
+    public func perform(_ command: RemoteCommand, on attributes: MacPlaybackAttributes) async throws -> MacPlaybackAttributes? {
+        let date = command.issuedAt ?? Date()
         // Only bookkeeping for Diagnostics: failing to write it mustn't fail the tap.
-        try? log.append(CommandRecord(kind: kind, sessionID: attributes.id, receivedAt: date))
+        try? log.append(CommandRecord(kind: command.kind, sessionID: attributes.id, receivedAt: date))
         CrossProcessSignal.post(AppGroup.commandSignal)
-        return library.applying(kind, to: attributes, at: date)
+        return library.applying(command, to: attributes, at: date)
     }
 }
 
@@ -105,7 +115,7 @@ public struct MockCommandHandler: SessionCommandHandling {
 public struct UnpairedCommandHandler: SessionCommandHandling {
     public init() {}
 
-    public func perform(_ kind: CommandKind, on attributes: MacPlaybackAttributes, at date: Date) async throws -> MacPlaybackAttributes? {
+    public func perform(_ command: RemoteCommand, on attributes: MacPlaybackAttributes) async throws -> MacPlaybackAttributes? {
         throw TransportError.notPaired
     }
 }

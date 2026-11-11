@@ -10,9 +10,21 @@ struct HomeView: View {
         Form {
             Section("Now Playing") {
                 if let attributes = model.attributes, let track = attributes.track {
-                    NowPlayingRow(track: track, attributes: attributes, artwork: model.artwork)
+                    NowPlayingRow(track: track, attributes: attributes, artwork: model.artwork) { seconds in
+                        Task { await model.seek(to: seconds) }
+                    }
                     TransportControls(isPlaying: attributes.isPlaying) { kind in
                         Task { await model.send(kind) }
+                    }
+                    if let volume = attributes.volume {
+                        VolumeRow(level: volume) { level in
+                            Task { await model.setVolume(level) }
+                        }
+                    }
+                    if !model.outputs.isEmpty {
+                        OutputPicker(outputs: model.outputs) { id in
+                            Task { await model.selectOutput(id) }
+                        }
                     }
                 } else {
                     Text("Nothing is playing on your Mac.")
@@ -108,6 +120,8 @@ private struct NowPlayingRow: View {
     let track: SessionTrack
     let attributes: MacPlaybackAttributes
     let artwork: CGImage?
+    /// Called once when a drag on the progress bar ends, with the chosen position.
+    let onSeek: (TimeInterval) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -122,19 +136,7 @@ private struct NowPlayingRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let elapsed = attributes.elapsed(at: context.date)
-                VStack(spacing: 2) {
-                    ProgressView(value: elapsed, total: max(track.duration, 1))
-                    HStack {
-                        Text(Duration.seconds(elapsed), format: .time(pattern: .minuteSecond))
-                        Spacer()
-                        Text(Duration.seconds(track.duration), format: .time(pattern: .minuteSecond))
-                    }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                }
-            }
+            SeekBar(attributes: attributes, duration: track.duration, onSeek: onSeek)
         }
         .padding(.vertical, 4)
     }
@@ -145,6 +147,103 @@ private struct NowPlayingRow: View {
         } else {
             Rectangle().fill(.quaternary)
                 .overlay { Image(systemName: "music.note").foregroundStyle(.secondary) }
+        }
+    }
+}
+
+/// The progress bar, draggable. While dragging it shows the finger's position;
+/// when the drag ends the Mac is asked to seek there, and the bar goes back to
+/// following the Mac's own state until the result arrives.
+private struct SeekBar: View {
+    let attributes: MacPlaybackAttributes
+    let duration: TimeInterval
+    let onSeek: (TimeInterval) -> Void
+    @State private var dragging = false
+    @State private var dragValue: TimeInterval = 0
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = dragging ? dragValue : attributes.elapsed(at: context.date)
+            VStack(spacing: 2) {
+                Slider(
+                    value: Binding(get: { elapsed }, set: { dragValue = $0 }),
+                    in: 0...max(duration, 1),
+                    onEditingChanged: { editing in
+                        if editing {
+                            dragValue = elapsed
+                        } else {
+                            onSeek(dragValue)
+                        }
+                        dragging = editing
+                    }
+                )
+                .disabled(duration <= 0)
+                HStack {
+                    Text(Duration.seconds(elapsed), format: .time(pattern: .minuteSecond))
+                    Spacer()
+                    Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Music's own volume on the Mac. Sent once when the drag ends.
+private struct VolumeRow: View {
+    let level: Double
+    let onChange: (Double) -> Void
+    @State private var dragging = false
+    @State private var dragValue = 0.0
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+            Slider(
+                value: Binding(get: { dragging ? dragValue : level }, set: { dragValue = $0 }),
+                in: 0...1,
+                onEditingChanged: { editing in
+                    if editing {
+                        dragValue = level
+                    } else {
+                        onChange(dragValue)
+                    }
+                    dragging = editing
+                }
+            )
+            Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Volume on your Mac")
+    }
+}
+
+/// Where the Mac plays to. Choosing one sends Music there alone.
+private struct OutputPicker: View {
+    let outputs: [AudioOutput]
+    let onSelect: (String) -> Void
+
+    private var selectedID: String { outputs.first { $0.isSelected }?.id ?? "" }
+
+    var body: some View {
+        Picker("Play To", selection: Binding(get: { selectedID }, set: { id in
+            if id != selectedID, !id.isEmpty { onSelect(id) }
+        })) {
+            ForEach(outputs) { output in
+                Label(output.name, systemImage: symbol(for: output.kind))
+                    .tag(output.id)
+                    .disabled(!output.isAvailable)
+            }
+        }
+    }
+
+    private func symbol(for kind: AudioOutput.Kind) -> String {
+        switch kind {
+        case .computer: "laptopcomputer"
+        case .homePod: "homepod.fill"
+        case .appleTV, .tv: "appletv.fill"
+        case .bluetooth: "headphones"
+        default: "airplayaudio"
         }
     }
 }

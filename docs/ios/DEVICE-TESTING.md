@@ -39,6 +39,12 @@ Without APNs, the Lock Screen can't change while the app isn't open: a command t
 | R5 | In StandBy, tap Pause, Play and Next | As R3 and R4 |
 | R6 | Open the app after R3–R5 | It shows what the Mac is playing |
 | R7 | Check the artwork in the app and on the Lock Screen | The album's own artwork |
+| R8 | Locked or in StandBy, drag the progress bar to about two minutes | Music on the Mac jumps there; the bar follows within about 3 s |
+| R9 | Locked or in StandBy, move the volume slider | Music's own volume on the Mac changes (not the Mac's system volume); the slider settles at the Mac's level |
+| R10 | In the app, choose a HomePod under Play To, then the Mac again | Music plays to that device alone, then back. The picker follows the Mac |
+
+R8–R10 were added on 11 November 2026 and have not been run on a phone yet. Before R9, note
+Music's volume on the Mac: switching output in R10 sets it to the device's own level.
 
 ## Tests
 

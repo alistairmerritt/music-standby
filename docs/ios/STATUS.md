@@ -6,6 +6,34 @@ Last updated 11 November 2026, branch `feature/ios`.
 
 **A remote media session appears in landscape StandBy on a real iPhone, and the new extension sends HTTPS requests and reads a shared Keychain item when its controls are tapped.** All of this used the built-in mock transport. Nothing has talked to a real Mac or relay.
 
+## Seek, volume and output, 11 November 2026 (evening)
+
+Three more controls, built end to end but **not yet tried on the iPhone** (it wasn't connected).
+
+| Control | Where | Built | Verified |
+| --- | --- | --- | --- |
+| Drag the progress bar to a position | Lock Screen, StandBy, Control Centre, the app | `MediaCommand.seekToPosition` → `seek` with `position` | Logic tests; Mac end by hand and by harness |
+| Volume slider | Lock Screen, StandBy, Control Centre, the app | `MediaDevice.Capability.absoluteVolume` → `setVolume` with `level`; sets **Music's own volume**, not the Mac's | Same |
+| Choose where the Mac plays (HomePod, Apple TV, AirPods…) | **The app only**: a "Play To" picker | `selectOutput` with an `outputID` from `playback.outputs` | Same |
+
+Why output switching is in the app and not on the Lock Screen: the NowPlaying framework's
+`devices` is a display list with volume capabilities and nothing else. There is no callback
+for the person picking a device, so a remote session can't offer a route picker there. Music's
+own scripting does the switch (`current AirPlay devices`), so the app's picker works wherever
+the phone is unlocked.
+
+The slider sends one level per drag in the app. On the Lock Screen iOS may call the volume
+capability many times during a drag; the extension sends one command at a time and keeps only
+the newest level while one is in flight. A `seek` is sent once, when the drag ends. The level
+shown is the Mac's: it comes back in the next state (`attributes.volume`), by push or by the
+post-tap read, and the slider snaps back to the old level until it does.
+
+Verified without the phone: 186 StandByKit tests (4 new) pass; the app and extension build and
+sign for the device on the paid team; the relay's harness drove the real Music through a local
+relay (38/38). What the iPhone still has to show: that the Lock Screen offers the slider and
+scrubber for a remote session, that iOS calls them, and what the slider does between the tap
+and the state coming back. R8–R10 in [DEVICE-TESTING.md](DEVICE-TESTING.md).
+
 ## Pushes, 11 November 2026
 
 **Changes made at the Mac now reach a suspended phone by push.** The paid team (it kept the Personal Team's team ID), push on, built without the App Group, which isn't registered yet. iPhone 15 Pro, iOS 27.2, the deployed relay with `PUSH_MODE=apns`. "UI test" is an XCUITest that only reads Control Centre.
@@ -95,7 +123,7 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **182 tests**, macOS, Xcode 27.2 (11 November). `Shared/StandByProtocol`: 56 tests. The extension's artwork prefetch has no automated test.
+`swift test` from `iPhoneCompanion/StandByKit`: **186 tests**, macOS, Xcode 27.2 (11 November evening). `Shared/StandByProtocol`: 56 tests. The extension's artwork prefetch has no automated test.
 
 | Area | Covers |
 | --- | --- |
