@@ -48,9 +48,11 @@ end of the drag, which is when the seek is sent. Whether a finger, rather than X
 delivers the end event is still unknown; either path now sends.
 
 Not seen on the phone: the StandBy screen itself (the driver can't see a sleeping Lock Screen),
-and the Lock Screen while playing. Two HomePods (Kitchen, Living Room) are refused by Music
-itself with -15014, from AppleScript too; the Study HomePod switches in under 2 s. 186
-StandByKit tests pass; the relay's harness 38/38.
+and the Lock Screen while playing. A switch is asynchronous on the Mac: Music answers at once
+and the device shows as selected a few seconds later (Living Room HomePod about 3 s, Study
+HomePod under 2 s), so the picker catches up on the next state. One device, the Kitchen
+HomePod, is refused by Music itself with -15014, from AppleScript too; the picker then stays
+where it was. 186 StandByKit tests pass; the relay's harness 38/38.
 
 ## Pushes, 11 November 2026
 
