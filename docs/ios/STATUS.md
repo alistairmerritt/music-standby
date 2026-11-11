@@ -32,6 +32,14 @@ The app registered its push-to-start token 6–13 times within a second of each 
 
 **Apple Watch (by hand, 11 November).** The session appears in the Watch's Now Playing, and its skip buttons work. The Digital Crown does nothing: the session's `MediaDevice` declares no capabilities. NowPlaying offers `absoluteVolume` and `relativeVolume` if Mac volume control is wanted.
 
+**Artwork on the phone (11 November).** After the Mac's artwork fixes, songs on the phone showed no artwork at all. In the phone's log, iOS suspends the extension about a second after each update and doesn't wake it again just to get an image. A fetch that started only when the system asked for the image stalled mid-way and finished on the next song. Three changes, one in each part:
+
+- **Mac:** uploads a song's artwork before sending the state that names it, waiting at most 2 s.
+- **Extension:** starts fetching the artwork as soon as an update arrives, instead of waiting for the system to ask. The song's content id now includes the artwork id (`<track id>#<16 hex>`), because iOS asks for an item's artwork when the item first appears, not when artwork is added to it later.
+- **Relay:** sends the same update again 0.7 s after one with new artwork. That wakes the extension again once the image is cached.
+
+The extension logs each request for the image ("asked for at WxH, cached: …", "handed over"). One song in the log: update at 20:59:02.287, fetch started at once, the system asked at 171×171 77 ms later, the image was cached in 508 ms and handed over, and the follow-up update came at 03.326. The artwork then showed on the phone (by hand). Checked over a handful of songs, not a long session.
+
 ## What exists
 
 | Area | Location |
@@ -87,7 +95,7 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **175 tests**, macOS, Xcode 27.2. `Shared/StandByProtocol`: 56 tests.
+`swift test` from `iPhoneCompanion/StandByKit`: **182 tests**, macOS, Xcode 27.2 (11 November). `Shared/StandByProtocol`: 56 tests. The extension's artwork prefetch has no automated test.
 
 | Area | Covers |
 | --- | --- |

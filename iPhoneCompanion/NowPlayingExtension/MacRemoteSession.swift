@@ -15,12 +15,17 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
 
     @ObservationIgnored private let services = ExtensionServices.make(container: SharedContainer.appGroup(), credentials: KeychainCredentialStore())
     @ObservationIgnored private let logger = Logger(subsystem: "com.alistairmerritt.MusicStandBy.NowPlaying", category: "session")
+    /// The artwork now in the cache. `content` reads it, so a finished fetch
+    /// makes the system read the session again and pick the image up.
+    private var fetchedArtwork: String?
+    @ObservationIgnored private var fetchingArtwork: String?
 
     init(attributes: MacPlaybackAttributes) {
         id = attributes.id
         self.attributes = attributes
         logger.log("Session created for \(attributes.id, privacy: .public), revision \(attributes.revision)")
         startObservingPushToken()
+        prefetchArtwork()
     }
 
     func update(_ incoming: MacPlaybackAttributes) {
@@ -29,27 +34,82 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             return
         }
         attributes = incoming
+        prefetchArtwork()
+    }
+
+    /// Fetches the track's artwork into the cache as soon as the update
+    /// arrives. iOS suspends the extension about a second after an update and
+    /// doesn't wake it to draw the player, so a fetch left until the system
+    /// asks for the image froze mid-way and finished on the next song (seen on
+    /// an iPhone, 11 Nov 2026). The relay already holds the image (the Mac
+    /// uploads it first), so the fetch takes about 150 ms. It starts at once;
+    /// the expiring activity only asks for more time, which iOS may refuse.
+    private func prefetchArtwork() {
+        guard let track = attributes.track, let artworkID = track.artworkReference, !MockArtwork.isMockID(artworkID),
+              fetchedArtwork != artworkID, fetchingArtwork != artworkID else { return }
+        fetchingArtwork = artworkID
+        let store = services.artwork, url = track.artworkURL, logger = logger, started = Date()
+        logger.log("Fetching artwork \(artworkID.prefix(12), privacy: .public)")
+        let fetch = Task { [weak self] in
+            do {
+                _ = try await store.resolve(id: artworkID, remoteURL: url)
+                logger.log("Artwork \(artworkID.prefix(12), privacy: .public) cached in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+                self?.artworkCached(artworkID)
+            } catch {
+                logger.error("Artwork fetch failed: \(error.localizedDescription, privacy: .public)")
+                self?.artworkCached(nil)
+            }
+        }
+        ProcessInfo.processInfo.performExpiringActivity(withReason: "Fetching the song's artwork") { expired in
+            guard !expired else { return }
+            let done = DispatchSemaphore(value: 0)
+            Task {
+                await fetch.value
+                done.signal()
+            }
+            _ = done.wait(timeout: .now() + 8)
+        }
+    }
+
+    private func artworkCached(_ artworkID: String?) {
+        fetchingArtwork = nil
+        if let artworkID, attributes.track?.artworkReference == artworkID { fetchedArtwork = artworkID }
     }
 
     var content: (any MediaContentRepresentable)? {
         guard let track = attributes.track else { return nil }
+        _ = fetchedArtwork   // observed: a finished fetch re-reads the content
         let store = services.artwork
         let artworkURL = track.artworkURL
+        let logger = logger
+        // iOS asks for an item's artwork when the item first appears, not when
+        // artwork is added to it later: with the song's id alone, art that
+        // followed the title (the Mac waits for Music to settle, or the
+        // catalogue answers) never showed (seen on an iPhone, 11 Nov 2026).
         return MusicContent(
-            id: track.id,
+            id: track.artworkReference.map { "\(track.id)#\($0.prefix(16))" } ?? track.id,
             songTitle: track.title,
             artistName: track.artist,
             albumName: track.album,
             type: .audio,
             duration: .finite(track.duration),
             artwork: track.artworkReference.map { artworkID in
-                Artwork(id: artworkID) { _ in
+                Artwork(id: artworkID) { size in
                     // PNG encoding never finished inside this extension on iOS 27.2 and the
                     // system kept relaunching it, so generated art skips the encoder.
                     if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {
                         return try ArtworkRepresentation(cgImage: image)
                     }
-                    return try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
+                    let cached = store.load(id: artworkID) != nil
+                    logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached)")
+                    do {
+                        let representation = try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
+                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over")
+                        return representation
+                    } catch {
+                        logger.error("Artwork \(artworkID.prefix(12), privacy: .public) not handed over: \(error.localizedDescription, privacy: .public)")
+                        throw error
+                    }
                 }
             }
         )
