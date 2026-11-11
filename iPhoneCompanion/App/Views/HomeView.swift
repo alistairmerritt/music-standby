@@ -55,7 +55,9 @@ struct HomeView: View {
         } header: {
             Text("Lock Screen and StandBy")
         } footer: {
-            Text("Music StandBy doesn’t play audio. Your Mac does.")
+            // iOS shows a session only once the app has asked while open, so a
+            // dismissed player stays hidden until the next launch re-requests it.
+            Text("Music StandBy doesn’t play audio. Your Mac does.\n\nIf you swipe the player away, it stays hidden until you next open Music StandBy.")
         }
     }
 
