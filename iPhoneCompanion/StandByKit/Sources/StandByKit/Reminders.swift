@@ -52,7 +52,7 @@ public final class ReminderModel {
         if enabled {
             guard await permission.request() else {
                 store(false)
-                problem = "Notifications are off for Music StandBy. Turn them on in Settings to get reminders."
+                problem = "Notifications are off for Second Chair. Turn them on in Settings to get reminders."
                 return
             }
             store(true)

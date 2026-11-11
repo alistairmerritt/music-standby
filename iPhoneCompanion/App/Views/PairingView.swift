@@ -32,7 +32,7 @@ struct PairingView: View {
                 pairing?.cancel()
             }
         } footer: {
-            Text("On your Mac, open Music StandBy in the menu bar and allow this iPhone.")
+            Text("On your Mac, open Second Chair in the menu bar and allow this iPhone.")
         }
     }
 
@@ -53,7 +53,7 @@ struct PairingView: View {
         } header: {
             Text("Pairing Code")
         } footer: {
-            Text(errorMessage ?? "Enter the six-digit code shown by Music StandBy on your Mac.")
+            Text(errorMessage ?? "Enter the six-digit code shown by Second Chair on your Mac.")
                 .foregroundStyle(errorMessage == nil ? Color.secondary : Color.red)
         }
 

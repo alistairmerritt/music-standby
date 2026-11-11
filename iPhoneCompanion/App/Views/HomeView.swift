@@ -28,7 +28,7 @@ struct HomeView: View {
                 NavigationLink("Diagnostics") { DiagnosticsView() }
             }
         }
-        .navigationTitle("Music StandBy")
+        .navigationTitle("Second Chair")
         .confirmationDialog("Unpair this Mac?", isPresented: $isConfirmingUnpair, titleVisibility: .visible) {
             Button("Unpair", role: .destructive) {
                 Task { await model.unpair() }
@@ -59,7 +59,7 @@ struct HomeView: View {
         } footer: {
             // iOS shows a session only once the app has asked while open, so a
             // dismissed player stays hidden until the next launch re-requests it.
-            Text("Music StandBy doesn’t play audio. Your Mac does.\n\nIf you dismiss the player, it stays hidden until you next open Music StandBy.")
+            Text("Second Chair doesn’t play audio. Your Mac does.\n\nIf you dismiss the player, it stays hidden until you next open Second Chair.")
         }
     }
 
@@ -71,7 +71,7 @@ struct HomeView: View {
             ))
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("iOS only shows your Mac’s music after Music StandBy has been opened, so a dismissed player stays hidden. With this on, you get a quiet notification when your Mac starts playing after a break. Tap it to bring the player back.")
+                Text("iOS only shows your Mac’s music after Second Chair has been opened, so a dismissed player stays hidden. With this on, you get a quiet notification when your Mac starts playing after a break. Tap it to bring the player back.")
                 if let problem = reminders.problem {
                     Text(problem).foregroundStyle(.red)
                 }
