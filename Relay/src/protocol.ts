@@ -27,6 +27,15 @@ export interface TrackMetadata {
   artworkID?: string;
 }
 
+/** One place Music can play to (Shared/StandByProtocol/Output.swift). */
+export interface AudioOutput {
+  id: string;
+  name: string;
+  kind: string;
+  isSelected: boolean;
+  isAvailable: boolean;
+}
+
 export interface PlaybackMessage {
   revision: number;
   state?: PlaybackState;
@@ -38,6 +47,9 @@ export interface PlaybackMessage {
   canGoPrevious: boolean;
   listeningSessionID?: string;
   detail?: string;
+  /** Music's own output volume, 0 to 1. Added 11 November 2026. */
+  volume?: number;
+  outputs?: AudioOutput[];
 }
 
 export interface ProtocolError {
@@ -50,6 +62,12 @@ export interface RemoteCommand {
   id: string;
   kind: string;
   issuedAt?: string;
+  /** Seconds, for `seek`. */
+  position?: number;
+  /** 0 to 1, for `setVolume`. */
+  level?: number;
+  /** An `AudioOutput.id`, for `selectOutput`. */
+  outputID?: string;
 }
 
 export interface CommandAck {
@@ -93,6 +111,8 @@ export interface NowPlayingAttributes {
   track?: NowPlayingTrack;
   canGoNext: boolean;
   canGoPrevious: boolean;
+  /** `PlaybackMessage.volume`, for the Lock Screen's slider. */
+  volume?: number;
 }
 
 export type MacFrame =
@@ -144,7 +164,14 @@ export function isPlaybackMessage(v: unknown): v is PlaybackMessage {
 
 export function isCommand(v: unknown): v is RemoteCommand {
   const c = v as RemoteCommand;
-  return !!c && UUID.test(c.id ?? "") && text(c.kind, 32);
+  return (
+    !!c &&
+    UUID.test(c.id ?? "") &&
+    text(c.kind, 32) &&
+    (c.position === undefined || Number.isFinite(c.position)) &&
+    (c.level === undefined || Number.isFinite(c.level)) &&
+    (c.outputID === undefined || text(c.outputID, 256))
+  );
 }
 
 export function isAck(v: unknown): v is CommandAck {

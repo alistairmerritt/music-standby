@@ -181,12 +181,21 @@ describe("pairing", () => {
 describe("playback and sessions", () => {
   it("stores the Mac's state and builds push attributes from it", async () => {
     const { mac, phoneToken, pairingID } = await pairedSetup();
-    const state = playback({ track: { id: "pid:A", title: "Song", artist: "Artist", album: "Album", duration: 200, artworkID: "a".repeat(64) } });
+    const outputs = [
+      { id: "name:Studio Mac", name: "Studio Mac", kind: "computer", isSelected: true, isAvailable: true },
+      { id: "e4:6e:91:c0:a6:d2", name: "Living Room", kind: "homepod", isSelected: false, isAvailable: true },
+    ];
+    const state = playback({
+      track: { id: "pid:A", title: "Song", artist: "Artist", album: "Album", duration: 200, artworkID: "a".repeat(64) },
+      volume: 0.4,
+      outputs,
+    });
     mac.send({ type: "state", message: state });
     const s = await waitForRevision(phoneToken, state.revision);
     expect(s.sessionID).toMatch(/^[0-9a-f-]{36}$/);
     expect(s.macConnected).toBe(true);
     expect(s.playback).toEqual(state);
+    expect(s.playback.outputs).toEqual(outputs);
     expect(s.attributes).toMatchObject({
       id: s.sessionID,
       macName: "Studio Mac",
@@ -196,7 +205,9 @@ describe("playback and sessions", () => {
       timestamp: state.capturedAt,
       track: { id: "pid:A", title: "Song", artworkID: "a".repeat(64) },
       canGoNext: true,
+      volume: 0.4,
     });
+    expect(s.attributes.outputs).toBeUndefined();
     expect(s.attributes.track.artworkURL).toMatch(new RegExp(`^https://relay\\.test/v1/artwork/${pairingID}/a{64}\\?sig=[A-Za-z0-9_-]{22}$`));
   });
 
@@ -323,6 +334,24 @@ describe("commands", () => {
     const response = await pending;
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ack: { commandID: id, accepted: true, revision: 42 } });
+  });
+
+  it("forwards a value command with its value, and refuses a malformed one", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const id = newCommandID();
+    const body = { command: { id, kind: "seek", issuedAt: new Date().toISOString(), position: 120.5 }, sessionID };
+    const pending = call("POST", "/v1/commands", { token: phoneToken, body, headers: { "Idempotency-Key": id } });
+    const frame = await mac.next("command");
+    expect(frame.command).toEqual(body.command);
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 43 } });
+    expect((await pending).status).toBe(200);
+    const bad = newCommandID();
+    const r = await call("POST", "/v1/commands", {
+      token: phoneToken,
+      body: { command: { id: bad, kind: "setVolume", level: "loud" }, sessionID },
+      headers: { "Idempotency-Key": bad },
+    });
+    expect(r.status).toBe(400);
   });
 
   it("passes the Mac's rejection through", async () => {

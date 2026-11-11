@@ -79,7 +79,9 @@ function describe(s) {
   if (!s.sessionID) return `no session · Mac ${s.macConnected ? "connected" : "offline"} · playback ${s.playback?.state ?? "none"}`;
   const a = s.attributes;
   const t = a.track ? `${a.track.title} — ${a.track.artist}` : "(no track)";
-  return `${a.isPlaying ? "▶" : "❚❚"} ${t} · r${a.revision} · session ${s.sessionID.slice(0, 8)} · art ${a.track?.artworkURL ? "yes" : "no"}`;
+  const volume = a.volume === undefined ? "" : ` · vol ${Math.round(a.volume * 100)}%`;
+  const outputs = s.playback?.outputs ? ` · → ${s.playback.outputs.filter((o) => o.isSelected).map((o) => o.name).join(", ") || "nothing"}` : "";
+  return `${a.isPlaying ? "▶" : "❚❚"} ${t} · r${a.revision} · session ${s.sessionID.slice(0, 8)} · art ${a.track?.artworkURL ? "yes" : "no"}${volume}${outputs}`;
 }
 
 switch (command) {
@@ -128,11 +130,16 @@ switch (command) {
 
   case "cmd": {
     const kind = rest[0];
-    if (!["play", "pause", "next", "previous"].includes(kind)) fail("usage: cmd play|pause|next|previous");
+    const usage = "usage: cmd play|pause|next|previous | seek <seconds> | setVolume <0-1> | selectOutput <id>";
+    if (!["play", "pause", "next", "previous", "seek", "setVolume", "selectOutput"].includes(kind)) fail(usage);
+    const value = { seek: { position: Number(rest[1]) }, setVolume: { level: Number(rest[1]) }, selectOutput: { outputID: rest[1] } }[kind] ?? {};
+    if (kind === "seek" && !Number.isFinite(value.position)) fail(usage);
+    if (kind === "setVolume" && !Number.isFinite(value.level)) fail(usage);
+    if (kind === "selectOutput" && !rest[1]) fail(usage);
     const before = await api("GET", "/v1/session");
     const sessionID = sessionOverride ?? before.json?.sessionID;
     const id = randomUUID().toUpperCase();
-    const body = { command: { id, kind, issuedAt: new Date().toISOString() }, ...(sessionID ? { sessionID } : {}) };
+    const body = { command: { id, kind, issuedAt: new Date().toISOString(), ...value }, ...(sessionID ? { sessionID } : {}) };
     const send = () => api("POST", "/v1/commands", { body, headers: { "Idempotency-Key": id } });
     const first = await send();
     console.log(`${kind}: HTTP ${first.status} in ${first.ms} ms ${first.text}`);

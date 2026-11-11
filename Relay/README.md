@@ -63,7 +63,9 @@ With `--relay URL` the same checks run against a deployed relay instead; see
 To drive it by hand, run `npm run dev`, then
 `msbctl watch 600 --relay http://127.0.0.1:8787 --pair`, then
 `node tools/mock-phone.mjs pair <code>` (type `approve` into `msbctl`), then
-`node tools/mock-phone.mjs cmd next`.
+`node tools/mock-phone.mjs cmd next`. Since 11 November the phone can also `cmd seek 90`,
+`cmd setVolume 0.4` (Music's own volume, 0 to 1) and `cmd selectOutput <id>`, with the ids
+from `playback.outputs` in `session`.
 
 ## Configuration
 
@@ -132,6 +134,16 @@ pushed before, the relay sends the same attributes again after `ARTWORK_FOLLOW_U
 wakes the extension again once the image is cached. It's skipped if a newer update, another
 session or a new token came in meanwhile. 60 tests pass. On the iPhone, with the Mac
 uploading the artwork first and the extension fetching it at once, the artwork showed.
+
+On the evening of 11 November, seek, volume and output selection (contract branch
+`contract/seek-volume`), **not yet deployed**. The relay passes the three value commands
+through with their `position`, `level` or `outputID`, refusing a non-numeric value with `400`,
+and copies the Mac's `volume` into push attributes; `playback.outputs` reaches the phone in
+`GET /v1/session` as the Mac sent it. 61 tests pass, and the local harness with `--playback`
+38/38 against the real Music: seek to 30 s, volume 1 → 0.3 → 1, an unknown output refused,
+the current output re-selected. The deployment before this one already forwards the commands
+(it checks only `id` and `kind`); what it lacks is `volume` in pushes, so the Lock Screen's
+slider waits for `npm run deploy`.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 

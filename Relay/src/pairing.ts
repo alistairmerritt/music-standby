@@ -561,6 +561,7 @@ export class Pairing extends DurableObject<Env> {
         : undefined,
       canGoNext: message.canGoNext,
       canGoPrevious: message.canGoPrevious,
+      ...(typeof message.volume === "number" ? { volume: message.volume } : {}),
     };
   }
 

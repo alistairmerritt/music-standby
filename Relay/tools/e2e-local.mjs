@@ -10,8 +10,10 @@
 //
 // Without --playback nothing changes Music: only reads, pairing, auth,
 // sessions, artwork and connection loss. With --playback it also sends
-// next, pause and play to the real Music.app, which must already be playing,
-// and leaves it paused. It never changes the volume and never launches Music.
+// next, pause, play and seek to the real Music.app, which must already be
+// playing, sets Music's own volume and puts it back, and re-selects the output
+// Music is already playing to. It never touches the Mac's system volume and
+// never launches Music.
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -93,8 +95,8 @@ function startMac(extra = []) {
 const phone = { id: "E2E-PHONE", name: "E2E iPhone", kind: "iphone" };
 let phoneToken, sessionID;
 const session = async () => (await api("GET", "/v1/session", { token: phoneToken })).json;
-const command = (kind, { id = randomUUID().toUpperCase(), session = sessionID } = {}) =>
-  api("POST", "/v1/commands", { token: phoneToken, headers: { "Idempotency-Key": id }, body: { command: { id, kind, issuedAt: new Date().toISOString() }, sessionID: session } });
+const command = (kind, { id = randomUUID().toUpperCase(), session = sessionID, ...value } = {}) =>
+  api("POST", "/v1/commands", { token: phoneToken, headers: { "Idempotency-Key": id }, body: { command: { id, kind, issuedAt: new Date().toISOString(), ...value }, sessionID: session } });
 
 try {
   // 1. Relay and Mac
@@ -167,6 +169,41 @@ try {
       const nextsAfter = (macLog.match(/command next →/g) ?? []).length;
       check("a repeated command id acts once", a.text === b.text && nextsAfter - nextsBefore === 1, `${nextsAfter - nextsBefore} next(s) on the Mac`);
       sessionID = (await session())?.sessionID ?? sessionID;
+
+      // Seek, volume and output (11 November 2026)
+      const seek = await command("seek", { position: 30 });
+      const sought = await until(async () => {
+        const s = await session();
+        const at = s?.playback ? s.playback.elapsedTime + (Date.now() - Date.parse(s.playback.capturedAt)) / 1000 : undefined;
+        return at !== undefined && at >= 29 && at <= 36 ? at : undefined;
+      });
+      check("Seek from the phone moves Music to 30 s", seek.json?.ack?.accepted && !!sought, sought ? `now at ${sought.toFixed(1)} s` : seek.text);
+
+      const start = await session();
+      const level = start?.playback?.volume;
+      check("the state carries Music's volume and outputs", typeof level === "number" && Array.isArray(start?.playback?.outputs),
+        `volume ${level}, ${start?.playback?.outputs?.length ?? 0} output(s)`);
+      const target = level !== undefined && level > 0.5 ? 0.3 : 0.7;
+      const vol = await command("setVolume", { level: target });
+      const changed2 = await until(async () => ((await session())?.playback?.volume === target ? true : undefined));
+      check("setVolume from the phone changes Music's own volume", vol.json?.ack?.accepted && !!changed2, `${level} → ${target}`);
+      if (level !== undefined) {
+        const back = await command("setVolume", { level });
+        const restored = await until(async () => ((await session())?.playback?.volume === level ? true : undefined));
+        check("and it is put back", back.json?.ack?.accepted && !!restored, `${level}`);
+      }
+      const bad = await command("setVolume", {});
+      check("a value command without its value is refused by the Mac", bad.status === 200 && bad.json?.ack?.accepted === false && bad.json?.ack?.error?.code === "invalid_request", bad.text);
+
+      const current = start?.playback?.outputs?.find((o) => o.isSelected);
+      if (current) {
+        const same = await command("selectOutput", { outputID: current.id });
+        check("selecting the output Music already plays to is accepted", same.json?.ack?.accepted === true, current.name);
+        const unknown = await command("selectOutput", { outputID: "00:00:00:00:00:00" });
+        check("an unknown output is refused", unknown.json?.ack?.accepted === false && unknown.json?.ack?.error?.code === "invalid_request", unknown.text);
+      } else {
+        check("Music reports a selected output", false, "none selected");
+      }
     }
   } else {
     console.log("skip  playback commands (run with --playback while Music is playing)");
