@@ -4,7 +4,7 @@
 #   scripts/build.sh            the app, msbctl and the test runner
 #   scripts/build.sh core       StandByProtocol and CompanionCore only
 #
-# Output in MacCompanion/.build/swiftc; the app at MacCompanion/build/Music StandBy.app,
+# Output in MacCompanion/.build/swiftc; the app at MacCompanion/build/Second Chair.app,
 # signed with your Apple Development identity so keychain and Automation
 # approvals survive rebuilds (ad-hoc when there is none; see the codesign step).
 set -euo pipefail
@@ -43,7 +43,7 @@ echo "› CompanionCoreTests"
 swiftc "${common[@]}" "${testflags[@]}" -parse-as-library -module-name CompanionCoreTests "${link[@]}" \
   "$root"/Tests/CompanionCoreTests/*.swift "$protocol/scripts/TestMain.swift" -o "$out/CompanionCoreTests"
 
-app="$root/build/Music StandBy.app"
+app="$root/build/Second Chair.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$out/MusicStandBy" "$app/Contents/MacOS/MusicStandBy"

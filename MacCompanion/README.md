@@ -30,7 +30,7 @@ swift test
 scripts/build.sh
 ```
 
-`build.sh` compiles with `swiftc` and assembles `build/Music StandBy.app`, signed with your
+`build.sh` compiles with `swiftc` and assembles `build/Second Chair.app`, signed with your
 Apple Development identity (ad-hoc if there is none, or with `MSB_SIGN_IDENTITY=-`), plus
 `.build/swiftc/msbctl`. Without a working Xcode it falls back to the Command Line Tools with
 a workaround for their broken module map (see `scripts/toolchain.sh`).

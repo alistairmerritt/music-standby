@@ -21,7 +21,7 @@ struct MenuContent: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Quit Music StandBy") { NSApp.terminate(nil) }
+                Button("Quit Second Chair") { NSApp.terminate(nil) }
                     .keyboardShortcut("q")
             }
         }
@@ -44,10 +44,10 @@ private struct NowPlayingSection: View {
             }
         case .notRunning?:
             Notice(symbol: "music.note", title: "Music isn’t running",
-                   detail: "Music StandBy never opens Music by itself.",
+                   detail: "Second Chair never opens Music by itself.",
                    action: ("Open Music", openMusic))
         case .automationDenied?:
-            Notice(symbol: "exclamationmark.triangle", title: "Music StandBy can’t read Music",
+            Notice(symbol: "exclamationmark.triangle", title: "Second Chair can’t read Music",
                    detail: "Allow it in System Settings › Privacy & Security › Automation.",
                    action: ("Open Privacy Settings", openAutomationSettings))
         default:
@@ -255,7 +255,7 @@ private struct PairingControls: View {
                         Text(code.code.map(String.init).joined(separator: " "))
                             .font(.system(.title, design: .monospaced).weight(.semibold))
                             .textSelection(.enabled)
-                        Text(left > 0 ? "Type this in Music StandBy on your iPhone. Expires in \(left / 60):\(String(format: "%02d", left % 60))." : "Expired.")
+                        Text(left > 0 ? "Type this in Second Chair on your iPhone. Expires in \(left / 60):\(String(format: "%02d", left % 60))." : "Expired.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

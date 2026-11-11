@@ -20,7 +20,7 @@ final class LaunchAtLogin {
             message = nil
         case .requiresApproval:
             isEnabled = true
-            message = "Approve Music StandBy in System Settings › General › Login Items."
+            message = "Approve Second Chair in System Settings › General › Login Items."
         case .notRegistered:
             isEnabled = false
             message = nil

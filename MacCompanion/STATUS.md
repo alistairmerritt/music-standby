@@ -3,6 +3,8 @@
 11 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
 SDK), Music.app 1.7.
 
+**Renamed to Second Chair on 11 November 2026.** The app is now `build/Second Chair.app`, and its menu and permission text say Second Chair. Its bundle identifier (`com.alistairmerritt.MusicStandBy.Mac`), its `defaults` domain and its Keychain items keep the old name, so approvals and the pairing carry over. Older entries use the old name.
+
 **Executed** means run on this Mac with output recorded. **Not verified** means written and
 unit-tested at most.
 

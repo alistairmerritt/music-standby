@@ -41,7 +41,7 @@ struct MusicStandByApp: App {
             MenuContent(companion: companion, relay: relay, launchAtLogin: launchAtLogin)
         } label: {
             Image(systemName: companion.snapshot?.state == .automationDenied ? "exclamationmark.triangle" : "music.note")
-                .accessibilityLabel("Music StandBy")
+                .accessibilityLabel("Second Chair")
         }
         .menuBarExtraStyle(.window)
     }
