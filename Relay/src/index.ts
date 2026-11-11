@@ -1,4 +1,4 @@
-// Music StandBy relay: one Worker, one Pairing Durable Object per Mac, and a
+// Second Chair relay: one Worker, one Pairing Durable Object per Mac, and a
 // Directory Durable Object for pairing codes and rate limits.
 // Contract: docs/relay/API-v1.md.
 

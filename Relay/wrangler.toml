@@ -1,4 +1,4 @@
-# Music StandBy relay. `npm run dev` runs it locally; `npm run deploy` deploys it as
+# Second Chair relay. `npm run dev` runs it locally; `npm run deploy` deploys it as
 # configured here (real pushes, dev endpoints off).
 name = "music-standby-relay"
 main = "src/index.ts"
