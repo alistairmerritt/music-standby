@@ -38,17 +38,33 @@ export interface AlertPush {
   token: string;
   /** Each reminder replaces the last, so they never pile up. */
   collapseID: string;
-  payload: { aps: { alert: { title: string; body: string }; "thread-id": string } };
+  payload: {
+    aps: { alert: { title: string; body: string }; "thread-id": string; "interruption-level": "time-sensitive"; "relevance-score": number };
+  };
 }
 
 export const REMINDER_ID = "mac-playing";
 
-/** No sound: the reminder should be noticed, not heard. */
+/**
+ * No sound: the reminder should be noticed, not heard. Time Sensitive, so it
+ * shows during a Focus, in a scheduled Summary and in StandBy: as an ordinary
+ * ("active") alert it went straight to Notification Centre whenever a Focus
+ * was on, which in StandBy is most of the time (seen 12 Nov 2026). The app
+ * carries the Time Sensitive entitlement; the person can still turn it off
+ * per app or per Focus in Settings.
+ */
 export function makeReminder(token: string, macName: string): AlertPush {
   return {
     token,
     collapseID: REMINDER_ID,
-    payload: { aps: { alert: { title: `Music playing on ${macName}`, body: "Tap to show on your Lock Screen." }, "thread-id": REMINDER_ID } },
+    payload: {
+      aps: {
+        alert: { title: `Music playing on ${macName}`, body: "Tap to show on your Lock Screen." },
+        "thread-id": REMINDER_ID,
+        "interruption-level": "time-sensitive",
+        "relevance-score": 1,
+      },
+    },
   };
 }
 

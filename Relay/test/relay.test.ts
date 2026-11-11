@@ -495,7 +495,12 @@ describe("reminders", () => {
     const sent = await reminders(phoneToken);
     expect(sent).toHaveLength(1);
     expect(sent[0].payload).toEqual({
-      aps: { alert: { title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." }, "thread-id": "mac-playing" },
+      aps: {
+        alert: { title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." },
+        "thread-id": "mac-playing",
+        "interruption-level": "time-sensitive",
+        "relevance-score": 1,
+      },
     });
     expect(sent[0].payload.aps.sound).toBeUndefined();
     expect(sent[0].collapseID).toBe("mac-playing");

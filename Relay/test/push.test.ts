@@ -112,6 +112,7 @@ describe("APNsPushSender", () => {
     const body = (await request.json()) as any;
     expect(body.aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." });
     expect(body.aps.sound).toBeUndefined();
+    expect(body.aps["interruption-level"]).toBe("time-sensitive");
   });
 
   describe("the global fetch", () => {
