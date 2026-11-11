@@ -154,9 +154,12 @@ public struct NowPlayingAttributes: Codable, Equatable, Sendable, Identifiable {
     public var track: Track?
     public var canGoNext: Bool
     public var canGoPrevious: Bool
+    /// `PlaybackMessage.volume`, copied through. Lets the Lock Screen's
+    /// volume slider show Music's level. Absent from an older relay.
+    public var volume: Double?
 
     public init(id: String, macName: String, revision: UInt64, isPlaying: Bool, elapsedTime: TimeInterval, timestamp: Date,
-                track: Track?, canGoNext: Bool, canGoPrevious: Bool) {
+                track: Track?, canGoNext: Bool, canGoPrevious: Bool, volume: Double? = nil) {
         self.id = id
         self.macName = macName
         self.revision = revision
@@ -166,6 +169,7 @@ public struct NowPlayingAttributes: Codable, Equatable, Sendable, Identifiable {
         self.track = track
         self.canGoNext = canGoNext
         self.canGoPrevious = canGoPrevious
+        self.volume = volume
     }
 }
 
