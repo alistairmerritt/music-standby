@@ -135,17 +135,22 @@ Frames are `MacFrame` / `RelayFrame` (PROTOCOL.md §6), one JSON object per text
 
 The relay owns the Now Playing **session**, and its id is what the phone sees as
 `MacPlaybackAttributes.id`. It is a fresh lowercase UUID each time, never reused. It is not
-the Mac's `listeningSessionID`, although that drives it.
+the Mac's `listeningSessionID`.
+
+**One session lasts as long as the pairing.** iOS 27.2 shows a session only once the app has
+asked for it while open; a session started by a `start` push exists, takes updates, and stays
+hidden (seen on an iPhone, 11 November 2026). So the Mac stopping, quitting or going away
+updates the session, showing the last track paused, instead of ending it.
 
 | Event | Relay action |
 | --- | --- |
 | State `playing`, no session | Start a session: new `sessionID`, `start` push to the push-to-start token |
 | Visible change during a session | `update` push to the session token |
-| `listeningSessionID` changes | End the session; start a new one if playing |
-| State `stopped`, `not_running` or `automation_denied` | End the session at once |
-| `paused` for 15 minutes | End the session |
-| Mac sends `goodbye` | End the session at once |
-| Mac socket drops without `goodbye` | Wait 60 s for a reconnect, then end the session |
+| `listeningSessionID` changes | Keep the session |
+| State `stopped`, `not_running` or `automation_denied` | Keep the session: `update` push, not playing, with the last track |
+| `paused` for any time | Keep the session. `PAUSED_TIMEOUT_MS` above 0 ends it after that long |
+| Mac sends `goodbye` | Keep the session: if playing, `update` push as paused at its extrapolated position |
+| Mac socket drops without `goodbye` | Wait 60 s for a reconnect, then as `goodbye`. The Mac's next state is pushed even at the same revision |
 | `POST /v1/session/end` from the phone | End the session, and start no new one for the same `listeningSessionID`. The next listening session, after a stop or quit, starts as usual |
 | `DELETE /v1/pairing` | End the session, revoke both tokens |
 | APNs answers `410` or `BadDeviceToken` | Forget that token; if it was the session's, end the session |
@@ -272,8 +277,8 @@ Every value is a judgement call, and the relay can change them without a version
 | --- | --- |
 | Pairing code and claim expiry | 5 minutes |
 | Command ack deadline (relay) / client timeout (extension) | 1.2 s / 1.5 s |
-| Mac disconnect grace before ending the session | 60 s |
-| Paused before ending the session | 15 minutes |
+| Mac disconnect grace before the phone is told it paused | 60 s |
+| Paused before ending the session | Never (`PAUSED_TIMEOUT_MS`, default 0) |
 | Mac ping / pong deadline | 30 s / 10 s |
 | Mac reconnect backoff | 1 s → 30 s, ±20 % jitter |
 

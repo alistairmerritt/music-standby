@@ -6,7 +6,6 @@ import {
   ARTWORK_ID,
   HEX_TOKEN,
   PROTOCOL_VERSION,
-  endsSession,
   isAck,
   isCommand,
   isPlaybackMessage,
@@ -19,6 +18,7 @@ import {
   type PlaybackMessage,
   type RelayFrame,
   type RemoteCommand,
+  type TrackMetadata,
 } from "./protocol";
 import { APNsPushSender, MockPushSender, makePush, tokenIsDead, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
 
@@ -46,6 +46,14 @@ interface Claim {
   status: "pending" | "approved" | "denied";
 }
 
+/**
+ * One Now Playing session lasts as long as the pairing. iOS 27.2 shows a
+ * session only once the app has asked for it while open, and a session started
+ * by a push stays hidden. So Music stopping or quitting, a new listening
+ * session, a long pause, or the Mac going away all update this session, with
+ * the last track paused, rather than ending it for a replacement no one sees
+ * (seen on an iPhone, 11 November 2026).
+ */
 interface Session {
   sessionID: string;
   listeningSessionID?: string;
@@ -53,6 +61,10 @@ interface Session {
   /** Revision of the last state actually pushed. */
   pushedRevision: number;
   pausedSince?: number;
+  /** Shown while the Mac reports no track, so the player isn't blanked. */
+  lastTrack?: TrackMetadata;
+  /** The Mac went away and the phone was told it paused; its next state is pushed whatever its revision. */
+  macAway?: boolean;
 }
 
 interface PushTokens {
@@ -102,8 +114,9 @@ export class Pairing extends DurableObject<Env> {
   private get disconnectGrace(): number {
     return Number(this.env.DISCONNECT_GRACE_MS ?? 60_000);
   }
+  /** 0, the default, keeps a paused session for good; see `Session`. */
   private get pausedTimeout(): number {
-    return Number(this.env.PAUSED_TIMEOUT_MS ?? 15 * 60_000);
+    return Number(this.env.PAUSED_TIMEOUT_MS ?? 0);
   }
 
   // MARK: RPC from the Worker
@@ -314,7 +327,7 @@ export class Pairing extends DurableObject<Env> {
         return this.receiveAck(frame.ack);
       case "goodbye":
         await this.ctx.storage.put("goodbye", true);
-        await this.endSession("mac_goodbye");
+        await this.markMacAway("goodbye");
         return;
       case "pair-decision":
         return this.decide(String(frame.claimID), frame.approved === true);
@@ -368,15 +381,7 @@ export class Pairing extends DurableObject<Env> {
     }
 
     const state = stateOf(message);
-    let session = await this.ctx.storage.get<Session>("session");
-    if (session && endsSession(state)) {
-      await this.endSession(`mac_${state}`);
-      return;
-    }
-    if (session && message.listeningSessionID && session.listeningSessionID && message.listeningSessionID !== session.listeningSessionID) {
-      await this.endSession("new_listening_session");
-      session = undefined;
-    }
+    const session = await this.ctx.storage.get<Session>("session");
     if (!session) {
       if (state !== "playing") return;
       // A session the phone dismissed stays dismissed for that listening session.
@@ -386,11 +391,46 @@ export class Pairing extends DurableObject<Env> {
       await this.startSession(message);
       return;
     }
-    session.listeningSessionID ??= message.listeningSessionID;
-    session.pausedSince = state === "paused" ? (session.pausedSince ?? Date.now()) : undefined;
+    // Stopped, quit or a new listening session: the same session, updated.
+    session.listeningSessionID = message.listeningSessionID ?? session.listeningSessionID;
+    session.pausedSince = state === "playing" ? undefined : (session.pausedSince ?? Date.now());
+    if (message.track) session.lastTrack = message.track;
+    const wasAway = session.macAway === true;
+    delete session.macAway;
     await this.ctx.storage.put("session", session);
-    if (message.revision > session.pushedRevision) await this.pushUpdate(session, message);
+    if (wasAway || message.revision > session.pushedRevision) await this.pushUpdate(session, message);
     await this.scheduleAlarm();
+  }
+
+  /**
+   * The Mac quit the companion or stayed disconnected past the grace period.
+   * A playing session is pushed as paused at its extrapolated position, so the
+   * phone doesn't show music running that may have stopped. Same revision: the
+   * phone accepts an equal one, and the Mac's next state is pushed regardless.
+   */
+  private async markMacAway(reason: string): Promise<void> {
+    const session = await this.ctx.storage.get<Session>("session");
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    if (!session || session.macAway) return;
+    session.macAway = true;
+    await this.ctx.storage.put("session", session);
+    console.log(`session ${short(session.sessionID)}: Mac away (${reason})`);
+    if (!playback || stateOf(playback) !== "playing") return;
+    const now = Date.now();
+    const ran = Math.max(0, (now - Date.parse(playback.capturedAt)) / 1000);
+    const duration = playback.track?.duration;
+    const elapsed = playback.elapsedTime + (Number.isFinite(ran) ? ran : 0);
+    const paused: PlaybackMessage = {
+      ...playback,
+      state: "paused",
+      isPlaying: false,
+      elapsedTime: duration && duration > 0 ? Math.min(elapsed, duration) : elapsed,
+      capturedAt: new Date(now).toISOString(),
+    };
+    await this.ctx.storage.put("playback", paused);
+    session.pausedSince = now;
+    await this.ctx.storage.put("session", session);
+    await this.pushUpdate(session, paused);
   }
 
   private async startSession(message: PlaybackMessage): Promise<void> {
@@ -400,6 +440,7 @@ export class Pairing extends DurableObject<Env> {
       startedAt: Date.now(),
       pushedRevision: message.revision,
     };
+    if (message.track) session.lastTrack = message.track;
     await this.ctx.storage.put("session", session);
     console.log(`session ${short(session.sessionID)}: started`);
     const tokens = await this.tokens();
@@ -439,7 +480,7 @@ export class Pairing extends DurableObject<Env> {
 
   private async attributes(session: Session, message: PlaybackMessage): Promise<NowPlayingAttributes> {
     const record = (await this.record())!;
-    const track = message.track;
+    const track = message.track ?? session.lastTrack;
     let artworkURL: string | undefined;
     if (track?.artworkID && ARTWORK_ID.test(track.artworkID)) {
       const base = this.env.PUBLIC_BASE_URL ?? record.baseURL ?? "";
@@ -714,9 +755,9 @@ export class Pairing extends DurableObject<Env> {
     const now = Date.now();
     const session = await this.ctx.storage.get<Session>("session");
     const disconnectedAt = await this.ctx.storage.get<number>("macDisconnectedAt");
-    if (session && disconnectedAt && now - disconnectedAt >= this.disconnectGrace) {
-      await this.endSession("mac_disconnected");
-    } else if (session?.pausedSince && now - session.pausedSince >= this.pausedTimeout) {
+    if (session && !session.macAway && disconnectedAt && now - disconnectedAt >= this.disconnectGrace) {
+      await this.markMacAway("disconnected");
+    } else if (this.pausedTimeout > 0 && session?.pausedSince && now - session.pausedSince >= this.pausedTimeout) {
       await this.endSession("paused_too_long");
     }
     const claims = await this.claims();
@@ -735,8 +776,8 @@ export class Pairing extends DurableObject<Env> {
     const deadlines: number[] = [];
     const session = await this.ctx.storage.get<Session>("session");
     const disconnectedAt = await this.ctx.storage.get<number>("macDisconnectedAt");
-    if (session && disconnectedAt) deadlines.push(disconnectedAt + this.disconnectGrace);
-    if (session?.pausedSince) deadlines.push(session.pausedSince + this.pausedTimeout);
+    if (session && !session.macAway && disconnectedAt) deadlines.push(disconnectedAt + this.disconnectGrace);
+    if (this.pausedTimeout > 0 && session?.pausedSince) deadlines.push(session.pausedSince + this.pausedTimeout);
     for (const claim of Object.values(await this.claims())) deadlines.push(claim.expiresAt);
     if (deadlines.length === 0) {
       await this.ctx.storage.deleteAlarm();

@@ -75,7 +75,7 @@ To drive it by hand, run `npm run dev`, then
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
 | `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
-| `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 900000 | |
+| `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 0 | `PAUSED_TIMEOUT_MS` 0 never ends a paused session |
 
 ## Deployment
 
@@ -111,6 +111,11 @@ were fixed first, with tests (52 in all): the sender called the global `fetch` a
 which Workers reject with "Illegal invocation", and it signed a new provider token for every
 push, which APNs refuses more than once every 20 minutes. On a real iPhone, every `update`
 push got `200` and reached the phone 1.4–3 s after the change at the Mac.
+
+Also on 11 November, sessions were made to last as long as the pairing (version `734d52e1`):
+iOS shows only a session the app asked for while open, so a replacement started by push
+stayed hidden. On the iPhone, with the app in the background: Music stopped, played, quit,
+relaunched and played a new song, and Control Centre followed every step in the one session.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 

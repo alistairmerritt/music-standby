@@ -113,10 +113,6 @@ export type RelayFrame =
   | { type: "revoked"; reason: string }
   | { type: "error"; error: ProtocolError };
 
-/** The state a Now Playing session can't continue through (PROTOCOL.md §3). */
-export function endsSession(state: PlaybackState | undefined): boolean {
-  return state === "stopped" || state === "not_running" || state === "automation_denied";
-}
 
 /** `state` wins; without it this is the temporary contract (PROTOCOL.md §3). */
 export function stateOf(message: PlaybackMessage): PlaybackState {

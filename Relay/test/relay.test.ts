@@ -220,22 +220,23 @@ describe("playback and sessions", () => {
     expect((await session(phoneToken)).playback.revision).toBe(newer.revision);
   });
 
-  it("starts a session only when playing, and pushes start, update and end", async () => {
+  it("starts a session only when playing, then keeps it through a stop, showing the last track paused", async () => {
     const { mac, phoneToken, sessionID } = await playingSetup();
     const next = playback({ track: { id: "pid:B", title: "Next", artist: "A", album: "B", duration: 100 } });
     mac.send({ type: "state", message: next });
     await waitForRevision(phoneToken, next.revision);
     const stopped = playback({ state: "stopped", isPlaying: false, track: undefined, listeningSessionID: undefined });
     mac.send({ type: "state", message: stopped });
-    await waitForRevision(phoneToken, stopped.revision);
+    const s = await waitForRevision(phoneToken, stopped.revision);
 
     const sent = await pushes(phoneToken);
-    expect(sent.map((p) => p.event)).toEqual(["start", "update", "end"]);
+    expect(sent.map((p) => p.event)).toEqual(["start", "update", "update"]);
     expect(sent[0].payload.aps.attributes.id).toBe(sessionID);
     expect(sent[1].payload.aps.attributes.track.id).toBe("pid:B");
-    expect(sent[2].payload.aps).toMatchObject({ event: "end", attributes: { id: sessionID } });
+    expect(sent[2].payload.aps.attributes).toMatchObject({ id: sessionID, isPlaying: false, track: { id: "pid:B", title: "Next" } });
     expect(Number.isInteger(sent[2].payload.aps.timestamp)).toBe(true);
-    expect((await session(phoneToken)).sessionID).toBeUndefined();
+    expect(s.sessionID).toBe(sessionID);
+    expect(s.attributes.track.id).toBe("pid:B");
   });
 
   it("does not start a session for a paused Mac", async () => {
@@ -246,21 +247,27 @@ describe("playback and sessions", () => {
     expect(s.sessionID).toBeUndefined();
   });
 
-  it("ends the session at once when Music quits", async () => {
-    const { mac, phoneToken } = await playingSetup();
+  it("keeps the session when Music quits, and plays on in it after a relaunch", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
     const quit = playback({ state: "not_running", isPlaying: false, track: undefined, listeningSessionID: undefined });
     mac.send({ type: "state", message: quit });
-    await waitForRevision(phoneToken, quit.revision);
-    expect((await session(phoneToken)).sessionID).toBeUndefined();
+    expect((await waitForRevision(phoneToken, quit.revision)).sessionID).toBe(sessionID);
+    const relaunched = playback({ listeningSessionID: crypto.randomUUID().toUpperCase() });
+    mac.send({ type: "state", message: relaunched });
+    const s = await waitForRevision(phoneToken, relaunched.revision);
+    expect(s.sessionID).toBe(sessionID);
+    expect(s.attributes.isPlaying).toBe(true);
+    const sent = await pushes(phoneToken);
+    expect(sent.map((p) => p.event)).toEqual(["start", "update", "update"]);
+    expect(sent.every((p) => p.payload.aps.attributes.id === sessionID)).toBe(true);
   });
 
-  it("starts a fresh session for a new listening session", async () => {
+  it("keeps the session across listening sessions", async () => {
     const { mac, phoneToken, sessionID } = await playingSetup();
     const fresh = playback({ listeningSessionID: crypto.randomUUID().toUpperCase() });
     mac.send({ type: "state", message: fresh });
     const s = await waitForRevision(phoneToken, fresh.revision);
-    expect(s.sessionID).toBeDefined();
-    expect(s.sessionID).not.toBe(sessionID);
+    expect(s.sessionID).toBe(sessionID);
   });
 
   it("holds an update until the session token arrives, then sends it", async () => {
@@ -408,36 +415,54 @@ describe("connection loss", () => {
     expect(s.sessionID).toBe(sessionID);
   });
 
-  it("ends the session when the Mac stays away past the grace period", async () => {
-    const { mac, pairingID, phoneToken } = await playingSetup();
+  it("pushes a Mac that stays away past the grace period as paused, keeps the session, and resumes it", async () => {
+    const { mac, macToken, pairingID, phoneToken, sessionID, state } = await playingSetup();
     mac.close(1001);
     await new Promise((r) => setTimeout(r, 50));
     await editStorage(pairingID, async (storage) => {
       await storage.put("macDisconnectedAt", Date.now() - 61_000);
     });
     await runDurableObjectAlarm(pairingStub(pairingID));
-    expect((await session(phoneToken)).sessionID).toBeUndefined();
-    expect((await pushes(phoneToken)).at(-1).event).toBe("end");
+    const away = await session(phoneToken);
+    expect(away.sessionID).toBe(sessionID);
+    const last = (await pushes(phoneToken)).at(-1);
+    expect(last.event).toBe("update");
+    expect(last.payload.aps.attributes).toMatchObject({ id: sessionID, isPlaying: false, revision: state.revision });
+    expect(last.payload.aps.attributes.elapsedTime).toBeGreaterThanOrEqual(state.elapsedTime);
+    // Only once.
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await pushes(phoneToken)).filter((p) => p.payload.aps.attributes.isPlaying === false)).toHaveLength(1);
+
+    // The Mac comes back and resends the same state: it is pushed, so the phone plays on.
+    const again = await MacSocket.connect(macToken);
+    await again.next("paired");
+    again.send({ type: "state", message: state });
+    await new Promise((r) => setTimeout(r, 50));
+    const back = (await pushes(phoneToken)).at(-1);
+    expect(back.payload.aps.attributes).toMatchObject({ id: sessionID, isPlaying: true, revision: state.revision });
   });
 
-  it("ends the session at once on goodbye", async () => {
-    const { mac, phoneToken } = await playingSetup();
+  it("keeps the session on goodbye, pushed as paused", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
     mac.send({ type: "goodbye", reason: "app_quit" });
     await new Promise((r) => setTimeout(r, 50));
-    expect((await session(phoneToken)).sessionID).toBeUndefined();
+    const s = await session(phoneToken);
+    expect(s.sessionID).toBe(sessionID);
+    expect(s.attributes.isPlaying).toBe(false);
+    expect((await pushes(phoneToken)).at(-1).payload.aps.attributes.isPlaying).toBe(false);
   });
 
-  it("ends a session paused for too long", async () => {
-    const { mac, pairingID, phoneToken } = await playingSetup();
+  it("keeps a session paused for hours by default", async () => {
+    const { mac, pairingID, phoneToken, sessionID } = await playingSetup();
     const paused = playback({ state: "paused", isPlaying: false });
     mac.send({ type: "state", message: paused });
     await waitForRevision(phoneToken, paused.revision);
     await editStorage(pairingID, async (storage) => {
       const s = (await storage.get<any>("session"))!;
-      await storage.put("session", { ...s, pausedSince: Date.now() - 16 * 60_000 });
+      await storage.put("session", { ...s, pausedSince: Date.now() - 8 * 3600_000 });
     });
     await runDurableObjectAlarm(pairingStub(pairingID));
-    expect((await session(phoneToken)).sessionID).toBeUndefined();
+    expect((await session(phoneToken)).sessionID).toBe(sessionID);
   });
 
   it("replaces an older Mac socket with a newer one", async () => {
