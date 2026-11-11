@@ -26,6 +26,30 @@ export interface PushResult {
 
 export interface PushSender {
   send(push: Push): Promise<PushResult>;
+  sendAlert(push: AlertPush): Promise<PushResult>;
+}
+
+/**
+ * An ordinary notification to the app, not a Now Playing push: the reminder
+ * to open it. iOS shows a remote session only once the app has asked while
+ * open, so a dismissed player stays hidden until the app is opened.
+ */
+export interface AlertPush {
+  token: string;
+  /** Each reminder replaces the last, so they never pile up. */
+  collapseID: string;
+  payload: { aps: { alert: { title: string; body: string }; "thread-id": string } };
+}
+
+export const REMINDER_ID = "mac-playing";
+
+/** No sound: the reminder should be noticed, not heard. */
+export function makeReminder(token: string, macName: string): AlertPush {
+  return {
+    token,
+    collapseID: REMINDER_ID,
+    payload: { aps: { alert: { title: `Music playing on ${macName}`, body: "Tap to show on your Lock Screen." }, "thread-id": REMINDER_ID } },
+  };
 }
 
 export function makePush(event: PushEvent, token: string, attributes: NowPlayingAttributes, now = Date.now()): Push {
@@ -50,8 +74,12 @@ export function tokenIsDead(result: PushResult): boolean {
 
 /** Records pushes instead of sending them. */
 export class MockPushSender implements PushSender {
-  constructor(private readonly record: (push: Push) => Promise<void>) {}
+  constructor(private readonly record: (push: Push | AlertPush) => Promise<void>) {}
   async send(push: Push): Promise<PushResult> {
+    await this.record(push);
+    return { status: 200 };
+  }
+  async sendAlert(push: AlertPush): Promise<PushResult> {
     await this.record(push);
     return { status: 200 };
   }
@@ -62,6 +90,8 @@ export interface APNsConfig {
   keyID: string;
   teamID: string;
   topic: string;
+  /** The app's own topic for alert pushes; defaults to `topic` without ".push-type.nowplaying". */
+  appTopic?: string;
   environment: "development" | "production";
 }
 
@@ -102,10 +132,31 @@ export class APNsPushSender implements PushSender {
   }
 
   async send(push: Push): Promise<PushResult> {
-    const response = await this.fetcher(`${this.host}/3/device/${push.token}`, {
+    return this.post(push.token, this.headers(push, await this.providerToken()), push.payload);
+  }
+
+  async sendAlert(push: AlertPush): Promise<PushResult> {
+    return this.post(push.token, this.alertHeaders(push, await this.providerToken()), push.payload);
+  }
+
+  alertHeaders(push: AlertPush, jwt: string): Record<string, string> {
+    return {
+      authorization: `bearer ${jwt}`,
+      "apns-push-type": "alert",
+      "apns-topic": this.config.appTopic ?? this.config.topic.replace(/\.push-type\.nowplaying$/, ""),
+      "apns-priority": "10",
+      "apns-collapse-id": push.collapseID,
+      // A reminder that arrives much later than the music started is noise.
+      "apns-expiration": String(Math.floor(Date.now() / 1000) + 10 * 60),
+      "content-type": "application/json",
+    };
+  }
+
+  private async post(token: string, headers: Record<string, string>, payload: unknown): Promise<PushResult> {
+    const response = await this.fetcher(`${this.host}/3/device/${token}`, {
       method: "POST",
-      headers: this.headers(push, await this.providerToken()),
-      body: JSON.stringify(push.payload),
+      headers,
+      body: JSON.stringify(payload),
     });
     if (response.ok) return { status: response.status };
     let reason: string | undefined;

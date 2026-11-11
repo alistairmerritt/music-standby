@@ -400,6 +400,95 @@ describe("commands", () => {
   });
 });
 
+describe("reminders", () => {
+  const alertToken = "ef".repeat(32);
+  const reminders = async (phoneToken: string) => (await pushes(phoneToken)).filter((p) => p.event === "reminder");
+
+  async function pauseFor(pairingID: string, minutes: number) {
+    await editStorage(pairingID, async (storage) => {
+      const s = (await storage.get<any>("session"))!;
+      await storage.put("session", { ...s, pausedSince: Date.now() - minutes * 60_000 });
+    });
+  }
+
+  it("stores and removes the phone's alert token", async () => {
+    const { phoneToken } = await pairedSetup();
+    expect((await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: "nothex" } })).status).toBe(400);
+    expect((await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } })).status).toBe(204);
+    expect((await call("DELETE", "/v1/tokens/alert", { token: phoneToken })).status).toBe(204);
+  });
+
+  it("reminds the phone when the Mac plays after a break", async () => {
+    const { mac, pairingID, phoneToken } = await playingSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    const paused = playback({ state: "paused", isPlaying: false });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 31);
+    const resumed = playback();
+    mac.send({ type: "state", message: resumed });
+    await waitForRevision(phoneToken, resumed.revision);
+    const sent = await reminders(phoneToken);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].payload).toEqual({
+      aps: { alert: { title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." }, "thread-id": "mac-playing" },
+    });
+    expect(sent[0].payload.aps.sound).toBeUndefined();
+    expect(sent[0].collapseID).toBe("mac-playing");
+    // The Now Playing update goes first, so a tap finds the session current.
+    const all = await pushes(phoneToken);
+    expect(all.at(-2).event).toBe("update");
+    expect(all.at(-1).event).toBe("reminder");
+  });
+
+  it("doesn't remind after a short pause, or a phone that didn't ask", async () => {
+    const { mac, pairingID, phoneToken } = await playingSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    mac.send({ type: "state", message: playback({ state: "paused", isPlaying: false }) });
+    await pauseFor(pairingID, 5);
+    const quick = playback();
+    mac.send({ type: "state", message: quick });
+    await waitForRevision(phoneToken, quick.revision);
+    expect(await reminders(phoneToken)).toHaveLength(0);
+
+    await call("DELETE", "/v1/tokens/alert", { token: phoneToken });
+    const paused = playback({ state: "paused", isPlaying: false });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 60);
+    const later = playback();
+    mac.send({ type: "state", message: later });
+    await waitForRevision(phoneToken, later.revision);
+    expect(await reminders(phoneToken)).toHaveLength(0);
+  });
+
+  it("reminds when a new session starts, since a session started by push stays hidden", async () => {
+    const { mac, phoneToken } = await pairedSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    const first = playback();
+    mac.send({ type: "state", message: first });
+    await waitForRevision(phoneToken, first.revision);
+    expect(await reminders(phoneToken)).toHaveLength(1);
+  });
+
+  it("counts a Mac that went away as a break", async () => {
+    const { mac, macToken, pairingID, phoneToken, state } = await playingSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    mac.close(1001);
+    await new Promise((r) => setTimeout(r, 50));
+    await editStorage(pairingID, async (storage) => {
+      await storage.put("macDisconnectedAt", Date.now() - 61_000);
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    await pauseFor(pairingID, 45);
+    const again = await MacSocket.connect(macToken);
+    await again.next("paired");
+    again.send({ type: "state", message: { ...state, revision: state.revision + 1 } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await reminders(phoneToken)).toHaveLength(1);
+  });
+});
+
 describe("connection loss", () => {
   it("keeps the session through a reconnect inside the grace period", async () => {
     const { mac, macToken, phoneToken, sessionID, state } = await playingSetup();

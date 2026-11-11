@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { APNsPushSender, makePush, tokenIsDead, type ProviderToken, type ProviderTokenStore } from "../src/push";
+import { APNsPushSender, makePush, makeReminder, tokenIsDead, type ProviderToken, type ProviderTokenStore } from "../src/push";
 import type { NowPlayingAttributes } from "../src/protocol";
 
 const attributes: NowPlayingAttributes = {
@@ -88,6 +88,30 @@ describe("APNsPushSender", () => {
     const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "production" }, fetcher);
     expect(sender.host).toBe("https://api.push.apple.com");
     expect(await sender.send(makePush("end", "ff", attributes))).toEqual({ status: 400, reason: "BadDeviceToken" });
+  });
+
+  it("sends a reminder as a silent alert to the app's own topic, replacing the last", async () => {
+    const { pem } = await testKey();
+    const seen: Request[] = [];
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(new Request(input, init));
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const sender = new APNsPushSender(
+      { keyP8: pem, keyID: "K", teamID: "T", topic: "com.alistairmerritt.MusicStandBy.push-type.nowplaying", environment: "development" },
+      fetcher,
+    );
+    const reminder = makeReminder("0123abcd", "Studio Mac");
+    expect(await sender.sendAlert(reminder)).toEqual({ status: 200 });
+    const request = seen[0];
+    expect(request.url).toBe("https://api.sandbox.push.apple.com/3/device/0123abcd");
+    expect(request.headers.get("apns-push-type")).toBe("alert");
+    expect(request.headers.get("apns-topic")).toBe("com.alistairmerritt.MusicStandBy");
+    expect(request.headers.get("apns-collapse-id")).toBe("mac-playing");
+    expect(Number(request.headers.get("apns-expiration"))).toBeGreaterThan(Date.now() / 1000 + 60);
+    const body = (await request.json()) as any;
+    expect(body.aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." });
+    expect(body.aps.sound).toBeUndefined();
   });
 
   describe("the global fetch", () => {

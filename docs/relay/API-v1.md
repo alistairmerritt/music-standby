@@ -65,6 +65,8 @@ Three kinds, all opaque bearer strings. Clients never parse them.
 | `PUT /v1/tokens/start` | phone | `PushToStartTokenRegistration` → `204` | §9 |
 | `PUT /v1/tokens/session` | phone | `SessionPushTokenRegistration` → `204` | §9 |
 | `DELETE /v1/tokens/session/{sessionID}` | phone | — → `204` | §9 |
+| `PUT /v1/tokens/alert` | phone | `{ "token": "<hex>" }` → `204` | §9, reminders on |
+| `DELETE /v1/tokens/alert` | phone | — → `204` | §9, reminders off |
 | `POST /v1/session/end` | phone | `SessionEndRequest` → `204` | Ends the session now |
 
 ---
@@ -229,6 +231,16 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   for each session's update token (from inside the extension, keyed by `attributes.id`).
   Tokens are hex, as Apple's examples encode them. Last write wins. A token for a session that
   isn't current is refused with `409 session_mismatch`.
+- **Reminders (opt-in).** `PUT /v1/tokens/alert` stores the app's ordinary APNs device token,
+  and `DELETE` removes it. While it's stored, the relay sends an alert push when the Mac starts
+  playing after at least `REMIND_AFTER_MS` (default 30 minutes) not playing, or when it starts a
+  new session. iOS shows a session only once the app has asked while open, so a dismissed player
+  stays hidden until the app is opened; nothing tells the relay whether it is showing, so the
+  reminder goes out blind. Headers: `apns-push-type: alert`, `apns-topic:
+  com.alistairmerritt.MusicStandBy`, `apns-collapse-id: mac-playing` (each replaces the last),
+  `apns-expiration: <now + 10 min>`. Body, with no sound:
+  `{"aps": {"alert": {"title": "Music playing on <Mac name>", "body": "Tap to show on your Lock Screen."}, "thread-id": "mac-playing"}}`.
+  A dead token is forgotten.
 - **Pushes**, as specified in Apple's *Publishing remote media sessions*:
 
   | | |

@@ -20,7 +20,7 @@ import {
   type RemoteCommand,
   type TrackMetadata,
 } from "./protocol";
-import { APNsPushSender, MockPushSender, makePush, tokenIsDead, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
+import { APNsPushSender, MockPushSender, makePush, makeReminder, tokenIsDead, type AlertPush, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
 
 // One Durable Object per pairing (one Mac, at most one phone). It holds the
 // credentials' hashes, the Mac's WebSocket, the latest playback, the Now
@@ -70,6 +70,8 @@ interface Session {
 interface PushTokens {
   start?: string;
   session?: { sessionID: string; token: string };
+  /** The app's ordinary push token; present only while the phone wants reminders. */
+  alert?: string;
 }
 
 interface StoredArtwork {
@@ -79,10 +81,11 @@ interface StoredArtwork {
 
 interface RecordedPush {
   at: string;
-  event: PushEvent;
+  event: PushEvent | "reminder";
   sessionID: string;
   status: number;
-  payload: Push["payload"];
+  payload: Push["payload"] | AlertPush["payload"];
+  collapseID?: string;
 }
 
 const ARTWORK_MAX_BYTES = 1024 * 1024;
@@ -117,6 +120,9 @@ export class Pairing extends DurableObject<Env> {
   /** 0, the default, keeps a paused session for good; see `Session`. */
   private get pausedTimeout(): number {
     return Number(this.env.PAUSED_TIMEOUT_MS ?? 0);
+  }
+  private get remindAfter(): number {
+    return Number(this.env.REMIND_AFTER_MS ?? 30 * 60_000);
   }
 
   // MARK: RPC from the Worker
@@ -197,6 +203,8 @@ export class Pairing extends DurableObject<Env> {
     if (method === "POST" && path === "/v1/commands") return this.command(request);
     if (method === "GET" && path === "/v1/session") return json(200, await this.sessionState(record));
     if (method === "PUT" && path === "/v1/tokens/start") return this.putStartToken(request);
+    if (method === "PUT" && path === "/v1/tokens/alert") return this.putAlertToken(request);
+    if (method === "DELETE" && path === "/v1/tokens/alert") return this.deleteAlertToken();
     if (method === "PUT" && path === "/v1/tokens/session") return this.putSessionToken(request, record);
     const deleteToken = /^\/v1\/tokens\/session\/([^/]+)$/.exec(path);
     if (deleteToken && method === "DELETE") return this.deleteSessionToken(decodeURIComponent(deleteToken[1]));
@@ -392,6 +400,7 @@ export class Pairing extends DurableObject<Env> {
       return;
     }
     // Stopped, quit or a new listening session: the same session, updated.
+    const restarted = state === "playing" && session.pausedSince !== undefined && Date.now() - session.pausedSince >= this.remindAfter;
     session.listeningSessionID = message.listeningSessionID ?? session.listeningSessionID;
     session.pausedSince = state === "playing" ? undefined : (session.pausedSince ?? Date.now());
     if (message.track) session.lastTrack = message.track;
@@ -399,7 +408,25 @@ export class Pairing extends DurableObject<Env> {
     delete session.macAway;
     await this.ctx.storage.put("session", session);
     if (wasAway || message.revision > session.pushedRevision) await this.pushUpdate(session, message);
+    if (restarted) await this.remind();
     await this.scheduleAlarm();
+  }
+
+  /**
+   * Music started after a break. The player may have been dismissed, and only
+   * opening the app brings it back, so a phone that asked gets a notification.
+   * Sent blind: nothing tells the relay whether the player is showing.
+   */
+  private async remind(): Promise<void> {
+    const tokens = await this.tokens();
+    const record = await this.record();
+    if (!tokens.alert || !record) return;
+    const result = await this.pushSender().sendAlert(makeReminder(tokens.alert, record.mac.name));
+    console.log(`pairing: reminder → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
+    if (tokenIsDead(result)) {
+      delete tokens.alert;
+      await this.ctx.storage.put("tokens", tokens);
+    }
   }
 
   /**
@@ -449,6 +476,8 @@ export class Pairing extends DurableObject<Env> {
     } else {
       console.log(`session ${short(session.sessionID)}: no push-to-start token; the phone must foreground to see it`);
     }
+    // A session started by push stays hidden until the app is opened.
+    await this.remind();
     await this.scheduleAlarm();
   }
 
@@ -594,6 +623,25 @@ export class Pairing extends DurableObject<Env> {
     return empty();
   }
 
+  /** The phone turned reminders on; its ordinary APNs device token. */
+  private async putAlertToken(request: Request): Promise<Response> {
+    const body = await readJSON<{ token?: string }>(request);
+    if (!body?.token || !HEX_TOKEN.test(body.token)) throw new HttpError(400, "invalid_request", "token must be hex");
+    const tokens = await this.tokens();
+    tokens.alert = body.token.toLowerCase();
+    await this.ctx.storage.put("tokens", tokens);
+    return empty();
+  }
+
+  private async deleteAlertToken(): Promise<Response> {
+    const tokens = await this.tokens();
+    if (tokens.alert) {
+      delete tokens.alert;
+      await this.ctx.storage.put("tokens", tokens);
+    }
+    return empty();
+  }
+
   private async putSessionToken(request: Request, record: PairingRecord): Promise<Response> {
     const body = await readJSON<{ sessionID?: string; token?: string }>(request);
     if (!body?.sessionID || !body.token || !HEX_TOKEN.test(body.token)) {
@@ -655,6 +703,7 @@ export class Pairing extends DurableObject<Env> {
           keyID: env.APNS_KEY_ID,
           teamID: env.APNS_TEAM_ID,
           topic: env.APNS_TOPIC ?? "com.alistairmerritt.MusicStandBy.push-type.nowplaying",
+          appTopic: env.APNS_APP_TOPIC,
           environment: env.APNS_ENVIRONMENT === "production" ? "production" : "development",
         },
         undefined,
@@ -667,7 +716,11 @@ export class Pairing extends DurableObject<Env> {
     }
     return new MockPushSender(async (push) => {
       const pushes = (await this.ctx.storage.get<RecordedPush[]>("pushes")) ?? [];
-      pushes.push({ at: iso(Date.now()), event: push.event, sessionID: push.sessionID, status: 200, payload: push.payload });
+      pushes.push(
+        "collapseID" in push
+          ? { at: iso(Date.now()), event: "reminder", sessionID: "", status: 200, payload: push.payload, collapseID: push.collapseID }
+          : { at: iso(Date.now()), event: push.event, sessionID: push.sessionID, status: 200, payload: push.payload },
+      );
       await this.ctx.storage.put("pushes", pushes.slice(-PUSHES_KEEP));
     });
   }

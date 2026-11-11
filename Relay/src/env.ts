@@ -19,6 +19,10 @@ export interface Env {
   ACK_TIMEOUT_MS?: string;
   DISCONNECT_GRACE_MS?: string;
   PAUSED_TIMEOUT_MS?: string;
+  /** A Mac that plays after this long not playing sends the phone a reminder, if it asked for them. Default 30 minutes. */
+  REMIND_AFTER_MS?: string;
+  /** Topic for reminder alerts; defaults to APNS_TOPIC without ".push-type.nowplaying". */
+  APNS_APP_TOPIC?: string;
 }
 
 export function directory(env: Env) {

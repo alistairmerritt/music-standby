@@ -73,6 +73,8 @@ To drive it by hand, run `npm run dev`, then
 | `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID` | — | Secrets (`wrangler secret put`). Never in `wrangler.toml` |
 | `APNS_ENVIRONMENT` | `development` | `production` uses `api.push.apple.com` |
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
+| `APNS_APP_TOPIC` | `APNS_TOPIC` without `.push-type.nowplaying` | Topic of reminder alerts |
+| `REMIND_AFTER_MS` | 1800000 | How long the Mac must not have played before a reminder |
 | `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
 | `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 0 | `PAUSED_TIMEOUT_MS` 0 never ends a paused session |
@@ -116,6 +118,11 @@ Also on 11 November, sessions were made to last as long as the pairing (version 
 iOS shows only a session the app asked for while open, so a replacement started by push
 stayed hidden. On the iPhone, with the app in the background: Music stopped, played, quit,
 relaunched and played a new song, and Control Centre followed every step in the one session.
+
+Then opt-in reminders were added (version `2d42be72`): a phone that turns them on gets "Music
+playing on <Mac>" when the Mac starts playing after 30 minutes without, so a dismissed player
+can be brought back with a tap. 58 tests pass. On the iPhone, with `REMIND_AFTER_MS` set to 20 s
+for the test, the reminder arrived after a dismissal, and tapping it brought the player back.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
