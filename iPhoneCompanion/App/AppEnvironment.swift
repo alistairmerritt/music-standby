@@ -64,6 +64,24 @@ enum AppEnvironment {
         )
     }
 
+    /// The opt-in reminder. Its token goes to the current pairing's relay.
+    static func makeReminders() -> ReminderModel {
+        let defaults = UserDefaults(suiteName: AppGroup.identifier) ?? .standard
+        let relay: any ReminderRelay
+        if relayConfiguration != nil {
+            let credentials = KeychainCredentialStore()
+            let http = URLSessionHTTP()
+            relay = RelayReminderRelay {
+                (try? credentials.load()).flatMap { $0 }.map { RelayClient(credential: $0, http: http) }
+            }
+        } else {
+            relay = NoReminderRelay()
+        }
+        return ReminderModel(defaults: defaults, permission: SystemNotificationPermission(), relay: relay) {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+    }
+
     /// A random identifier kept for the life of the install. Never hardware-derived.
     private static func currentDevice(defaults: UserDefaults) -> DeviceIdentity {
         let key = "deviceIdentifier"

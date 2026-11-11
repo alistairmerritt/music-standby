@@ -174,6 +174,18 @@ public struct RelayClient: CommandSender, SessionReading, Sendable {
         _ = try await perform(try makeRequest(RelayPath.sessionToken(id: sessionID), method: "DELETE"))
     }
 
+    /// Turns reminders on: the app's ordinary push token, for "Music playing" alerts.
+    public func registerAlertToken(_ hex: String) async throws {
+        var request = try makeRequest(RelayPath.alertToken, method: "PUT")
+        try attach(AlertTokenRegistration(token: hex), to: &request)
+        _ = try await perform(request)
+    }
+
+    /// Turns reminders off.
+    public func removeAlertToken() async throws {
+        _ = try await perform(try makeRequest(RelayPath.alertToken, method: "DELETE"))
+    }
+
     // MARK: Requests
 
     /// Authenticated with the phone token unless `bearer` says otherwise.
@@ -318,4 +330,8 @@ extension RelayClient: ArtworkFetching {
         try artworkPolicy.validate(data: data, contentType: response.value(forHTTPHeaderField: "Content-Type"))
         return data
     }
+}
+
+private struct AlertTokenRegistration: Encodable {
+    let token: String
 }

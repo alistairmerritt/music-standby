@@ -12,6 +12,7 @@ The contract is [docs/relay/API-v1.md](../relay/API-v1.md), merged into `feature
 | Reconcile | `GET /v1/session` on launch and every 5 s while the app is in the foreground, plus once 0.7 s after an in-app command | App |
 | Command | `POST /v1/commands` with the session on screen and `Idempotency-Key`, 1.5 s timeout | Extension, directly; the app for its own buttons |
 | Push tokens | `PUT /v1/tokens/start`, `PUT /v1/tokens/session`, `DELETE /v1/tokens/session/{id}` | App and extension |
+| Reminders (opt-in) | `PUT /v1/tokens/alert`, `DELETE /v1/tokens/alert` | App |
 | Artwork | The signed `artworkURL`, or `/v1/artwork/{pairingID}/{artworkID}` with the bearer | Extension and app |
 | Unpair | `DELETE /v1/pairing`, then forgets the credential whatever the answer | App |
 

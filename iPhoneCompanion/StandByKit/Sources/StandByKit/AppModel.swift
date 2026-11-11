@@ -180,9 +180,11 @@ public final class AppModel {
         setNowPlayingEnabled(false)
     }
 
+    /// Show in Now Playing, and the reminder's tap. Turns showing on even
+    /// before the Mac's state has arrived: the next state then activates it.
     public func activateNowPlaying() async {
-        guard let attributes else { return }
         setNowPlayingEnabled(true)
+        guard let attributes, attributes.track != nil else { return }
         await sessionController.activate(with: attributes)
         if let error = sessionController.lastError {
             record("Now Playing failed: \(error)")

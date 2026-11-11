@@ -8,6 +8,7 @@ enum RelayPath {
     static func claimStatus(id: String) -> String { "v1/pairing/claim/\(id.relayPathComponent)" }
     static let commands = "v1/commands"
     static let startToken = "v1/tokens/start"
+    static let alertToken = "v1/tokens/alert"
     static let sessionToken = "v1/tokens/session"
     static func sessionToken(id: String) -> String { "v1/tokens/session/\(id.relayPathComponent)" }
     static let session = "v1/session"

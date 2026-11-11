@@ -3,14 +3,20 @@ import SwiftUI
 
 @main
 struct MusicStandByApp: App {
-    @State private var model = AppEnvironment.makeModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
+    private var model: AppModel { appDelegate.model }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(appDelegate.reminders)
                 .task { await model.start() }
+                // A new pairing has a new relay record, without the token.
+                .onChange(of: model.pairedMac) { _, mac in
+                    if mac != nil { appDelegate.reminders.refresh() }
+                }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     switch phase {
                     case .active: Task { await model.sceneDidBecomeActive() }

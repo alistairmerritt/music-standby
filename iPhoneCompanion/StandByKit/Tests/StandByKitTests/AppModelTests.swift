@@ -553,6 +553,20 @@ struct Harness {
         #expect(h.model.log.filter { $0.message.contains("Now Playing failed") }.count == 1)
     }
 
+    /// The reminder's tap can arrive before the relay has answered.
+    @Test func showingRequestedBeforeAnyStateActivatesWhenItArrives() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.model.stopNowPlaying()
+        await h.connected()
+        await h.model.activateNowPlaying()
+        #expect(h.controller.activations.isEmpty)
+        await h.transport.emit(.playback(message(revision: 1)))
+        await eventually("activated") { h.controller.isActive }
+        #expect(h.controller.activations.count == 1)
+    }
+
     @Test func foregroundDoesNotActivateBeforeAnyTrack() async {
         let h = Harness()
         let task = await h.run()

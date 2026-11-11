@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(ReminderModel.self) private var reminders
     @State private var isConfirmingUnpair = false
 
     var body: some View {
@@ -20,6 +21,7 @@ struct HomeView: View {
             }
 
             nowPlayingSection
+            remindersSection
             macSection
 
             Section {
@@ -57,7 +59,23 @@ struct HomeView: View {
         } footer: {
             // iOS shows a session only once the app has asked while open, so a
             // dismissed player stays hidden until the next launch re-requests it.
-            Text("Music StandBy doesn’t play audio. Your Mac does.\n\nIf you swipe the player away, it stays hidden until you next open Music StandBy.")
+            Text("Music StandBy doesn’t play audio. Your Mac does.\n\nIf you dismiss the player, it stays hidden until you next open Music StandBy.")
+        }
+    }
+
+    private var remindersSection: some View {
+        Section {
+            Toggle("Remind When Music Starts", isOn: Binding(
+                get: { reminders.isEnabled },
+                set: { enabled in Task { await reminders.setEnabled(enabled) } }
+            ))
+        } footer: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("iOS only shows your Mac’s music after Music StandBy has been opened, so a dismissed player stays hidden. With this on, you get a quiet notification when your Mac starts playing after a break. Tap it to bring the player back.")
+                if let problem = reminders.problem {
+                    Text(problem).foregroundStyle(.red)
+                }
+            }
         }
     }
 
