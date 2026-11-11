@@ -9,7 +9,7 @@ import Testing
     /// Records every event and answers from a table keyed by its object path,
     /// e.g. "pPlS of app" or "pRaw of cArt[1] of cURT[86657] of app".
     final class Events: @unchecked Sendable {
-        struct Sent { var event: String; var path: String; var pid: Int32; var objectClass: String?; var data: NSAppleEventDescriptor? }
+        struct Sent { var event: String; var path: String; var pid: Int32; var objectClass: String?; var data: NSAppleEventDescriptor?; var waited: Bool }
         private let lock = NSLock()
         private var _sent: [Sent] = []
         var replies: [String: RawEventRunner.Reply] = [:]
@@ -19,10 +19,10 @@ import Testing
 
         func runner(pid: pid_t? = 4242, exists: Bool = true) -> RawEventRunner {
             RawEventRunner(processID: { pid }, processExists: { _ in exists },
-                           send: { [unowned self] event, _ in self.answer(event) })
+                           send: { [unowned self] event, _, wait in self.answer(event, waited: wait) })
         }
 
-        private func answer(_ event: NSAppleEventDescriptor) -> RawEventRunner.Reply {
+        private func answer(_ event: NSAppleEventDescriptor, waited: Bool) -> RawEventRunner.Reply {
             let name = code(event.eventClass) + "/" + code(event.eventID)
             let path = Self.path(event.paramDescriptor(forKeyword: keyDirectObject))
             // The address stays 'kpid', the PID's own bytes; int32Value won't coerce it.
@@ -31,8 +31,9 @@ import Testing
                 ? address!.data.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) } : -1
             let cls = event.paramDescriptor(forKeyword: Code.objectClass).map { code($0.typeCodeValue) }
             let data = event.paramDescriptor(forKeyword: Code.data)
-            lock.withLock { _sent.append(Sent(event: name, path: path, pid: pid, objectClass: cls, data: data)) }
+            lock.withLock { _sent.append(Sent(event: name, path: path, pid: pid, objectClass: cls, data: data, waited: waited)) }
             let key = name == "core/getd" ? path : name == "core/cnte" ? "count \(cls ?? "?") of \(path)" : name == "core/setd" ? "set \(path)" : name
+            guard waited else { return .result(nil) }
             return replies[key] ?? .musicError(code: -1708, message: "fake Music doesn’t understand \(key)")
         }
 
@@ -298,6 +299,7 @@ import Testing
         let list = events.sent[1].data
         #expect(list?.numberOfItems == 1)
         #expect(Events.path(list?.atIndex(1)) == "cAPD[2] of app", "the HomePod is second in Music's list")
+        #expect(events.sent[0].waited && !events.sent[1].waited, "the switch is sent without waiting: a HomePod can take over 5 s to connect")
         #expect(events.runner().run(.selectOutput("name:Alistair's MacBook Pro")) == .value(.text("ok")))
         #expect(Events.path(events.sent[3].data?.atIndex(1)) == "cAPD[1] of app")
     }

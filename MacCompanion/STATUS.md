@@ -51,8 +51,20 @@ Found on the way:
   sets by index within the same few milliseconds.
 - Setting `player position` and `sound volume` works while paused, so none of this needs audio.
 
-Unit tests: 114 (was 105). Not done: the menu-bar app has no volume or output controls of its
-own, and nothing here has been tried from a real iPhone yet (the phone wasn't connected).
+**From the real iPhone, 12 November morning** (Music paused throughout, system output 0):
+seek from Control Centre's scrubber (Music 14 s → 124 s) and from the app (200 s → 59 s → 87 s);
+Music's volume from the app (100 → 27) and from the Control Centre slider (35 → 49 → 69, two
+coalesced commands); output from the app's Play To picker, Mac → Study HomePod → Mac, twice.
+
+The switch is now sent **without waiting for Music's reply**: a HomePod Music hasn't used
+lately took longer than the 5 s wait (-1712), and Music finished the switch after we'd given
+up, leaving the ack `command_failed` for a switch that happened. The ack now means the request
+reached Music; the next reads show where it plays. Two devices refused by Music itself, from
+AppleScript as well, with -15014: the Kitchen HomePod and the Living Room HomePod (checked
+12 November; the Study HomePod switched in under 2 s). Music's own AirPlay menu is the
+place to look for those.
+
+Unit tests: 114 (was 105). Not done: the menu-bar app has no volume or output controls of its own.
 
 ## Raw Apple Events
 

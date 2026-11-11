@@ -36,14 +36,16 @@ public struct RawEventRunner: MusicScriptRunning {
         case sendError(code: Int, message: String)
     }
 
-    typealias Send = @Sendable (_ event: NSAppleEventDescriptor, _ timeout: TimeInterval) -> Reply
+    /// `waitForReply` false sends the event and returns at once with `.result(nil)`:
+    /// Music keeps working on it, and the next read shows the outcome.
+    typealias Send = @Sendable (_ event: NSAppleEventDescriptor, _ timeout: TimeInterval, _ waitForReply: Bool) -> Reply
 
     private let processID: @Sendable () -> pid_t?
     private let processExists: @Sendable (pid_t) -> Bool
     private let send: Send
 
     public init() {
-        self.init(processID: Self.musicProcessID, processExists: Self.processExists, send: Self.sendLive)
+        self.init(processID: Self.musicProcessID, processExists: Self.processExists, send: { Self.sendLive($0, timeout: $1, waitForReply: $2) })
     }
 
     init(processID: @escaping @Sendable () -> pid_t?,
@@ -186,7 +188,11 @@ public struct RawEventRunner: MusicScriptRunning {
 
     /// `MusicScript.selectOutput`: finds the device by id in Music's list,
     /// then sets `current AirPlay devices` to that one device by its index.
-    /// Two events, milliseconds apart, so the index is still Music's.
+    /// Two events, milliseconds apart, so the index is still Music's. The set
+    /// is sent without waiting for a reply: connecting to a HomePod Music
+    /// hasn't used lately took longer than 5 s (-1712, 12 Nov 2026), and Music
+    /// finished the switch after the wait had given up. The ack therefore
+    /// says the request went to Music; the next reads show where it plays.
     private func selectOutput(_ music: Target, id: String) -> ScriptOutput {
         let timeout: TimeInterval = 5
         switch outputs(music, timeout: timeout) {
@@ -195,7 +201,7 @@ public struct RawEventRunner: MusicScriptRunning {
             let device = Specifier.element(Code.airPlayDevice, index: Int32(index + 1), of: .application)
             let list = NSAppleEventDescriptor.list()
             list.insert(device.descriptor, at: 0)
-            return music.set(.property(Code.currentAirPlayDevices), to: list)
+            return music.set(.property(Code.currentAirPlayDevices), to: list, waitForReply: false)
         case .musicError(let code, let message), .sendError(let code, let message):
             return .failure(code: code, message: message)
         }
@@ -267,8 +273,12 @@ public struct RawEventRunner: MusicScriptRunning {
     /// The real send. `.canInteract` lets Music interact with the user if an
     /// event needs it. Whether the first run's Automation prompt appears as it
     /// does for NSAppleScript is untested (STATUS.md).
-    static func sendLive(_ event: NSAppleEventDescriptor, timeout: TimeInterval) -> Reply {
+    static func sendLive(_ event: NSAppleEventDescriptor, timeout: TimeInterval, waitForReply: Bool = true) -> Reply {
         do {
+            guard waitForReply else {
+                _ = try event.sendEvent(options: [.noReply, .canInteract], timeout: timeout)
+                return .result(nil)
+            }
             let reply = try event.sendEvent(options: [.waitForReply, .canInteract], timeout: timeout)
             // `sendEvent` doesn't throw for an error Music sends back.
             if let number = reply.paramDescriptor(forKeyword: keyErrorNumber), number.int32Value != 0 {
@@ -304,29 +314,30 @@ public struct RawEventRunner: MusicScriptRunning {
         func get(_ specifier: Specifier, timeout: TimeInterval) -> Reply {
             let event = make(Code.coreSuite, Code.getData)
             event.setParam(specifier.descriptor, forKeyword: keyDirectObject)
-            return send(event, timeout)
+            return send(event, timeout, true)
         }
 
         func count(_ elementClass: FourCharCode, in container: Specifier, timeout: TimeInterval) -> Reply {
             let event = make(Code.coreSuite, Code.countElements)
             event.setParam(container.descriptor, forKeyword: keyDirectObject)
             event.setParam(NSAppleEventDescriptor(typeCode: elementClass), forKeyword: Code.objectClass)
-            return send(event, timeout)
+            return send(event, timeout, true)
         }
 
         func command(_ command: MusicCommand) -> ScriptOutput {
-            switch send(make(Code.musicSuite, command.eventID), 3) {
+            switch send(make(Code.musicSuite, command.eventID), 3, true) {
             case .result: .value(.text("ok"))
             case .musicError(let code, let message), .sendError(let code, let message): .failure(code: code, message: message)
             }
         }
 
         /// `set <specifier> to <value>`: a `core/setd` event with the value as `data`.
-        func set(_ specifier: Specifier, to value: NSAppleEventDescriptor, timeout: TimeInterval = 3) -> ScriptOutput {
+        /// With `waitForReply` false it returns "ok" as soon as the event is sent.
+        func set(_ specifier: Specifier, to value: NSAppleEventDescriptor, timeout: TimeInterval = 3, waitForReply: Bool = true) -> ScriptOutput {
             let event = make(Code.coreSuite, Code.setData)
             event.setParam(specifier.descriptor, forKeyword: keyDirectObject)
             event.setParam(value, forKeyword: Code.data)
-            switch send(event, timeout) {
+            switch send(event, timeout, waitForReply) {
             case .result: return .value(.text("ok"))
             case .musicError(let code, let message), .sendError(let code, let message): return .failure(code: code, message: message)
             }
