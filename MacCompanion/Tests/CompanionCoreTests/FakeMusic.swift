@@ -26,6 +26,9 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
     private var _denied = false
     private var _nextFailure: (Int, String)?
     private var _quitDuringNextScript = false
+    private var _staleReadsAfterSkip = 0
+    private var _staleReadsLeft = 0
+    private var _previousIndex: Int?
     private var _scripts: [MusicScript] = []
     let tracks: [Track]
 
@@ -64,6 +67,9 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
 
     func failNext(code: Int, message: String) { lock.withLock { _nextFailure = (code, message) } }
     func quitDuringNextScript() { lock.withLock { _quitDuringNextScript = true } }
+    /// Music's habit seen on 11 Nov 2026: right after a skip, the artwork read
+    /// returns the previous track's image under the new track's persistent ID.
+    func returnPreviousArtworkAfterSkip(reads: Int) { lock.withLock { _staleReadsAfterSkip = reads } }
 
     /// What `MusicController` uses as its process check.
     var processCheck: @Sendable () -> Bool { { [unowned self] in self.running } }
@@ -88,6 +94,10 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
             case .artwork:
                 guard _state != "stopped" else { return .value(.text("NO_TRACK")) }
                 let track = tracks[_index]
+                if _staleReadsLeft > 0, let previous = _previousIndex, let stale = tracks[previous].artwork {
+                    _staleReadsLeft -= 1
+                    return .value(.list([.text(track.pid), .data(stale, type: "PNGf")]))
+                }
                 guard let art = track.artwork else { return .value(.list([.text(track.pid)])) }
                 return .value(.list([.text(track.pid), .data(art, type: "PNGf")]))
             case .command(let command):
@@ -112,9 +122,13 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
         case .pause: if _state == "playing" { _state = "paused" }
         case .playPause: _state = _state == "playing" ? "paused" : "playing"
         case .next:
+            _previousIndex = _index
+            _staleReadsLeft = _staleReadsAfterSkip
             _index = (_index + 1) % tracks.count
             _position = 0
         case .previous:
+            _previousIndex = _index
+            _staleReadsLeft = _staleReadsAfterSkip
             _index = (_index + tracks.count - 1) % tracks.count
             _position = 0
         }

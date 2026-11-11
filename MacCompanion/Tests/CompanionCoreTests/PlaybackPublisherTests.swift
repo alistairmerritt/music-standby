@@ -25,7 +25,7 @@ import StandByProtocol
         let m = try must(p.ingest(snap(.paused, 10), artworkID: nil))
         #expect(m.revision == 1_000_001)
         #expect(m.state == .paused)
-        #expect(m.track?.id == "pid:542CEB17C137B39E")
+        #expect(m.track?.id.hasPrefix("pid:542CEB17C137B39E-") == true)
         #expect(m.listeningSessionID == nil)   // paused without having played
         #expect(m.canGoNext && m.canGoPrevious)
     }
@@ -53,7 +53,7 @@ import StandByProtocol
         #expect(!paused.isPlaying)
         let skipped = try must(p.ingest(snap(.paused, 0, at: 1002, track: next), artworkID: nil))
         #expect(skipped.listeningSessionID == session)
-        #expect(skipped.track?.id == "pid:542CEB17C137B3A5")
+        #expect(skipped.track?.id.hasPrefix("pid:542CEB17C137B3A5-") == true)
         #expect(skipped.track?.artworkID == nil)
         #expect(playing.revision < paused.revision && paused.revision < skipped.revision)
     }

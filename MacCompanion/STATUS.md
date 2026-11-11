@@ -331,6 +331,19 @@ quits, long pauses and the Mac going away, showing the last track paused. The co
 `listeningSessionID` no longer changes what the phone sees. Executed on the iPhone with the
 app in the background: stop, play, quit Music, relaunch and play; the phone followed each.
 
+**Artwork mixed up between songs (11 November).** Two causes, both in how Music reports
+autoplay and radio tracks. First, Music gave every song of an autoplay queue the same
+persistent ID (`3C97D19625454E5C` for six different songs), and the companion keyed its
+artwork and catalogue caches on it: a song got the previous one's image, or no lookup. Track
+IDs are now `pid:<persistent ID>-<12 hex>`, the hex a hash of title, artist, album and
+length. Second, after a skip Music can hand out the previous song's image: for 0.9 s once,
+for a whole song another time, and once an image it then withdrew. Music's artwork is now
+read only 1.5 s after a track change, and an image identical to the previous song's from
+another album is read again, then replaced by the catalogue's after 4 s. Executed with
+`msbctl watch` over 8 autoplay skips at volume 0: 9 songs, 9 different images; Music's own
+art about 1.7 s after each skip; one song that kept the previous image fell back to the
+catalogue. 98 tests.
+
 ## For the relay design
 
 - `not_running` arrives within about 0.8 s of `terminate()`, so the relay can end the Now

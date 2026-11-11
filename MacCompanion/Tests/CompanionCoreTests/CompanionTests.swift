@@ -24,6 +24,7 @@ import StandByProtocol
                                   transport: relay, store: CompanionStore(defaults: defaults), device: Self.device,
                                   artworkLookup: artworkLookup, now: now, isMusicLaunching: { false })
         companion.settleDelay = .zero
+        companion.artworkSettle = 0
         for state in PlaybackState.allCases { companion.monitor.pollIntervals[state] = .seconds(3600) }
         companion.start()
         let ok = await eventually { await relay.sent.contains { if case .state = $0 { true } else { false } } }
@@ -100,7 +101,7 @@ import StandByProtocol
         let id = await r.relay.simulateCommand(.next)
         await eventually { await r.relay.ack(for: id) != nil }
         let after = try #require(await states(r.relay).last)
-        #expect(after.track?.id == "pid:542CEB17C137B3A5")
+        #expect(after.track?.id.hasPrefix("pid:542CEB17C137B3A5-") == true)
         #expect(after.listeningSessionID == before.listeningSessionID)
         #expect(after.elapsedTime == 0)
         #expect(after.revision > before.revision)
@@ -218,6 +219,96 @@ import StandByProtocol
         r.companion.refresh()
         await eventually { await states(r.relay).last.map { abs($0.elapsedTime - 60) < 1 } ?? false }
         #expect(await catalogue.queries.count == 1)
+    }
+
+    // MARK: Artwork across skips
+
+    private func skip(_ r: Rig) async {
+        let id = await r.relay.simulateCommand(.next)
+        await eventually { await r.relay.ack(for: id) != nil }
+    }
+
+    /// An autoplay queue: Music gives every song the same persistent ID.
+    @Test func songsSharingAPersistentIDGetTheirOwnArtwork() async throws {
+        let a = FakeMusic.Track(title: "Burnham Beeches Summer", artist: "Empire", album: "Empire", duration: 200, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
+        let b = FakeMusic.Track(title: "Dreamland", artist: "Glass Animals", album: "Dreamland", duration: 214, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 300))
+        let r = await rig(tracks: [a, b])
+        let first = try #require(await states(r.relay).last)
+        await skip(r)
+        await eventually { await states(r.relay).last?.track?.title == "Dreamland" }
+        let second = try #require(await states(r.relay).last)
+        #expect(second.track?.id != first.track?.id)
+        #expect(second.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 300)))
+    }
+
+    @Test func theCatalogueIsAskedForEachSongEvenWithASharedPersistentID() async throws {
+        let a = FakeMusic.Track(title: "Elsewhere", artist: "Hazlett", album: "The Happiest Times", duration: 201, pid: "3C97D19625454E5C", artwork: nil)
+        let b = FakeMusic.Track(title: "Come Back To You", artist: "Vera", album: "Vera", duration: 188, pid: "3C97D19625454E5C", artwork: nil)
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let r = await rig(tracks: [a, b], artworkLookup: catalogue)
+        await eventually { await catalogue.queries.count == 1 }
+        await skip(r)
+        await eventually { await catalogue.queries.count == 2 }
+        #expect(await catalogue.queries.map(\.title) == ["Elsewhere", "Come Back To You"])
+    }
+
+    @Test func thePreviousSongsArtworkRightAfterASkipIsReadAgain() async throws {
+        let a = FakeMusic.Track(title: "Losing My Edge", artist: "LCD Soundsystem", album: "LCD Soundsystem", duration: 473, pid: "542CEB17C137B39E", artwork: FakeMusic.png(side: 800))
+        let c = FakeMusic.Track(title: "Dreamland", artist: "Glass Animals", album: "Dreamland", duration: 214, pid: "542CEB17C137B3AC", artwork: FakeMusic.png(side: 300))
+        let r = await rig(tracks: [a, c])
+        r.music.returnPreviousArtworkAfterSkip(reads: 1)
+        await skip(r)
+        await eventually { r.companion.events.contains { $0.text.hasPrefix("artwork matches the previous track's") } }
+        let right = ArtworkID.make(sourceBytes: FakeMusic.png(side: 300)), wrong = ArtworkID.make(sourceBytes: FakeMusic.png(side: 800))
+        #expect(await states(r.relay).last?.track?.artworkID != wrong)
+        r.companion.refresh()
+        await eventually { await states(r.relay).last?.track?.artworkID == right }
+        #expect(await states(r.relay).filter { $0.track?.title == "Dreamland" }.allSatisfy { $0.track?.artworkID != wrong })
+    }
+
+    /// Seen on 11 Nov 2026: Music went on returning the previous song's image.
+    @Test func artworkThatStaysThePreviousSongsFallsBackToTheCatalogue() async throws {
+        final class Clock: @unchecked Sendable { var date = Date() }
+        let clock = Clock()
+        let a = FakeMusic.Track(title: "Magic Wand", artist: "The Avalanches", album: "Magic Wand", duration: 230, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
+        let c = FakeMusic.Track(title: "Sunshine", artist: "Clancy", album: "Sunshine", duration: 190, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 300))
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let r = await rig(now: { clock.date }, tracks: [a, c], artworkLookup: catalogue)
+        r.music.returnPreviousArtworkAfterSkip(reads: 1000)
+        await skip(r)
+        await eventually { r.companion.events.contains { $0.text.hasPrefix("artwork matches the previous track's") } }
+        clock.date = clock.date.addingTimeInterval(Companion.staleArtworkWindow + 1)
+        r.companion.refresh()
+        let fromCatalogue = ArtworkID.make(sourceBytes: FakeMusic.png(side: 400))
+        await eventually { await states(r.relay).last?.track?.artworkID == fromCatalogue }
+        #expect(await catalogue.queries.map(\.title) == ["Sunshine"])
+        #expect(await states(r.relay).filter { $0.track?.title == "Sunshine" }.allSatisfy { $0.track?.artworkID != ArtworkID.make(sourceBytes: FakeMusic.png(side: 800)) })
+    }
+
+    /// Music can report the previous track's image, then none, right after a
+    /// skip; its artwork is read only once the track has settled.
+    @Test func musicsArtworkIsReadOnlyOnceTheTrackHasSettled() async throws {
+        let a = FakeMusic.Track(title: "Thinkin Bout You", artist: "Frank Ocean", album: "channel ORANGE", duration: 200, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
+        let b = FakeMusic.Track(title: "All That I've Been Feeling", artist: "Sycco", album: "Sycco", duration: 210, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 300))
+        let r = await rig(tracks: [a, b])
+        r.companion.artworkSettle = 0.5
+        let reads = r.music.scripts.filter { if case .artwork = $0 { true } else { false } }.count
+        await skip(r)
+        await eventually { await states(r.relay).last?.track?.title == "All That I've Been Feeling" }
+        #expect(await states(r.relay).last?.track?.artworkID == nil, "too soon after the skip")
+        #expect(r.music.scripts.filter { if case .artwork = $0 { true } else { false } }.count == reads)
+        await eventually { await states(r.relay).last?.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 300)) }
+    }
+
+    @Test func artworkSharedWithinAnAlbumIsKeptAtOnce() async throws {
+        let art = FakeMusic.png(side: 500)
+        let a = FakeMusic.Track(title: "Sea Wall", artist: "Glass Animals", album: "Dreamland", duration: 200, pid: "542CEB17C137B3B1", artwork: art)
+        let b = FakeMusic.Track(title: "Dreamland", artist: "Glass Animals", album: "Dreamland", duration: 214, pid: "542CEB17C137B3B2", artwork: art)
+        let r = await rig(tracks: [a, b])
+        await skip(r)
+        await eventually { await states(r.relay).last?.track?.title == "Dreamland" }
+        #expect(await states(r.relay).last?.track?.artworkID == ArtworkID.make(sourceBytes: art))
+        #expect(!r.companion.events.contains { $0.text.hasPrefix("artwork matches the previous track's") })
     }
 
     @Test func unknownArtworkRequestGetsAnError() async {

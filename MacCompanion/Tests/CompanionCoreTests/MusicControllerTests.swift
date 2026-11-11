@@ -64,7 +64,7 @@ import StandByProtocol
         let track = try #require(snapshot.track)
         #expect(track.title == "Losing My Edge")
         #expect(track.duration == 473.114)
-        #expect(track.trackID == "pid:542CEB17C137B39E")
+        #expect(track.trackID.hasPrefix("pid:542CEB17C137B39E-"))
         #expect(track.trackClass == "URL track")
         #expect(track.artworkCount == 1)
     }
