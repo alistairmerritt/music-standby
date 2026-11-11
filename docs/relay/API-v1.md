@@ -180,6 +180,12 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
 | `504 mac_unreachable` | No Mac socket, or no ack within 1.2 s |
 | `401 unauthorized` | Bad or revoked `phoneToken` |
 
+- **Value commands (11 November 2026).** `seek` carries `position` (seconds), `setVolume` carries
+  `level` (0 to 1) and `selectOutput` carries `outputID` (an `AudioOutput.id` from
+  `playback.outputs`). The relay passes them through untouched; the Mac checks them and
+  answers `invalid_request` when one is missing. `playback.volume` and `playback.outputs` in
+  `GET /v1/session`, and `attributes.volume` in pushes, carry the results. All optional, so an
+  older Mac or relay leaves them out.
 - **`sessionID` is required.** A command from an old session can't act on a new one.
 - **Idempotent.** The relay remembers the last 50 command ids per pairing. A repeat gets the
   first answer and is never forwarded twice, and the Mac also ignores repeats. A retried "next"

@@ -53,13 +53,19 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
     /// Diagnostic text for `.automationDenied` and `.error`. Never shown raw to
     /// a user on the phone.
     public var detail: String?
+    /// Music's own output volume, 0 to 1. Nil from a Mac that doesn't report it.
+    /// Added 11 November 2026, with `outputs`.
+    public var volume: Double?
+    /// Where Music can play to, and where it is playing now. Nil when unknown.
+    public var outputs: [AudioOutput]?
 
     /// Encoded for the temporary contract and for JavaScript readers. Always
     /// equal to `state == .playing`.
     public var isPlaying: Bool { state.isPlaying }
 
     public init(revision: UInt64, state: PlaybackState, elapsedTime: TimeInterval, capturedAt: Date, track: TrackMetadata?,
-                canGoNext: Bool, canGoPrevious: Bool, listeningSessionID: UUID? = nil, detail: String? = nil) {
+                canGoNext: Bool, canGoPrevious: Bool, listeningSessionID: UUID? = nil, detail: String? = nil,
+                volume: Double? = nil, outputs: [AudioOutput]? = nil) {
         self.revision = revision
         self.state = state
         self.elapsedTime = elapsedTime
@@ -69,6 +75,8 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         self.canGoPrevious = canGoPrevious
         self.listeningSessionID = listeningSessionID
         self.detail = detail
+        self.volume = volume
+        self.outputs = outputs
     }
 
     /// The temporary contract's initialiser. A non-playing message with a
@@ -85,7 +93,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
     // MARK: Codable
 
     private enum CodingKeys: String, CodingKey {
-        case revision, state, isPlaying, elapsedTime, capturedAt, track, canGoNext, canGoPrevious, listeningSessionID, detail
+        case revision, state, isPlaying, elapsedTime, capturedAt, track, canGoNext, canGoPrevious, listeningSessionID, detail, volume, outputs
     }
 
     public init(from decoder: Decoder) throws {
@@ -98,6 +106,8 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         canGoPrevious = try c.decode(Bool.self, forKey: .canGoPrevious)
         listeningSessionID = try c.decodeIfPresent(UUID.self, forKey: .listeningSessionID)
         detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        volume = try c.decodeIfPresent(Double.self, forKey: .volume)
+        outputs = try c.decodeIfPresent([AudioOutput].self, forKey: .outputs)
         // `state` wins when present. Without it this is the temporary contract.
         if let state = try c.decodeIfPresent(PlaybackState.self, forKey: .state) {
             self.state = state
@@ -118,6 +128,8 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         try c.encode(canGoPrevious, forKey: .canGoPrevious)
         try c.encodeIfPresent(listeningSessionID, forKey: .listeningSessionID)
         try c.encodeIfPresent(detail, forKey: .detail)
+        try c.encodeIfPresent(volume, forKey: .volume)
+        try c.encodeIfPresent(outputs, forKey: .outputs)
     }
 }
 
@@ -139,12 +151,14 @@ extension PlaybackMessage {
 
     /// Whether `self` differs from `previous` in a way a viewer could see.
     /// Ordinary progress is not a change; a seek is, once the position moves
-    /// further than `positionTolerance` from where `previous` predicts.
+    /// further than `positionTolerance` from where `previous` predicts. So are
+    /// a new volume and a change among the outputs.
     /// The Mac sends only on these, and the relay can coalesce on the same rule.
     public func hasVisibleChange(from previous: PlaybackMessage?, positionTolerance: TimeInterval = 2) -> Bool {
         guard let previous else { return true }
         if state != previous.state || track != previous.track || canGoNext != previous.canGoNext
-            || canGoPrevious != previous.canGoPrevious || listeningSessionID != previous.listeningSessionID {
+            || canGoPrevious != previous.canGoPrevious || listeningSessionID != previous.listeningSessionID
+            || volume != previous.volume || outputs != previous.outputs {
             return true
         }
         guard track != nil, state == .playing || state == .paused else { return false }
