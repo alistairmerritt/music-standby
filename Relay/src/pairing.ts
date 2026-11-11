@@ -65,6 +65,8 @@ interface Session {
   lastTrack?: TrackMetadata;
   /** The Mac went away and the phone was told it paused; its next state is pushed whatever its revision. */
   macAway?: boolean;
+  /** The artwork the phone was last pushed, to know when an update brings new artwork. */
+  pushedArtworkID?: string;
 }
 
 interface PushTokens {
@@ -98,6 +100,15 @@ const ARTWORK_KEEP = 64;
  */
 const ARTWORK_PENDING_MS = 10_000;
 const ARTWORK_UPLOAD_WAIT_MS = 3_000;
+/**
+ * iOS takes an update's artwork from the Now Playing extension about 1.07 s
+ * after the update, but suspends the extension about 1.0 s after it, and
+ * doesn't wake it for artwork. So artwork in the last update of a burst never
+ * showed (seen on an iPhone, 11 Nov 2026). The same update pushed again this
+ * long after keeps the extension awake past that moment; it has cached the
+ * image by then.
+ */
+const ARTWORK_FOLLOW_UP_MS = 700;
 const ACKS_KEEP = 50;
 const PUSHES_KEEP = 100;
 
@@ -485,11 +496,25 @@ export class Pairing extends DurableObject<Env> {
     const tokens = await this.tokens();
     const token = tokens.session?.sessionID === session.sessionID ? tokens.session.token : undefined;
     if (!token) return; // sent when the extension registers its token
-    const ok = await this.push("update", token, await this.attributes(session, message));
+    const attributes = await this.attributes(session, message);
+    const ok = await this.push("update", token, attributes);
     if (ok) {
       session.pushedRevision = message.revision;
+      const artwork = attributes.track?.artworkID || undefined;
+      const newArtwork = artwork !== undefined && artwork !== session.pushedArtworkID;
+      session.pushedArtworkID = artwork;
       await this.ctx.storage.put("session", session);
+      if (newArtwork) void this.followUp(session.sessionID, message.revision, token, attributes);
     }
+  }
+
+  /** The same update again, unless something newer has gone out since. */
+  private async followUp(sessionID: string, revision: number, token: string, attributes: NowPlayingAttributes): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, Number(this.env.ARTWORK_FOLLOW_UP_MS ?? ARTWORK_FOLLOW_UP_MS)));
+    const session = await this.ctx.storage.get<Session>("session");
+    const tokens = await this.tokens();
+    if (session?.sessionID !== sessionID || session.pushedRevision !== revision || tokens.session?.token !== token) return;
+    await this.push("update", token, attributes);
   }
 
   async endSession(reason: string): Promise<void> {

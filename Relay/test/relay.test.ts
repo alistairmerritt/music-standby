@@ -400,6 +400,41 @@ describe("commands", () => {
   });
 });
 
+describe("artwork follow-up", () => {
+  it("pushes an update that brings new artwork again, once", async () => {
+    const { mac, phoneToken } = await playingSetup();
+    const before = (await pushes(phoneToken)).length;
+    const withArt = playback({ track: { id: "pid:A-1", title: "Song", artist: "A", album: "B", duration: 200, artworkID: "c".repeat(64) } });
+    mac.send({ type: "state", message: withArt });
+    await waitForRevision(phoneToken, withArt.revision);
+    await new Promise((r) => setTimeout(r, 900));
+    const sent = (await pushes(phoneToken)).slice(before);
+    expect(sent.map((p) => p.event)).toEqual(["update", "update"]);
+    expect(sent.every((p) => p.payload.aps.attributes.revision === withArt.revision)).toBe(true);
+    expect(sent[1].payload.aps.attributes.track.artworkID).toBe("c".repeat(64));
+    // Same artwork again (a pause): no follow-up.
+    const paused = playback({ state: "paused", isPlaying: false, track: withArt.track });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await new Promise((r) => setTimeout(r, 900));
+    expect((await pushes(phoneToken)).slice(before).length).toBe(3);
+  });
+
+  it("skips the follow-up when a newer state has gone out", async () => {
+    const { mac, phoneToken } = await playingSetup();
+    const before = (await pushes(phoneToken)).length;
+    const withArt = playback({ track: { id: "pid:A-1", title: "Song", artist: "A", album: "B", duration: 200, artworkID: "d".repeat(64) } });
+    mac.send({ type: "state", message: withArt });
+    await waitForRevision(phoneToken, withArt.revision);
+    const next = playback({ track: { id: "pid:B-2", title: "Next", artist: "A", album: "C", duration: 100 } });
+    mac.send({ type: "state", message: next });
+    await waitForRevision(phoneToken, next.revision);
+    await new Promise((r) => setTimeout(r, 900));
+    const sent = (await pushes(phoneToken)).slice(before);
+    expect(sent.map((p) => p.payload.aps.attributes.revision)).toEqual([withArt.revision, next.revision]);
+  });
+});
+
 describe("reminders", () => {
   const alertToken = "ef".repeat(32);
   const reminders = async (phoneToken: string) => (await pushes(phoneToken)).filter((p) => p.event === "reminder");

@@ -75,6 +75,7 @@ To drive it by hand, run `npm run dev`, then
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
 | `APNS_APP_TOPIC` | `APNS_TOPIC` without `.push-type.nowplaying` | Topic of reminder alerts |
 | `REMIND_AFTER_MS` | 1800000 | How long the Mac must not have played before a reminder |
+| `ARTWORK_FOLLOW_UP_MS` | 700 | Delay before an update with new artwork is sent again |
 | `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
 | `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 0 | `PAUSED_TIMEOUT_MS` 0 never ends a paused session |
@@ -123,6 +124,14 @@ Then opt-in reminders were added (version `2d42be72`): a phone that turns them o
 playing on <Mac>" when the Mac starts playing after 30 minutes without, so a dismissed player
 can be brought back with a tap. 58 tests pass. On the iPhone, with `REMIND_AFTER_MS` set to 20 s
 for the test, the reminder arrived after a dismissal, and tapping it brought the player back.
+
+Then a follow-up update for new artwork (version `ef0fa938`). iOS suspends the phone's
+extension about a second after each update and doesn't wake it just to get an image, so
+artwork often never showed. After an `update` push that names artwork the session hasn't
+pushed before, the relay sends the same attributes again after `ARTWORK_FOLLOW_UP_MS`. That
+wakes the extension again once the image is cached. It's skipped if a newer update, another
+session or a new token came in meanwhile. 60 tests pass. On the iPhone, with the Mac
+uploading the artwork first and the extension fetching it at once, the artwork showed.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 

@@ -216,7 +216,13 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   relay ask the Mac for it, so it can ask first. If the relay sent `artwork-request` for the
   id in the last 10 s and the Mac is connected, the GET waits up to 3 s for the upload,
   answering as soon as it lands, or `404` as soon as the Mac answers `artwork_unavailable`.
-  Otherwise an unknown id is `404 not_found` at once.
+  Otherwise an unknown id is `404 not_found` at once. The Mac uploads a new song's artwork
+  before sending the state that names it, so this wait is the fallback.
+- **Follow-up update:** iOS suspends the extension about a second after each update. After an
+  `update` push naming artwork it hasn't pushed for this session before, the relay sends the
+  same attributes again after `ARTWORK_FOLLOW_UP_MS` (700 ms), unless a newer revision, another
+  session or a new token arrived meanwhile. The extension should start fetching on `update`,
+  not wait for the system to ask, and include the artwork id in the content's id.
 - **Tracks without artwork:** `attributes.track.artworkID` is `""` and there is no
   `artworkURL`. The iOS type declares `artworkID` non-optional, and a push the system can't
   decode is silently lost.
@@ -291,6 +297,7 @@ Every value is a judgement call, and the relay can change them without a version
 | Command ack deadline (relay) / client timeout (extension) | 1.2 s / 1.5 s |
 | Mac disconnect grace before the phone is told it paused | 60 s |
 | Paused before ending the session | Never (`PAUSED_TIMEOUT_MS`, default 0) |
+| Update sent again after new artwork | 700 ms (`ARTWORK_FOLLOW_UP_MS`) |
 | Mac ping / pong deadline | 30 s / 10 s |
 | Mac reconnect backoff | 1 s → 30 s, ±20 % jitter |
 

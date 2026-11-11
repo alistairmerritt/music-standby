@@ -21,6 +21,8 @@ export interface Env {
   PAUSED_TIMEOUT_MS?: string;
   /** A Mac that plays after this long not playing sends the phone a reminder, if it asked for them. Default 30 minutes. */
   REMIND_AFTER_MS?: string;
+  /** Delay of the repeat update that keeps the phone's extension awake for new artwork. Default 700. */
+  ARTWORK_FOLLOW_UP_MS?: string;
   /** Topic for reminder alerts; defaults to APNS_TOPIC without ".push-type.nowplaying". */
   APNS_APP_TOPIC?: string;
 }
