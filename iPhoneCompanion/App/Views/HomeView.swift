@@ -1,5 +1,8 @@
+import os
 import StandByKit
 import SwiftUI
+
+private let seekLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "seekbar")
 
 struct HomeView: View {
     @Environment(AppModel.self) private var model
@@ -154,39 +157,66 @@ private struct NowPlayingRow: View {
 /// The progress bar, draggable. While dragging it shows the finger's position;
 /// when the drag ends the Mac is asked to seek there, and the bar goes back to
 /// following the Mac's own state until the result arrives.
+///
+/// The end of a drag is taken from `onEditingChanged(false)` **or** from the
+/// values going quiet for `settle`: on an iPhone (12 Nov 2026) a drag on this
+/// slider reported its start and every value but never its end, with or
+/// without the clock running, while the volume slider below always did. The
+/// clock also pauses during a drag.
 private struct SeekBar: View {
     let attributes: MacPlaybackAttributes
     let duration: TimeInterval
     let onSeek: (TimeInterval) -> Void
     @State private var dragging = false
     @State private var dragValue: TimeInterval = 0
+    @State private var now = Date()
+    @State private var settling: Task<Void, Never>?
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private static let settle: Duration = .milliseconds(600)
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let elapsed = dragging ? dragValue : attributes.elapsed(at: context.date)
-            VStack(spacing: 2) {
-                Slider(
-                    value: Binding(get: { elapsed }, set: { dragValue = $0 }),
-                    in: 0...max(duration, 1),
-                    onEditingChanged: { editing in
-                        if editing {
-                            dragValue = elapsed
-                        } else {
-                            onSeek(dragValue)
-                        }
-                        dragging = editing
+        let elapsed = dragging ? dragValue : attributes.elapsed(at: now)
+        VStack(spacing: 2) {
+            Slider(
+                value: Binding(get: { elapsed }, set: { value in
+                    dragValue = value
+                    if !dragging { dragging = true }
+                    settling?.cancel()
+                    settling = Task { @MainActor in
+                        try? await Task.sleep(for: Self.settle)
+                        guard !Task.isCancelled else { return }
+                        finishDrag()
                     }
-                )
-                .disabled(duration <= 0)
-                HStack {
-                    Text(Duration.seconds(elapsed), format: .time(pattern: .minuteSecond))
-                    Spacer()
-                    Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
+                }),
+                in: 0...max(duration, 1),
+                onEditingChanged: { editing in
+                    if editing {
+                        dragValue = elapsed
+                        dragging = true
+                    } else {
+                        settling?.cancel()
+                        finishDrag()
+                    }
                 }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+            )
+            .disabled(duration <= 0)
+            HStack {
+                Text(Duration.seconds(elapsed), format: .time(pattern: .minuteSecond))
+                Spacer()
+                Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
             }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
+        .onReceive(clock) { if !dragging { now = $0 } }
+    }
+
+    private func finishDrag() {
+        guard dragging else { return }
+        seekLog.debug("Seek bar drag ended, seeking to \(dragValue, privacy: .public)")
+        dragging = false
+        now = Date()
+        onSeek(dragValue)
     }
 }
 

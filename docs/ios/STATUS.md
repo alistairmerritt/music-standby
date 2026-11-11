@@ -8,7 +8,7 @@ Last updated 11 November 2026, branch `feature/ios`.
 
 ## Seek, volume and output, 11 November 2026 (evening)
 
-Three more controls, built end to end but **not yet tried on the iPhone** (it wasn't connected).
+Three more controls, built end to end and **tried on the iPhone on 12 November** (below).
 
 | Control | Where | Built | Verified |
 | --- | --- | --- | --- |
@@ -28,11 +28,29 @@ the newest level while one is in flight. A `seek` is sent once, when the drag en
 shown is the Mac's: it comes back in the next state (`attributes.volume`), by push or by the
 post-tap read, and the slider snaps back to the old level until it does.
 
-Verified without the phone: 186 StandByKit tests (4 new) pass; the app and extension build and
-sign for the device on the paid team; the relay's harness drove the real Music through a local
-relay (38/38). What the iPhone still has to show: that the Lock Screen offers the slider and
-scrubber for a remote session, that iOS calls them, and what the slider does between the tap
-and the state coming back. R8–R10 in [DEVICE-TESTING.md](DEVICE-TESTING.md).
+**On the iPhone 15 Pro, 12 November morning** (the relay deployed with `volume`; Music mostly
+paused, with the Mac's system output at 0). Driven by an XCUITest on the phone and watched from
+the Mac:
+
+| Control | Result |
+| --- | --- |
+| Control Centre, expanded tile, "Track position" scrubber | Dragged to 50 %: `seek` reached the extension, Music jumped 14 s → 124 s within a second, and the scrubber then followed the Mac's own position |
+| Control Centre volume slider | Showed the Mac's 35 %. A drag sent two coalesced `setVolume`s (Music 35 → 49 → 69) and the slider settled at the Mac's level. Greyed out before the relay carried `volume` |
+| App volume slider | 100 → 27 on the Mac in about 2 s |
+| App progress bar | Works after two fixes, below: 200 s → 59 s → 87 s |
+| App Play To picker | Mac → Study HomePod → Mac, twice. Music's volume became the HomePod's (11) and stayed there after switching back |
+
+The app's progress bar needed two changes. Inside a `TimelineView`, or re-rendered by a timer
+mid-drag, the slider reported the drag's start and every value but never its end, so nothing was
+sent and the bar froze at the finger. The volume slider, which never re-rendered mid-drag,
+was fine. The bar now pauses its clock during a drag **and** treats 600 ms of quiet values as the
+end of the drag, which is when the seek is sent. Whether a finger, rather than XCUITest's drag,
+delivers the end event is still unknown; either path now sends.
+
+Not seen on the phone: the StandBy screen itself (the driver can't see a sleeping Lock Screen),
+and the Lock Screen while playing. Two HomePods (Kitchen, Living Room) are refused by Music
+itself with -15014, from AppleScript too; the Study HomePod switches in under 2 s. 186
+StandByKit tests pass; the relay's harness 38/38.
 
 ## Pushes, 11 November 2026
 
