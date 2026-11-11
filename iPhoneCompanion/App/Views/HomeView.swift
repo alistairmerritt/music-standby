@@ -59,7 +59,7 @@ struct HomeView: View {
         } footer: {
             // iOS shows a session only once the app has asked while open, so a
             // dismissed player stays hidden until the next launch re-requests it.
-            Text("Second Chair doesn’t play audio. Your Mac does.\n\nIf you dismiss the player, it stays hidden until you next open Second Chair.")
+            Text("If you dismiss the player, it stays hidden until you next open Second Chair.")
         }
     }
 
@@ -71,7 +71,7 @@ struct HomeView: View {
             ))
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("iOS only shows your Mac’s music after Second Chair has been opened, so a dismissed player stays hidden. With this on, you get a quiet notification when your Mac starts playing after a break. Tap it to bring the player back.")
+                Text("If you’ve dismissed Second Chair from your Lock Screen or StandBy, get a quiet notification when your Mac starts playing music again. Tap it to bring the player back.")
                 if let problem = reminders.problem {
                     Text(problem).foregroundStyle(.red)
                 }
