@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import StandByProtocol
 
 /// Runs `MusicScript`s as raw Apple Events, addressed to Music's **process
 /// id**. This is the runner `MusicController` uses.
@@ -75,6 +76,9 @@ public struct RawEventRunner: MusicScriptRunning {
         case .snapshot: snapshot(music)
         case .artwork: artwork(music)
         case .command(let command): music.command(command)
+        case .seek(let seconds): music.set(.property(Code.playerPosition), to: NSAppleEventDescriptor(double: seconds))
+        case .setVolume(let level): music.set(.property(Code.soundVolume), to: NSAppleEventDescriptor(int32: Int32(level)))
+        case .selectOutput(let id): selectOutput(music, id: id)
         }
         // Measured while Music quit: the event in flight failed with -609 once
         // the process had gone, then each one after with -600 in under 1 ms.
@@ -87,7 +91,9 @@ public struct RawEventRunner: MusicScriptRunning {
     // MARK: The three scripts
 
     /// `MusicScript.snapshotSource`, event for event: player state, player
-    /// position, properties of current track, count of its artworks.
+    /// position, properties of current track, count of its artworks, then
+    /// (11 November 2026) sound volume and the properties of every AirPlay
+    /// device, one event for all of them.
     private func snapshot(_ music: Target) -> ScriptOutput {
         let timeout: TimeInterval = 3
         // `set playerState to (player state as text)`, outside any try.
@@ -97,7 +103,7 @@ public struct RawEventRunner: MusicScriptRunning {
         case .musicError(let code, let message), .sendError(let code, let message):
             return .failure(code: code, message: message)
         }
-        var f = [state, "0", "", "", "", "", "0", "", "0", "", "0"]
+        var f = [state, "0", "", "", "", "", "0", "", "0", "", "0", "", ""]
 
         // `try: set pos to (player position as text)`. Stopped is `missing value`.
         switch music.get(.property(Code.playerPosition), timeout: timeout) {
@@ -121,7 +127,78 @@ public struct RawEventRunner: MusicScriptRunning {
         case .result, .musicError: break
         case .sendError(let code, let message): return .failure(code: code, message: message)
         }
+
+        // `try: set item 12 of f to (sound volume as text)`
+        switch music.get(.property(Code.soundVolume), timeout: timeout) {
+        case .result(let value): f[11] = AppleScriptText.of(value)
+        case .musicError: break
+        case .sendError(let code, let message): return .failure(code: code, message: message)
+        }
+
+        // `try: repeat with d in AirPlay devices …`: one `properties of every
+        // AirPlay device` event where the script sends five per device.
+        switch outputs(music, timeout: timeout) {
+        case .result(let devices): f[12] = devices.map(\.text).joined()
+        case .musicError: break
+        case .sendError(let code, let message): return .failure(code: code, message: message)
+        }
         return .value(.text(f.joined(separator: SnapshotParser.separator)))
+    }
+
+    /// One AirPlay device as Music lists it, in the snapshot's text form.
+    struct Output {
+        var name: String
+        var kind: String
+        var selected: String
+        var available: String
+        var address: String
+
+        var id: String { AudioOutput.makeID(networkAddress: address == "missing value" ? nil : address, name: name) }
+        var text: String {
+            [name, kind, selected, available, address].joined(separator: MusicScript.outputFieldSeparator) + MusicScript.outputSeparator
+        }
+    }
+
+    enum OutputsReply {
+        case result([Output])
+        case musicError(code: Int, message: String)
+        case sendError(code: Int, message: String)
+    }
+
+    /// `properties of every AirPlay device`: a list of records, read in Music's order.
+    private func outputs(_ music: Target, timeout: TimeInterval) -> OutputsReply {
+        switch music.get(.property(Code.properties, of: .every(Code.airPlayDevice)), timeout: timeout) {
+        case .result(let list):
+            guard let list, list.descriptorType == typeAEList || list.numberOfItems > 0 else { return .result([]) }
+            var outputs: [Output] = []
+            for index in stride(from: 1, through: list.numberOfItems, by: 1) {
+                guard let item = list.atIndex(index) else { continue }
+                let record = item.descriptorType == typeAERecord ? item : (item.coerce(toDescriptorType: typeAERecord) ?? item)
+                func field(_ code: FourCharCode) -> String { AppleScriptText.of(record.forKeyword(code)) }
+                outputs.append(Output(name: field(Code.name), kind: field(Code.kind), selected: field(Code.selected),
+                                      available: field(Code.available), address: field(Code.networkAddress)))
+            }
+            return .result(outputs)
+        case .musicError(let code, let message): return .musicError(code: code, message: message)
+        case .sendError(let code, let message): return .sendError(code: code, message: message)
+        }
+    }
+
+    /// `MusicScript.selectOutput`: finds the device by id in Music's list,
+    /// then sets `current AirPlay devices` to that one device by its index.
+    /// Two events, milliseconds apart, so the index is still Music's.
+    private func selectOutput(_ music: Target, id: String) -> ScriptOutput {
+        let timeout: TimeInterval = 5
+        switch outputs(music, timeout: timeout) {
+        case .result(let devices):
+            guard let index = devices.firstIndex(where: { $0.id == id }) else { return .value(.text("NOT_FOUND")) }
+            let device = Specifier.element(Code.airPlayDevice, index: Int32(index + 1), of: .application)
+            let list = NSAppleEventDescriptor.list()
+            list.insert(device.descriptor, at: 0)
+            return music.set(.property(Code.currentAirPlayDevices), to: list)
+        case .musicError(let code, let message), .sendError(let code, let message):
+            return .failure(code: code, message: message)
+        }
     }
 
     /// Fills fields 3–10 from a track's `properties` record as the script
@@ -244,6 +321,17 @@ public struct RawEventRunner: MusicScriptRunning {
             }
         }
 
+        /// `set <specifier> to <value>`: a `core/setd` event with the value as `data`.
+        func set(_ specifier: Specifier, to value: NSAppleEventDescriptor, timeout: TimeInterval = 3) -> ScriptOutput {
+            let event = make(Code.coreSuite, Code.setData)
+            event.setParam(specifier.descriptor, forKeyword: keyDirectObject)
+            event.setParam(value, forKeyword: Code.data)
+            switch send(event, timeout) {
+            case .result: return .value(.text("ok"))
+            case .musicError(let code, let message), .sendError(let code, let message): return .failure(code: code, message: message)
+            }
+        }
+
         private func make(_ eventClass: FourCharCode, _ eventID: FourCharCode) -> NSAppleEventDescriptor {
             NSAppleEventDescriptor.appleEvent(withEventClass: eventClass, eventID: eventID,
                                               targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
@@ -258,6 +346,8 @@ indirect enum Specifier {
     case application
     case property(FourCharCode, of: Specifier = .application)
     case element(FourCharCode, index: Int32, of: Specifier)
+    /// `every <class>` of the application.
+    case every(FourCharCode)
     /// A specifier Music returned, such as the track `current track` names.
     case raw(NSAppleEventDescriptor)
 
@@ -265,12 +355,24 @@ indirect enum Specifier {
         switch self {
         case .application: return .null()
         case .raw(let descriptor): return descriptor
+        case .every(let cls):
+            // `every`: formAbsolutePosition with kAEAll, which is an absolute
+            // ordinal ('abso'), not an enumeration. Music answers -10001 to the latter.
+            return Self.make(want: cls, form: Code.formIndex, data: Self.ordinal(Code.all), from: .application)
         case .property(let code, let container):
             return Self.make(want: Code.propertyClass, form: Code.formProperty,
                              data: NSAppleEventDescriptor(typeCode: code), from: container)
         case .element(let cls, let index, let container):
             return Self.make(want: cls, form: Code.formIndex, data: NSAppleEventDescriptor(int32: index), from: container)
         }
+    }
+
+    /// A four-byte ordinal travels in host byte order, as `typeType` and
+    /// `typeEnumerated` do; AppleScript's own `every` prints as `abso($206c6c61)`
+    /// on this Mac, " lla" in memory. Big-endian bytes got -1728 from Music.
+    static func ordinal(_ code: FourCharCode) -> NSAppleEventDescriptor {
+        var native = code
+        return NSAppleEventDescriptor(descriptorType: typeAbsoluteOrdinal, data: Data(bytes: &native, count: 4))!
     }
 
     private static func make(want: FourCharCode, form: FourCharCode, data: NSAppleEventDescriptor,
@@ -295,6 +397,8 @@ enum Code {
     // Events
     static let coreSuite = fcc("core")
     static let getData = fcc("getd")
+    static let setData = fcc("setd")
+    static let data = fcc("data")
     static let countElements = fcc("cnte")
     static let musicSuite = fcc("hook")
     static let objectClass = fcc("kocl")
@@ -307,12 +411,23 @@ enum Code {
     static let propertyClass = fcc("prop")
     static let formProperty = fcc("prop")
     static let formIndex = fcc("indx")
+    /// `every`: kAEAll, used with `formIndex`.
+    static let all = fcc("all ")
 
     // Application properties
     static let playerState = fcc("pPlS")
     static let playerPosition = fcc("pPos")
     static let currentTrack = fcc("pTrk")
     static let properties = fcc("pALL")
+    static let soundVolume = fcc("pVol")
+    static let currentAirPlayDevices = fcc("pAPD")
+
+    // AirPlay devices
+    static let airPlayDevice = fcc("cAPD")
+    static let kind = fcc("pKnd")
+    static let selected = fcc("selc")
+    static let available = fcc("pAva")
+    static let networkAddress = fcc("pMAC")
 
     // Track and artwork
     static let name = fcc("pnam")
@@ -349,6 +464,12 @@ enum AppleScriptText {
         Code.fcc("kPSS"): "stopped", Code.fcc("kPSP"): "playing", Code.fcc("kPSp"): "paused",
         Code.fcc("kPSF"): "fast forwarding", Code.fcc("kPSR"): "rewinding",
     ]
+    /// `kind of AirPlay device as text`, from the `eAPD` enumeration.
+    static let airPlayKinds: [FourCharCode: String] = [
+        Code.fcc("kAPC"): "computer", Code.fcc("kAPX"): "AirPort Express", Code.fcc("kAPT"): "Apple TV",
+        Code.fcc("kAPO"): "AirPlay device", Code.fcc("kAPB"): "Bluetooth device", Code.fcc("kAPH"): "HomePod",
+        Code.fcc("kAPV"): "TV", Code.fcc("kAPU"): "unknown",
+    ]
     static let classes: [FourCharCode: String] = [
         Code.fcc("cTrk"): "track", Code.fcc("cFlT"): "file track", Code.fcc("cURT"): "URL track",
         Code.fcc("cShT"): "shared track", Code.fcc("cCDT"): "audio CD track",
@@ -367,7 +488,7 @@ enum AppleScriptText {
             return real(descriptor.doubleValue)
         case typeEnumerated:
             let code = descriptor.enumCodeValue
-            return playerStates[code] ?? "«constant ****\(AppleScriptRunner.fourCharCode(code))»"
+            return playerStates[code] ?? airPlayKinds[code] ?? "«constant ****\(AppleScriptRunner.fourCharCode(code))»"
         case typeType:
             let code = descriptor.typeCodeValue
             if code == Code.missingValue { return "missing value" }

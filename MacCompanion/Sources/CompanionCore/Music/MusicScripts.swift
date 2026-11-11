@@ -23,6 +23,16 @@ public enum MusicScript: Hashable, Sendable {
     case snapshot
     case artwork
     case command(MusicCommand)
+    /// `set player position to <seconds>`. Added 11 November 2026.
+    case seek(TimeInterval)
+    /// `set sound volume to <0–100>`: Music's own output volume, not the
+    /// Mac's. Added 11 November 2026.
+    case setVolume(Int)
+    /// `set current AirPlay devices to {<the device with this id>}`, so Music
+    /// plays to that device alone. The id is `AudioOutput.id`: the device's
+    /// network address, or `name:<name>` for one without (the Mac itself).
+    /// Answers "NOT_FOUND" when no device has that id. Added 11 November 2026.
+    case selectOutput(String)
 
     /// Guard 2 of 2. Music may quit between the process check and the Apple
     /// Event, and `tell application "Music"` would relaunch it. `is running`
@@ -41,11 +51,54 @@ public enum MusicScript: Hashable, Sendable {
             end timeout
             return "ok"
             """
+        case .seek(let seconds):
+            """
+            \(Self.guardLine)
+            with timeout of 3 seconds
+            \ttell application "Music" to set player position to \(seconds)
+            end timeout
+            return "ok"
+            """
+        case .setVolume(let level):
+            """
+            \(Self.guardLine)
+            with timeout of 3 seconds
+            \ttell application "Music" to set sound volume to \(level)
+            end timeout
+            return "ok"
+            """
+        case .selectOutput(let id):
+            """
+            \(Self.guardLine)
+            with timeout of 5 seconds
+            \ttell application "Music"
+            \t\trepeat with d in AirPlay devices
+            \t\t\tset addr to missing value
+            \t\t\ttry
+            \t\t\t\tset addr to network address of d
+            \t\t\tend try
+            \t\t\tif addr is missing value then set addr to "name:" & (name of d)
+            \t\t\tif addr is "\(id.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))" then
+            \t\t\t\tset current AirPlay devices to {d}
+            \t\t\t\treturn "ok"
+            \t\t\tend if
+            \t\tend repeat
+            \t\treturn "NOT_FOUND"
+            \tend tell
+            end timeout
+            """
         }
     }
 
+    /// Separators inside the snapshot's `outputs` field (field 13): one
+    /// device per U+001E, its five values split by U+001D.
+    static let outputSeparator = "\u{1e}"
+    static let outputFieldSeparator = "\u{1d}"
+
     /// The tested `musicprobe.sh` fields and order, with two changes measured
-    /// on macOS 27.0.1. `properties of current track` fetches every track field
+    /// on macOS 27.0.1, plus two fields added on 11 November 2026: Music's
+    /// `sound volume` and its AirPlay devices (name, kind, selected,
+    /// available, network address per device). `properties of current track` fetches every track field
     /// in one Apple Event, where reading each property was eleven events and
     /// 100–430 ms on the main thread; and a timeout, because without one a
     /// hung Music blocks for AppleScript's default two minutes (the spike saw a
@@ -54,6 +107,8 @@ public enum MusicScript: Hashable, Sendable {
     private static let snapshotSource = """
     \(guardLine)
     set US to (ASCII character 31)
+    set RS to (ASCII character 30)
+    set GS to (ASCII character 29)
     with timeout of 3 seconds
     \ttell application "Music"
     \t\tset playerState to (player state as text)
@@ -61,7 +116,7 @@ public enum MusicScript: Hashable, Sendable {
     \t\ttry
     \t\t\tset pos to (player position as text)
     \t\tend try
-    \t\tset f to {playerState, pos, "", "", "", "", "0", "", "0", "", "0"}
+    \t\tset f to {playerState, pos, "", "", "", "", "0", "", "0", "", "0", "", ""}
     \t\ttry
     \t\t\tset p to properties of current track
     \t\t\tset item 3 of f to (name of p)
@@ -81,6 +136,20 @@ public enum MusicScript: Hashable, Sendable {
     \t\t\ttry
     \t\t\t\tset item 11 of f to (count of artworks of current track as text)
     \t\t\tend try
+    \t\tend try
+    \t\ttry
+    \t\t\tset item 12 of f to (sound volume as text)
+    \t\tend try
+    \t\ttry
+    \t\t\tset outs to ""
+    \t\t\trepeat with d in AirPlay devices
+    \t\t\t\tset addr to "missing value"
+    \t\t\t\ttry
+    \t\t\t\t\tset addr to (network address of d as text)
+    \t\t\t\tend try
+    \t\t\t\tset outs to outs & (name of d) & GS & (kind of d as text) & GS & (selected of d as text) & GS & (available of d as text) & GS & addr & RS
+    \t\t\tend repeat
+    \t\t\tset item 13 of f to outs
     \t\tend try
     \t\tset AppleScript's text item delimiters to US
     \t\tset out to f as text

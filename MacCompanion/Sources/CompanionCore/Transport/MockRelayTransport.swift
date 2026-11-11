@@ -85,9 +85,15 @@ public actor MockRelayTransport: CompanionTransport {
     /// A phone command, as the relay would forward it. Returns its id.
     @discardableResult
     public func simulateCommand(_ kind: CommandKind, issuedAt: Date? = Date(), id: UUID = UUID()) -> UUID {
-        let frame = RelayFrame.command(RemoteCommand(id: id, kind: kind, issuedAt: issuedAt))
-        if let data = try? frame.encoded() { simulateJSON(data) }
-        return id
+        simulate(RemoteCommand(id: id, kind: kind, issuedAt: issuedAt))
+    }
+
+    /// A phone command with its value, as the relay would forward it.
+    public func simulate(_ command: RemoteCommand) -> UUID {
+        var command = command
+        if command.issuedAt == nil { command.issuedAt = Date() }
+        if let data = try? RelayFrame.command(command).encoded() { simulateJSON(data) }
+        return command.id
     }
 
     /// Delivers raw JSON as if it arrived on the socket.

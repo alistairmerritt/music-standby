@@ -49,6 +49,7 @@ public struct PlaybackPublisher: Sendable {
         return PlaybackMessage(
             revision: revision, state: snapshot.state, elapsedTime: track == nil ? 0 : snapshot.position,
             capturedAt: StandByWire.wirePrecision(snapshot.capturedAt), track: track, canGoNext: canSkip, canGoPrevious: canSkip,
-            listeningSessionID: session, detail: snapshot.detail)
+            listeningSessionID: session, detail: snapshot.detail,
+            volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs)
     }
 }

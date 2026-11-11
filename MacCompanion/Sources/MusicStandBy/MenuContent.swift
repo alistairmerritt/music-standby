@@ -293,7 +293,7 @@ private struct MockRelaySection: View {
         DisclosureGroup("Simulate iPhone") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    ForEach(CommandKind.allCases, id: \.self) { kind in
+                    ForEach(CommandKind.allCases.filter { $0.requiredValue == nil }, id: \.self) { kind in
                         Button(kind.rawValue.capitalized) { Task { await mock.simulateCommand(kind) } }
                     }
                 }

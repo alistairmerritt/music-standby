@@ -38,6 +38,28 @@ import StandByProtocol
         #expect(p.ingest(snap(.playing, 30, at: 1020.5), artworkID: nil) == nil)
     }
 
+    @Test func volumeAndOutputChangesAreSent() throws {
+        var p = publisher()
+        var snapshot = snap(.playing, 10, at: 1000)
+        snapshot.volume = 50
+        snapshot.outputs = [AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: true)]
+        let first = try must(p.ingest(snapshot, artworkID: nil))
+        #expect(first.volume == 0.5)
+        #expect(first.outputs?.first?.name == "Mac")
+        var same = snap(.playing, 11, at: 1001)
+        same.volume = 50
+        same.outputs = snapshot.outputs
+        #expect(p.ingest(same, artworkID: nil) == nil)
+        var quieter = snap(.playing, 12, at: 1002)
+        quieter.volume = 30
+        quieter.outputs = snapshot.outputs
+        #expect(try must(p.ingest(quieter, artworkID: nil)).volume == 0.3)
+        var moved = snap(.playing, 13, at: 1003)
+        moved.volume = 30
+        moved.outputs = [AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: false)]
+        #expect(p.ingest(moved, artworkID: nil) != nil)
+    }
+
     @Test func seekIsSent() {
         var p = publisher()
         _ = p.ingest(snap(.playing, 10, at: 1000), artworkID: nil)

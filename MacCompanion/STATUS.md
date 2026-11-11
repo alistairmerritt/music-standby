@@ -13,13 +13,46 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 105 tests in 12 suites pass (`swift test`, 11 November) |
+| Unit tests | 114 tests in 12 suites pass (`scripts/test.sh`, 11 November evening) |
 | Shared protocol | 56 tests in 10 suites pass (`scripts/test.sh`, 10 November); builds for iOS with `xcodebuild` |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
 | Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. On 10 November it drove real Music from a real iPhone through the deployed relay (below). The menu has never been clicked by hand |
 | Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
+
+## Seek, volume and output (11 November 2026, evening)
+
+Three value commands from the phone, on top of play, pause, next and previous. All executed on
+this Mac against the real Music.app 1.7, with Music paused and the Mac's system output at 0.
+
+| Command | What the Mac does | Executed |
+| --- | --- | --- |
+| `seek` (`position`, seconds) | `set player position`, clamped to the track | `msbctl control seek 60`: 1.3 s → 60.0 s while paused. Through the relay harness while playing: 30.5 s read back |
+| `setVolume` (`level`, 0–1) | `set sound volume` 0–100: **Music's own volume, never the Mac's** | 100 → 40 → 100; harness 1 → 0.3 → 1 |
+| `selectOutput` (`outputID`) | `set current AirPlay devices` to that one device, found by id in Music's list | Mac → Study HomePod → Mac. An unknown id is `invalid_request`, nothing sent |
+
+The snapshot gained two fields: `sound volume` and `properties of every AirPlay device`, one
+event each (13 devices here: the Mac, AirPods Max, six HomePods, Apple TVs, a TV and a Google
+Mini through AirPort Express). A snapshot still reads in 87–101 ms on the controller's queue;
+`msbctl compare` is identical to AppleScript on all 13 fields. A device's id is its network
+address, or `name:<name>` for the Mac itself, so two devices called "Living Room" (a TV and a
+HomePod) stay apart.
+
+Found on the way:
+
+- **`every` is an absolute ordinal in host byte order.** `abso` with big-endian `all ` got
+  -1728 from Music; AppleScript's own event prints as `abso($206c6c61)`. An enumeration got
+  -10001.
+- **Switching output changes Music's volume.** Selecting the Study HomePod set `sound volume`
+  to 11 (that device's level), and switching back to the Mac left it at 11. The phone's volume
+  slider follows, since the next state carries the new level.
+- Music moves a device it has just played to up its list, so `selectOutput` reads the list and
+  sets by index within the same few milliseconds.
+- Setting `player position` and `sound volume` works while paused, so none of this needs audio.
+
+Unit tests: 114 (was 105). Not done: the menu-bar app has no volume or output controls of its
+own, and nothing here has been tried from a real iPhone yet (the phone wasn't connected).
 
 ## Raw Apple Events
 

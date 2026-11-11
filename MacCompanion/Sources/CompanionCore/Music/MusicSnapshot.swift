@@ -46,13 +46,20 @@ public struct MusicSnapshot: Equatable, Sendable {
     public var track: MusicTrack?
     /// AppleScript's message and number, for `.automationDenied` and `.error`.
     public var detail: String?
+    /// Music's `sound volume`, 0–100. Nil when the read didn't include it.
+    public var volume: Int?
+    /// Music's AirPlay devices, in its order. Nil when the read didn't include them.
+    public var outputs: [AudioOutput]?
 
-    public init(state: PlaybackState, position: TimeInterval = 0, capturedAt: Date, track: MusicTrack? = nil, detail: String? = nil) {
+    public init(state: PlaybackState, position: TimeInterval = 0, capturedAt: Date, track: MusicTrack? = nil, detail: String? = nil,
+                volume: Int? = nil, outputs: [AudioOutput]? = nil) {
         self.state = state
         self.position = position
         self.capturedAt = capturedAt
         self.track = track
         self.detail = detail
+        self.volume = volume
+        self.outputs = outputs
     }
 
     public static func notRunning(at date: Date) -> MusicSnapshot {
@@ -69,12 +76,15 @@ public struct MusicSnapshot: Equatable, Sendable {
 /// Parses the snapshot script's output: fields joined by U+001F, in the order
 /// state, position, name, artist, album, album artist, duration, persistent ID,
 /// database ID, class, artwork count. Same order as the tested `musicprobe.sh`.
+/// Two more since 11 November 2026: sound volume, and the AirPlay devices
+/// (one per U+001E; name, kind, selected, available, network address split by
+/// U+001D). A shorter record, from an older script, leaves both nil.
 public enum SnapshotParser {
     public static let separator = "\u{1f}"
 
     public static func parse(_ raw: String, capturedAt: Date) -> MusicSnapshot {
         var f = raw.components(separatedBy: separator)
-        while f.count < 11 { f.append("") }
+        while f.count < 13 { f.append("") }
         let track: MusicTrack? = f[2].isEmpty ? nil : MusicTrack(
             title: f[2], artist: f[3], album: f[4],
             albumArtist: f[5].isEmpty ? nil : f[5],
@@ -83,7 +93,35 @@ public enum SnapshotParser {
             databaseID: Int(f[8]),
             trackClass: f[9].isEmpty ? nil : f[9],
             artworkCount: Int(f[10]) ?? 0)
-        return MusicSnapshot(state: state(f[0]), position: number(f[1]) ?? 0, capturedAt: capturedAt, track: track)
+        return MusicSnapshot(state: state(f[0]), position: number(f[1]) ?? 0, capturedAt: capturedAt, track: track,
+                             volume: Int(f[11]).map { min(100, max(0, $0)) }, outputs: outputs(f[12]))
+    }
+
+    /// Nil for an empty field: the script didn't read the devices, or there were none.
+    static func outputs(_ text: String) -> [AudioOutput]? {
+        let records = text.components(separatedBy: MusicScript.outputSeparator).filter { !$0.isEmpty }
+        guard !records.isEmpty else { return nil }
+        return records.map { record in
+            var v = record.components(separatedBy: MusicScript.outputFieldSeparator)
+            while v.count < 5 { v.append("") }
+            let address = v[4] == "missing value" || v[4].isEmpty ? nil : v[4]
+            return AudioOutput(id: AudioOutput.makeID(networkAddress: address, name: v[0]), name: v[0], kind: kind(v[1]),
+                               isSelected: v[2] == "true", isAvailable: v[3] != "false")
+        }
+    }
+
+    /// `kind of AirPlay device as text` → the wire's kind.
+    static func kind(_ text: String) -> AudioOutput.Kind {
+        switch text {
+        case "computer": .computer
+        case "AirPort Express": .airportExpress
+        case "Apple TV": .appleTV
+        case "AirPlay device": .airPlay
+        case "Bluetooth device": .bluetooth
+        case "HomePod": .homePod
+        case "TV": .tv
+        default: .unknown
+        }
     }
 
     /// `player state as text`. Fast-forwarding and rewinding are still playing.

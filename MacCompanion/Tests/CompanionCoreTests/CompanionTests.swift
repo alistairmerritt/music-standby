@@ -145,9 +145,62 @@ import StandByProtocol
     @Test func unknownCommandKindIsRejectedByID() async throws {
         let r = await rig()
         let id = UUID()
-        await r.relay.simulateJSON(Data(#"{"type":"command","command":{"id":"\#(id.uuidString)","kind":"seek"}}"#.utf8))
+        await r.relay.simulateJSON(Data(#"{"type":"command","command":{"id":"\#(id.uuidString)","kind":"shuffle"}}"#.utf8))
         await eventually { await r.relay.ack(for: id) != nil }
         #expect(await r.relay.ack(for: id)?.error?.code == .unsupportedCommand)
+    }
+
+    @Test func seekFromThePhoneMovesMusicAndIsClampedToTheTrack() async throws {
+        let r = await rig()
+        let id = await r.relay.simulate(.seek(to: 120.5))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(r.music.position == 120.5)
+        await eventually { await states(r.relay).last?.elapsedTime == 120.5 }
+        let far = await r.relay.simulate(.seek(to: 9_999))
+        await eventually { await r.relay.ack(for: far) != nil }
+        #expect(r.music.position == 473.114, "clamped to the track's duration")
+    }
+
+    @Test func volumeFromThePhoneSetsMusicsOwnVolumeAndIsReported() async throws {
+        let r = await rig()
+        #expect(await states(r.relay).last?.volume == 1.0, "the first state carries Music's volume")
+        let id = await r.relay.simulate(.setVolume(0.4))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(r.music.volume == 40)
+        await eventually { await states(r.relay).last?.volume == 0.4 }
+        let loud = await r.relay.simulate(.setVolume(7))
+        await eventually { await r.relay.ack(for: loud) != nil }
+        #expect(r.music.volume == 100, "clamped to 0…1")
+    }
+
+    @Test func outputFromThePhoneSwitchesMusicToThatDeviceAlone() async throws {
+        let r = await rig()
+        let first = try #require(await states(r.relay).last)
+        let homePod = try #require(first.outputs?.first { $0.kind == .homePod })
+        #expect(first.outputs?.filter(\.isSelected).map(\.name) == ["Test Mac"])
+        #expect(first.outputs?.first { $0.name == "Bedroom Apple TV" }?.isAvailable == false)
+        let id = await r.relay.simulate(.selectOutput(homePod.id))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(r.music.selectedOutputs == ["Study HomePod"])
+        await eventually { await states(r.relay).last?.outputs?.filter(\.isSelected).map(\.name) == ["Study HomePod"] }
+        let unknown = await r.relay.simulate(.selectOutput("00:11:22:33:44:55"))
+        await eventually { await r.relay.ack(for: unknown) != nil }
+        #expect(await r.relay.ack(for: unknown)?.error?.code == .invalidRequest)
+        #expect(r.music.selectedOutputs == ["Study HomePod"])
+    }
+
+    @Test func aValueCommandWithoutItsValueIsInvalidAndNeverReachesMusic() async throws {
+        let r = await rig()
+        let before = r.music.scripts.count
+        for command in [RemoteCommand(kind: .seek), RemoteCommand(kind: .setVolume), RemoteCommand(kind: .selectOutput, outputID: "")] {
+            let id = await r.relay.simulate(command)
+            await eventually { await r.relay.ack(for: id) != nil }
+            #expect(await r.relay.ack(for: id)?.error?.code == .invalidRequest)
+        }
+        #expect(r.music.scripts.count == before)
     }
 
     @Test func artworkIsIdentifiedRequestedAndUploaded() async throws {

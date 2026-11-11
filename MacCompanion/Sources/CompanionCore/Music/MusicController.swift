@@ -120,16 +120,38 @@ public actor MusicController {
         case notRunning
         case automationDenied(String)
         case failed(String)
+        /// `selectOutput` named an id that isn't in Music's device list.
+        case outputNotFound
     }
 
     /// Sends one command. Does not wait for Music to settle or re-read it.
     public func perform(_ command: MusicCommand) -> CommandOutcome {
+        perform(script: .command(command))
+    }
+
+    /// `set player position`. The caller clamps to the track.
+    public func seek(to seconds: TimeInterval) -> CommandOutcome {
+        perform(script: .seek(max(0, seconds)))
+    }
+
+    /// `set sound volume`, 0–100: Music's own output volume.
+    public func setVolume(_ level: Int) -> CommandOutcome {
+        perform(script: .setVolume(min(100, max(0, level))))
+    }
+
+    /// Plays to the AirPlay device with this `AudioOutput.id`, and only to it.
+    public func selectOutput(_ id: String) -> CommandOutcome {
+        perform(script: .selectOutput(id))
+    }
+
+    private func perform(script: MusicScript) -> CommandOutcome {
         guard isRunning() else {
             skippedWhileClosed += 1
             return .notRunning
         }
-        switch run(.command(command)) {
+        switch run(script) {
         case .notRunning: return .notRunning
+        case .value(.text("NOT_FOUND")): return .outputNotFound
         case .value: return .performed
         case .failure(let code, let message):
             let failure = failureSnapshot(code: code, message: message, at: now())

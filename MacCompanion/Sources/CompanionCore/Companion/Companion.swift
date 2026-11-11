@@ -257,22 +257,41 @@ public final class Companion {
         }
         var performed = false
         let ack: CommandAck
-        let skip = command.kind == .next || command.kind == .previous
+        let needsTrack = command.kind == .next || command.kind == .previous || command.kind == .seek
         if command.isExpired(at: now()) {
             ack = reject(command, .commandExpired, "issued more than \(Int(RemoteCommand.maximumAge)) s ago")
-        } else if skip, await currentTrackIsMissing() {
+        } else if !command.hasRequiredValue {
+            ack = reject(command, .invalidRequest, "\(command.kind.rawValue) needs \(command.kind.requiredValue ?? "a value")")
+        } else if needsTrack, await currentTrackIsMissing() {
             // Music answers "next track" with nothing loaded as a success that
             // does nothing (seen right after a relaunch), so check first.
             ack = reject(command, .noCurrentTrack, "nothing is loaded in Music")
         } else {
             await monitor.waitOutLaunch()
-            switch await controller.perform(MusicCommand(command.kind)) {
+            let outcome: MusicController.CommandOutcome
+            switch command.kind {
+            case .seek:
+                // Clamped to the track Music had at the last read; Music
+                // clamps again to the one it has now.
+                let duration = snapshot?.track?.duration ?? 0
+                let position = command.position ?? 0
+                outcome = await controller.seek(to: duration > 0 ? min(position, duration) : position)
+            case .setVolume:
+                outcome = await controller.setVolume(Int((min(1, max(0, command.level ?? 0)) * 100).rounded()))
+            case .selectOutput:
+                outcome = await controller.selectOutput(command.outputID ?? "")
+            case .play, .pause, .next, .previous:
+                outcome = await controller.perform(MusicCommand(command.kind)!)
+            }
+            switch outcome {
             case .notRunning:
                 ack = reject(command, .musicNotRunning, "Music.app is not running. The companion does not launch it.")
             case .automationDenied(let detail):
                 ack = reject(command, .automationDenied, detail)
             case .failed(let detail):
                 ack = reject(command, .commandFailed, detail)
+            case .outputNotFound:
+                ack = reject(command, .invalidRequest, "Music lists no output with id \(command.outputID ?? "")")
             case .performed:
                 performed = true
                 ack = .accepted(command.id, revision: publisher.latestRevision)
@@ -280,7 +299,7 @@ public final class Companion {
         }
         remember(ack)
         lastAck = ack
-        record("command \(command.kind.rawValue) → \(ack.accepted ? "accepted" : "rejected \(ack.error?.code.rawValue ?? "")") r\(ack.revision)")
+        record("command \(command.summary) → \(ack.accepted ? "accepted" : "rejected \(ack.error?.code.rawValue ?? "")") r\(ack.revision)")
         return (ack, performed)
     }
 
@@ -630,12 +649,27 @@ public struct CompanionEvent: Identifiable, Equatable, Sendable {
 }
 
 extension MusicCommand {
-    public init(_ kind: CommandKind) {
+    /// Nil for a kind that carries a value (`seek`, `setVolume`,
+    /// `selectOutput`): those are `MusicController`'s own methods.
+    public init?(_ kind: CommandKind) {
         switch kind {
         case .play: self = .play
         case .pause: self = .pause
         case .next: self = .next
         case .previous: self = .previous
+        case .seek, .setVolume, .selectOutput: return nil
+        }
+    }
+}
+
+extension RemoteCommand {
+    /// `kind` and its value, for logs: "seek 120.5", "setVolume 0.40", "next".
+    public var summary: String {
+        switch kind {
+        case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
+        case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
+        case .selectOutput: "selectOutput \(outputID ?? "-")"
+        case .play, .pause, .next, .previous: kind.rawValue
         }
     }
 }

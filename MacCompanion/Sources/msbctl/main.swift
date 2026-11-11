@@ -44,6 +44,13 @@ func describe(_ s: MusicSnapshot) -> String {
         lines.append("track:     (none)")
     }
     if let d = s.detail { lines.append("detail:    \(d)") }
+    lines.append("volume:    \(s.volume.map { "\($0) %" } ?? "(not read)")")
+    if let outputs = s.outputs {
+        lines.append("outputs:   \(outputs.count)")
+        for o in outputs {
+            lines.append("  \(o.isSelected ? "●" : "○") \(o.name) — \(o.kind.rawValue)\(o.isAvailable ? "" : ", unavailable")  [\(o.id)]")
+        }
+    }
     return lines.joined(separator: "\n")
 }
 
@@ -144,20 +151,42 @@ case "artwork":
     }
 
 case "control":
+    // seek <seconds>, volume <0-100> and output <id|name> were added on 11 November 2026.
     let verbs: [String: MusicCommand] = ["play": .play, "pause": .pause, "playpause": .playPause, "next": .next, "previous": .previous]
-    guard let word = arguments.dropFirst().first, let command = verbs[word] else {
-        print("usage: msbctl control play|pause|playpause|next|previous")
+    let word = arguments.dropFirst().first ?? ""
+    let value = arguments.dropFirst(2).joined(separator: " ")
+    let usage = "usage: msbctl control play|pause|playpause|next|previous | seek <seconds> | volume <0-100> | output <id or name>"
+    guard verbs[word] != nil || (["seek", "volume", "output"].contains(word) && !value.isEmpty) else {
+        print(usage)
         exit(2)
     }
     run {
         let controller = MusicController()
         let before = await controller.snapshot()
-        print("before: \(before.state.rawValue) \(before.track?.title ?? "-") @ \(String(format: "%.1f", before.position))")
-        let outcome = await controller.perform(command)
-        print("\(word): \(outcome)")
-        try? await Task.sleep(for: .milliseconds(400))
+        func line(_ s: MusicSnapshot) -> String {
+            let outputs = s.outputs?.filter(\.isSelected).map(\.name).joined(separator: ", ") ?? "?"
+            return "\(s.state.rawValue) \(s.track?.title ?? "-") @ \(String(format: "%.1f", s.position)) vol \(s.volume.map(String.init) ?? "?") → \(outputs)"
+        }
+        print("before: \(line(before))")
+        let outcome: MusicController.CommandOutcome
+        switch word {
+        case "seek":
+            guard let seconds = Double(value) else { print(usage); return 2 }
+            outcome = await controller.seek(to: seconds)
+        case "volume":
+            guard let level = Int(value) else { print(usage); return 2 }
+            outcome = await controller.setVolume(level)
+        case "output":
+            // An id as the wire has it, or a device name from the snapshot.
+            let id = before.outputs?.first { $0.id == value || $0.name == value }?.id ?? value
+            outcome = await controller.selectOutput(id)
+        default:
+            outcome = await controller.perform(verbs[word]!)
+        }
+        print("\(word)\(value.isEmpty ? "" : " \(value)"): \(outcome)")
+        try? await Task.sleep(for: .milliseconds(word == "output" ? 1500 : 400))
         let after = await controller.snapshot()
-        print("after:  \(after.state.rawValue) \(after.track?.title ?? "-") @ \(String(format: "%.1f", after.position)) pid \(after.track?.persistentID ?? "-")")
+        print("after:  \(line(after)) pid \(after.track?.persistentID ?? "-")")
         return outcome == .performed ? 0 : 1
     }
 
@@ -263,8 +292,14 @@ case "watch":
                     let id = UUID()
                     await mock.simulateCommand(.play, id: id)
                     await mock.simulateCommand(.play, id: id)
-                case "seek":
-                    await mock.simulateJSON(Data(#"{"type":"command","command":{"id":"\#(UUID().uuidString)","kind":"seek"}}"#.utf8))
+                case "shuffle":   // a kind this build doesn't know
+                    await mock.simulateJSON(Data(#"{"type":"command","command":{"id":"\#(UUID().uuidString)","kind":"shuffle"}}"#.utf8))
+                case let w where w.hasPrefix("seek "):
+                    if let seconds = Double(w.dropFirst(5)) { await mock.simulate(.seek(to: seconds)) }
+                case let w where w.hasPrefix("volume "):
+                    if let level = Double(w.dropFirst(7)) { await mock.simulate(.setVolume(level / 100)) }
+                case let w where w.hasPrefix("output "):
+                    await mock.simulate(.selectOutput(String(line.trimmingCharacters(in: .whitespaces).dropFirst(7))))
                 case "read":
                     await companion.refresh()
                 case "drop":
