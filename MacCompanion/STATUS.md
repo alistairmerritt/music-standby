@@ -59,10 +59,11 @@ coalesced commands); output from the app's Play To picker, Mac → Study HomePod
 The switch is now sent **without waiting for Music's reply**: a HomePod Music hasn't used
 lately took longer than the 5 s wait (-1712), and Music finished the switch after we'd given
 up, leaving the ack `command_failed` for a switch that happened. The ack now means the request
-reached Music; the next reads show where it plays. Two devices refused by Music itself, from
-AppleScript as well, with -15014: the Kitchen HomePod and the Living Room HomePod (checked
-12 November; the Study HomePod switched in under 2 s). Music's own AirPlay menu is the
-place to look for those.
+reached Music; the next reads show where it plays. Measured 12 November from AppleScript:
+Music answers a `set current AirPlay devices` at once and the Living Room HomePod showed as
+selected about 3 s later; the Study HomePod in under 2 s. One device, the Kitchen HomePod, is
+refused by Music itself with -15014, from AppleScript as well. Music's own AirPlay menu is the
+place to look for that one.
 
 Unit tests: 114 (was 105). Not done: the menu-bar app has no volume or output controls of its own.
 
