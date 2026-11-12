@@ -12,6 +12,8 @@ Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Sho
 
 **Play To was removed on 12 November (evening)**, from the Shortcuts actions and from the app (the picker under the volume slider). Music on the Mac can't switch to some speakers at all: tried with AppleScript alone, with no Second Chair code involved, the switch to the Bedroom HomePod timed out after 20 s and the MacBook stayed selected, and Music refuses the Kitchen HomePod with -15014. Alistair found Play To to the Bedroom HomePod failed every time. The protocol (`selectOutput`, `playback.outputs`), the Mac and the relay keep their support, and so does `AppModel.selectOutput`; nothing on the phone sends it now. Its free App Shortcut slot went to Stop Showing.
 
+**On TestFlight as build 202611122021** (version 0.1, uploaded 12 November 20:26 by `scripts/archive.sh --upload` from `feature/shortcuts` at bab7970). The export checks passed (production pushes, Time Sensitive, the Now Playing extension with its App Group), and the archive carries the 11 actions and 10 App Shortcuts.
+
 | Action | Runs | Does |
 | --- | --- | --- |
 | Play or Pause on Mac | in the background | Pauses a playing Mac, plays a paused one (from the relay's state) |
