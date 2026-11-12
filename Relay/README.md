@@ -78,6 +78,7 @@ from `playback.outputs` in `session`.
 | `APNS_APP_TOPIC` | `APNS_TOPIC` without `.push-type.nowplaying` | Topic of reminder alerts |
 | `REMIND_AFTER_MS` | 1800000 | How long the Mac must not have played before a reminder |
 | `ARTWORK_FOLLOW_UP_MS` | 700 | Delay before an update with new artwork is sent again |
+| `ARTWORK_DOWNLOAD_FOLLOW_UP_MS` | 1000 | Delay after the phone downloads the artwork it was last pushed before that update is sent again (once per artwork) |
 | `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
 | `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 0 | `PAUSED_TIMEOUT_MS` 0 never ends a paused session |
@@ -156,7 +157,23 @@ Later on 12 November, each pairing finds its own APNs environment (see
 [APNs status](#apns-status)), so TestFlight builds, whose tokens are production ones, get
 their pushes from the same relay as builds from Xcode. 65 tests pass, and the local harness
 21/21. Deployed the same day as version `bda19049`; the deployment answered an
-unauthenticated `GET /v1/session` with `401`. Not yet seen with a TestFlight build.
+unauthenticated `GET /v1/session` with `401`. **Then seen working with the first TestFlight
+build** (202611121125), whose tokens are production ones: with the phone locked and the
+app asleep for almost three minutes (no requests from it), a skip on the Mac reached the
+Lock Screen. The Mac uploaded the new artwork at 11:43:24 and the extension fetched it a
+second later without reading the session, so the update came by push. The relay's own
+push lines didn't reach that `wrangler tail` session (an earlier one, started before, did
+show them), so the environment switch itself wasn't seen in the log.
+
+The artwork lagged once: on that first skip after the phone had slept, the title changed but
+the artwork only came with the next song, and from then on it kept up. Likely, not proven: an
+extension waking after minutes asleep takes longer than the 0.7 s before the follow-up push
+to fetch the image, so the follow-up arrives before the image is cached and nothing asks
+again. So the relay now also waits for the download: when the phone downloads the artwork
+of the update it was last pushed, that update goes again a second later, once per artwork
+(`ARTWORK_DOWNLOAD_FOLLOW_UP_MS`). It costs at most one more push per song, and changes
+nothing when the artwork already shows. 68 tests pass (the new one fails without it), and
+the local harness 21/21.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 

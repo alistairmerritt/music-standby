@@ -23,6 +23,7 @@ export interface Env {
   REMIND_AFTER_MS?: string;
   /** Delay of the repeat update that keeps the phone's extension awake for new artwork. Default 700. */
   ARTWORK_FOLLOW_UP_MS?: string;
+  ARTWORK_DOWNLOAD_FOLLOW_UP_MS?: string;
   /** Topic for reminder alerts; defaults to APNS_TOPIC without ".push-type.nowplaying". */
   APNS_APP_TOPIC?: string;
 }

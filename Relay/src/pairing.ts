@@ -109,6 +109,16 @@ const ARTWORK_UPLOAD_WAIT_MS = 3_000;
  * image by then.
  */
 const ARTWORK_FOLLOW_UP_MS = 700;
+/**
+ * An extension woken after minutes asleep can take longer than that to
+ * download the image: on the first TestFlight build (12 Nov 2026), the first
+ * song after the phone had slept got its title but not its artwork, and later
+ * songs got both. So when the phone downloads the artwork of the update it was
+ * last pushed, that update goes again this long after the download, by when
+ * the image is cached. Once per artwork; a download before the update is
+ * pushed doesn't count.
+ */
+const ARTWORK_DOWNLOAD_FOLLOW_UP_MS = 1000;
 const ACKS_KEEP = 50;
 const PUSHES_KEEP = 100;
 
@@ -121,6 +131,8 @@ export class Pairing extends DurableObject<Env> {
   private artworkWaiters = new Map<string, Set<() => void>>();
   /** Kept so pushes reuse one provider token; see ProviderTokenStore. */
   private apns?: APNsPushSender;
+  /** The artwork a download follow-up is waiting or was sent for; see ARTWORK_DOWNLOAD_FOLLOW_UP_MS. */
+  private downloadFollowUp?: string;
 
   private get ackTimeout(): number {
     return Number(this.env.ACK_TIMEOUT_MS ?? 1200);
@@ -822,6 +834,7 @@ export class Pairing extends DurableObject<Env> {
       art = await this.ctx.storage.get<StoredArtwork>(`art:${artworkID}`);
     }
     if (!art) throw new HttpError(404, "not_found");
+    void this.followUpAfterDownload(artworkID);
     return new Response(art.data, {
       headers: {
         "Content-Type": art.contentType,
@@ -830,6 +843,23 @@ export class Pairing extends DurableObject<Env> {
         "X-Protocol-Version": String(PROTOCOL_VERSION),
       },
     });
+  }
+
+  /** The last pushed update again, once the phone has its artwork; see ARTWORK_DOWNLOAD_FOLLOW_UP_MS. */
+  private async followUpAfterDownload(artworkID: string): Promise<void> {
+    if (this.downloadFollowUp === artworkID) return;
+    this.downloadFollowUp = artworkID;
+    await new Promise((resolve) => setTimeout(resolve, Number(this.env.ARTWORK_DOWNLOAD_FOLLOW_UP_MS ?? ARTWORK_DOWNLOAD_FOLLOW_UP_MS)));
+    const session = await this.ctx.storage.get<Session>("session");
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    const tokens = await this.tokens();
+    const token = session && tokens.session?.sessionID === session.sessionID ? tokens.session.token : undefined;
+    if (!session || !token || !playback || session.pushedArtworkID !== artworkID || playback.revision !== session.pushedRevision) {
+      // Not (or no longer) the artwork on the phone: a later download may still count.
+      if (this.downloadFollowUp === artworkID) this.downloadFollowUp = undefined;
+      return;
+    }
+    await this.push("update", token, await this.attributes(session, playback));
   }
 
   // MARK: Timers

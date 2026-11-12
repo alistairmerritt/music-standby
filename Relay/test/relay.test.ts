@@ -462,6 +462,72 @@ describe("artwork follow-up", () => {
     const sent = (await pushes(phoneToken)).slice(before);
     expect(sent.map((p) => p.payload.aps.attributes.revision)).toEqual([withArt.revision, next.revision]);
   });
+
+  describe("after the phone downloads the artwork", () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 8, 7]);
+
+    /** Playing, then a song with uploaded artwork, its update and the 0.7 s follow-up already pushed. */
+    async function songWithArtwork(artworkID: string) {
+      const setup = await playingSetup();
+      const song = playback({ track: { id: "pid:D-4", title: "Song", artist: "A", album: "B", duration: 200, artworkID } });
+      setup.mac.send({ type: "state", message: song });
+      expect((await setup.mac.next("artwork-request")).artworkID).toBe(artworkID);
+      expect((await call("PUT", `/v1/artwork/${artworkID}`, { token: setup.macToken, raw: jpeg, headers: { "Content-Type": "image/jpeg" } })).status).toBe(201);
+      await waitForRevision(setup.phoneToken, song.revision);
+      await new Promise((r) => setTimeout(r, 900));
+      const download = () => call("GET", `/v1/artwork/${setup.pairingID}/${artworkID}`, { token: setup.phoneToken });
+      return { ...setup, song, download, before: (await pushes(setup.phoneToken)).length };
+    }
+
+    it("pushes that update again a second later, once per artwork", async () => {
+      const { phoneToken, song, download, before } = await songWithArtwork("1".repeat(64));
+      expect((await download()).status).toBe(200);
+      expect((await download()).status).toBe(200); // the extension often asks twice
+      await new Promise((r) => setTimeout(r, 600));
+      expect((await pushes(phoneToken)).length).toBe(before); // not yet: the image is still arriving
+      await new Promise((r) => setTimeout(r, 700));
+      const sent = (await pushes(phoneToken)).slice(before);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].event).toBe("update");
+      expect(sent[0].payload.aps.attributes.revision).toBe(song.revision);
+      expect(sent[0].payload.aps.attributes.track.artworkID).toBe("1".repeat(64));
+      // Downloading the same artwork later (the app, a relaunch) doesn't push again.
+      expect((await download()).status).toBe(200);
+      await new Promise((r) => setTimeout(r, 1300));
+      expect((await pushes(phoneToken)).length).toBe(before + 1);
+    });
+
+    it("doesn't push once a newer state has gone out", async () => {
+      const { mac, phoneToken, download, before } = await songWithArtwork("2".repeat(64));
+      expect((await download()).status).toBe(200);
+      const next = playback({ track: { id: "pid:E-5", title: "Next", artist: "A", album: "C", duration: 100 } });
+      mac.send({ type: "state", message: next });
+      await waitForRevision(phoneToken, next.revision);
+      await new Promise((r) => setTimeout(r, 1300));
+      const sent = (await pushes(phoneToken)).slice(before);
+      expect(sent.map((p) => p.payload.aps.attributes.revision)).toEqual([next.revision]);
+    });
+
+    it("doesn't push for artwork the phone wasn't last pushed", async () => {
+      const { mac, macToken, phoneToken, pairingID, before } = await songWithArtwork("3".repeat(64));
+      // An older song's artwork, still stored, downloaded again.
+      const old = "4".repeat(64);
+      const other = playback({ track: { id: "pid:F-6", title: "Old", artist: "A", album: "D", duration: 100, artworkID: old } });
+      mac.send({ type: "state", message: other });
+      await mac.next("artwork-request");
+      await call("PUT", `/v1/artwork/${old}`, { token: macToken, raw: jpeg, headers: { "Content-Type": "image/jpeg" } });
+      await waitForRevision(phoneToken, other.revision);
+      const back = playback({ track: { id: "pid:D-4", title: "Song", artist: "A", album: "B", duration: 200, artworkID: "3".repeat(64) } });
+      mac.send({ type: "state", message: back });
+      await waitForRevision(phoneToken, back.revision);
+      await new Promise((r) => setTimeout(r, 900));
+      const settled = (await pushes(phoneToken)).length;
+      expect((await call("GET", `/v1/artwork/${pairingID}/${old}`, { token: phoneToken })).status).toBe(200);
+      await new Promise((r) => setTimeout(r, 1300));
+      expect((await pushes(phoneToken)).length).toBe(settled);
+      expect(settled).toBeGreaterThan(before);
+    });
+  });
 });
 
 describe("reminders", () => {
