@@ -19,6 +19,9 @@ struct HomeView: View {
                     TransportControls(isPlaying: attributes.isPlaying) { kind in
                         Task { await model.send(kind) }
                     }
+                    if model.canContinueOnPhone {
+                        ContinueOnPhoneRow()
+                    }
                     if let volume = attributes.volume {
                         VolumeRow(level: volume) { level in
                             Task { await model.setVolume(level) }
@@ -217,6 +220,45 @@ private struct SeekBar: View {
         dragging = false
         now = Date()
         onSeek(dragValue)
+    }
+}
+
+/// Starts the Mac's song here, with its Up Next, then pauses the Mac.
+private struct ContinueOnPhoneRow: View {
+    @Environment(AppModel.self) private var model
+    @State private var working = false
+    @State private var outcome: ContinueOutcome?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                Task {
+                    working = true
+                    outcome = await model.continueOnPhone(with: SystemMusicPhonePlayer())
+                    working = false
+                }
+            } label: {
+                HStack {
+                    Label("Continue on iPhone", systemImage: "iphone")
+                    if working {
+                        Spacer()
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(working)
+            Text(note).font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Says up front that the Mac pauses; afterwards, only what went wrong.
+    private var note: String {
+        switch outcome {
+        case .unavailable?: "Your Mac can’t tell which Apple Music song this is."
+        case .notAllowed?: "Allow Second Chair to use Apple Music in Settings › Apps › Second Chair."
+        case .didNotStart?: "Apple Music on this iPhone didn’t start the song. Your Mac is still playing."
+        case nil, .continued?, .macStillPlaying?: "Plays the song and what’s next in Apple Music on this iPhone, and pauses your Mac."
+        }
     }
 }
 

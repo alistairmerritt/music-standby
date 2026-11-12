@@ -17,6 +17,9 @@ public final class AppModel {
     public private(set) var attributes: MacPlaybackAttributes?
     /// Where the Mac can play to, from its last state. Empty when it doesn't say.
     public private(set) var outputs: [AudioOutput] = []
+    /// True when the Mac's last state names the song's Apple Music catalogue ID,
+    /// so Continue on iPhone can start it here.
+    public private(set) var canContinueOnPhone = false
     public private(set) var artwork: CGImage?
     public private(set) var pushTokens = PushTokens()
     public private(set) var commandsFromSystem: [CommandRecord] = []
@@ -219,6 +222,47 @@ public final class AppModel {
         await send(.selectOutput(id, issuedAt: now()))
     }
 
+    /// Continue on iPhone: starts the Mac's song in this phone's Apple Music
+    /// at the Mac's position, with the Mac's Up Next after it, and once it's
+    /// playing here, pauses the Mac. Until then the Mac keeps playing, so a
+    /// failure costs nothing.
+    public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
+        guard let message = latestMessage, let catalogID = message.track?.catalogID else { return .unavailable }
+        guard await player.requestAccess() else {
+            record("Continue on iPhone: no access to Apple Music")
+            return .notAllowed
+        }
+        let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
+        let started = await player.play(catalogIDs: queue, position: { [weak self] in
+            guard let self, let latest = self.latestMessage, latest.track?.catalogID == catalogID else { return message.elapsed(at: Date()) }
+            return latest.elapsed(at: self.now())
+        }, timeout: timeout)
+        guard started else {
+            record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")
+            return .didNotStart
+        }
+        guard latestMessage?.state == .playing else {
+            record("Continue on iPhone: playing here; the Mac was already paused")
+            return .continued
+        }
+        // Once more after a second if the first try fails: the Mac can be busy
+        // just then, as when headphones follow the music to the phone.
+        for attempt in 1...2 {
+            do {
+                let ack = try await transport.send(RemoteCommand(kind: .pause, issuedAt: now()))
+                if ack.accepted {
+                    record("Continue on iPhone: playing here with \(queue.count - 1) songs after it; the Mac is paused")
+                    return .continued
+                }
+                record("Continue on iPhone: the Mac refused to pause (\(ack.error?.code.rawValue ?? "no reason")), try \(attempt)")
+            } catch {
+                record("Continue on iPhone: couldn't pause the Mac (\(error.localizedDescription)), try \(attempt)")
+            }
+            if attempt == 1 { try? await sleep(1) }
+        }
+        return .macStillPlaying
+    }
+
     public func send(_ command: RemoteCommand) async {
         let name = command.kind.rawValue
         do {
@@ -261,6 +305,7 @@ public final class AppModel {
             assignedSessionID = nil
             attributes = nil
             artwork = nil
+            canContinueOnPhone = false
             if reason == .pairingRevoked {
                 forgetPairing()
                 record("The pairing was revoked. Pair with your Mac again.")
@@ -290,6 +335,7 @@ public final class AppModel {
         }
         latestMessage = message
         outputs = message.outputs ?? []
+        canContinueOnPhone = message.track?.catalogID != nil
         var updated = MacPlaybackAttributes(mac: mac, message: message, sessionID: assignedSessionID)
         // Once Music stops or quits the Mac reports no track. Keep the last one,
         // paused, in the same session: iOS shows only a session the app asked
