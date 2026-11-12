@@ -101,6 +101,8 @@ export class MockPushSender implements PushSender {
   }
 }
 
+export type APNsEnvironment = "development" | "production";
+
 export interface APNsConfig {
   keyP8: string;
   keyID: string;
@@ -108,7 +110,19 @@ export interface APNsConfig {
   topic: string;
   /** The app's own topic for alert pushes; defaults to `topic` without ".push-type.nowplaying". */
   appTopic?: string;
-  environment: "development" | "production";
+  /** Where a pairing's pushes go until one has been delivered elsewhere. */
+  environment: APNsEnvironment;
+}
+
+/**
+ * Which APNs environment a pairing's phone turned out to use. Builds from Xcode
+ * get sandbox tokens; TestFlight and App Store builds get production ones, and
+ * nothing in a token says which. Every token of one phone comes from one build,
+ * so one answer per pairing is enough.
+ */
+export interface EnvironmentStore {
+  get(): Promise<APNsEnvironment | undefined>;
+  put(environment: APNsEnvironment): Promise<void>;
 }
 
 /** A signed provider token, with what it was signed for and when. */
@@ -134,6 +148,7 @@ const PROVIDER_TOKEN_REUSE_MS = 30 * 60 * 1000;
 
 export class APNsPushSender implements PushSender {
   private jwt?: ProviderToken;
+  private learned?: APNsEnvironment;
 
   constructor(
     private readonly config: APNsConfig,
@@ -141,10 +156,18 @@ export class APNsPushSender implements PushSender {
     // global fetch is called as a method of another object.
     private readonly fetcher: typeof fetch = (input, init) => fetch(input, init),
     private readonly store?: ProviderTokenStore,
+    private readonly environments?: EnvironmentStore,
   ) {}
 
+  /** The host pushes go to first: the environment learned, else the configured one. */
   get host(): string {
-    return this.config.environment === "production" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com";
+    return hostFor(this.learned ?? this.config.environment);
+  }
+
+  /** The environment the next push goes to first. */
+  async environment(): Promise<APNsEnvironment> {
+    this.learned ??= await this.environments?.get();
+    return this.learned ?? this.config.environment;
   }
 
   async send(push: Push): Promise<PushResult> {
@@ -168,8 +191,28 @@ export class APNsPushSender implements PushSender {
     };
   }
 
+  /**
+   * APNs answers BadDeviceToken to a token sent to the wrong environment
+   * (Apple: "…and that the token matches the environment"), so that answer is
+   * tried once against the other one. Delivered there, that environment is
+   * kept for the pairing. Refused by both, the token is dead as before.
+   */
   private async post(token: string, headers: Record<string, string>, payload: unknown): Promise<PushResult> {
-    const response = await this.fetcher(`${this.host}/3/device/${token}`, {
+    const first = await this.environment();
+    const result = await this.attempt(first, token, headers, payload);
+    if (result.status !== 400 || result.reason !== "BadDeviceToken") return result;
+    const other: APNsEnvironment = first === "production" ? "development" : "production";
+    const retry = await this.attempt(other, token, headers, payload);
+    if (retry.status >= 200 && retry.status < 300) {
+      console.log(`push: token is for APNs ${other}, not ${first}; using ${other} from now on`);
+      this.learned = other;
+      await this.environments?.put(other);
+    }
+    return retry;
+  }
+
+  private async attempt(environment: APNsEnvironment, token: string, headers: Record<string, string>, payload: unknown): Promise<PushResult> {
+    const response = await this.fetcher(`${hostFor(environment)}/3/device/${token}`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
@@ -224,6 +267,10 @@ export class APNsPushSender implements PushSender {
     const age = now - token.issuedAt;
     return age >= 0 && age < PROVIDER_TOKEN_REUSE_MS;
   }
+}
+
+function hostFor(environment: APNsEnvironment): string {
+  return environment === "production" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com";
 }
 
 function pemToBytes(pem: string): Uint8Array {

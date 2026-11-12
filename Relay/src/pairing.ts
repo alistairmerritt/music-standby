@@ -20,7 +20,7 @@ import {
   type RemoteCommand,
   type TrackMetadata,
 } from "./protocol";
-import { APNsPushSender, MockPushSender, makePush, makeReminder, tokenIsDead, type AlertPush, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
+import { APNsPushSender, MockPushSender, makePush, makeReminder, tokenIsDead, type AlertPush, type APNsEnvironment, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
 
 // One Durable Object per pairing (one Mac, at most one phone). It holds the
 // credentials' hashes, the Mac's WebSocket, the latest playback, the Now
@@ -736,6 +736,10 @@ export class Pairing extends DurableObject<Env> {
         {
           get: () => this.ctx.storage.get<ProviderToken>("apnsProviderToken"),
           put: (token) => (token ? this.ctx.storage.put("apnsProviderToken", token) : this.ctx.storage.delete("apnsProviderToken").then(() => {})),
+        },
+        {
+          get: () => this.ctx.storage.get<APNsEnvironment>("apnsEnvironment"),
+          put: (environment) => this.ctx.storage.put("apnsEnvironment", environment),
         },
       );
       return this.apns;

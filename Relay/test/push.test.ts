@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { APNsPushSender, makePush, makeReminder, tokenIsDead, type ProviderToken, type ProviderTokenStore } from "../src/push";
+import { APNsPushSender, makePush, makeReminder, tokenIsDead, type APNsEnvironment, type EnvironmentStore, type ProviderToken, type ProviderTokenStore } from "../src/push";
 import type { NowPlayingAttributes } from "../src/protocol";
 
 const attributes: NowPlayingAttributes = {
@@ -113,6 +113,80 @@ describe("APNsPushSender", () => {
     expect(body.aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." });
     expect(body.aps.sound).toBeUndefined();
     expect(body.aps["interruption-level"]).toBe("time-sensitive");
+  });
+
+  describe("the APNs environment", () => {
+    function apns(answers: Record<string, () => Response>) {
+      const seen: string[] = [];
+      const fetcher = (async (input: RequestInfo | URL) => {
+        const url = new Request(input).url;
+        seen.push(new URL(url).host);
+        return (answers[new URL(url).host] ?? (() => new Response(null, { status: 200 })))();
+      }) as typeof fetch;
+      return { seen, fetcher };
+    }
+    const badToken = () => new Response(JSON.stringify({ reason: "BadDeviceToken" }), { status: 400 });
+    function memoryEnvironments(): EnvironmentStore & { saved?: APNsEnvironment } {
+      const store = {
+        saved: undefined as APNsEnvironment | undefined,
+        get: async () => store.saved,
+        put: async (environment: APNsEnvironment) => {
+          store.saved = environment;
+        },
+      };
+      return store;
+    }
+
+    it("follows a TestFlight build's token to production, and stays there", async () => {
+      const { pem } = await testKey();
+      const { seen, fetcher } = apns({ "api.sandbox.push.apple.com": badToken });
+      const environments = memoryEnvironments();
+      const config = { keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" as const };
+      const sender = new APNsPushSender(config, fetcher, undefined, environments);
+      expect(await sender.send(makePush("update", "ab", attributes))).toEqual({ status: 200 });
+      expect(seen).toEqual(["api.sandbox.push.apple.com", "api.push.apple.com"]);
+      expect(environments.saved).toBe("production");
+      // The next push, and a reminder, go straight to production.
+      expect(await sender.sendAlert(makeReminder("cd", "Studio Mac"))).toEqual({ status: 200 });
+      expect(seen.slice(2)).toEqual(["api.push.apple.com"]);
+      // So does a sender made after the Durable Object woke up again.
+      const woken = new APNsPushSender(config, fetcher, undefined, environments);
+      await woken.send(makePush("update", "ab", attributes));
+      expect(seen.slice(3)).toEqual(["api.push.apple.com"]);
+    });
+
+    it("follows a development build back to the sandbox", async () => {
+      const { pem } = await testKey();
+      const { seen, fetcher } = apns({ "api.push.apple.com": badToken });
+      const environments = memoryEnvironments();
+      environments.saved = "production";
+      const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" }, fetcher, undefined, environments);
+      expect(await sender.send(makePush("start", "ab", attributes))).toEqual({ status: 200 });
+      expect(seen).toEqual(["api.push.apple.com", "api.sandbox.push.apple.com"]);
+      expect(environments.saved).toBe("development");
+    });
+
+    it("reports a token both environments refuse as dead, and learns nothing", async () => {
+      const { pem } = await testKey();
+      const { seen, fetcher } = apns({ "api.sandbox.push.apple.com": badToken, "api.push.apple.com": badToken });
+      const environments = memoryEnvironments();
+      const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" }, fetcher, undefined, environments);
+      const result = await sender.send(makePush("update", "ab", attributes));
+      expect(result).toEqual({ status: 400, reason: "BadDeviceToken" });
+      expect(tokenIsDead(result)).toBe(true);
+      expect(seen).toHaveLength(2);
+      expect(environments.saved).toBeUndefined();
+    });
+
+    it("tries the other environment only for BadDeviceToken", async () => {
+      const { pem } = await testKey();
+      for (const [status, reason] of [[410, "Unregistered"], [400, "DeviceTokenNotForTopic"], [429, "TooManyRequests"], [500, "InternalServerError"]] as const) {
+        const { seen, fetcher } = apns({ "api.sandbox.push.apple.com": () => new Response(JSON.stringify({ reason }), { status }) });
+        const sender = new APNsPushSender({ keyP8: pem, keyID: "K", teamID: "T", topic: "t", environment: "development" }, fetcher, undefined, memoryEnvironments());
+        expect(await sender.send(makePush("update", "ab", attributes))).toEqual({ status, reason });
+        expect(seen).toEqual(["api.sandbox.push.apple.com"]);
+      }
+    });
   });
 
   describe("the global fetch", () => {

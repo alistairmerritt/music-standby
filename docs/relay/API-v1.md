@@ -251,13 +251,15 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   reminder goes out blind. Headers: `apns-push-type: alert`, `apns-topic:
   com.alistairmerritt.MusicStandBy`, `apns-collapse-id: mac-playing` (each replaces the last),
   `apns-expiration: <now + 10 min>`. Body, with no sound:
-  `{"aps": {"alert": {"title": "Music playing on <Mac name>", "body": "Tap to show on your Lock Screen."}, "thread-id": "mac-playing"}}`.
-  A dead token is forgotten.
+  `{"aps": {"alert": {"title": "Music playing on <Mac name>", "body": "Tap to show on your Lock Screen."}, "thread-id": "mac-playing", "interruption-level": "time-sensitive", "relevance-score": 1}}`.
+  Time Sensitive (since 12 November 2026) so a Focus or a scheduled Summary doesn't hold it
+  back, which in StandBy it otherwise did; the app carries the matching entitlement, and the
+  person can still turn it off per app or per Focus. A dead token is forgotten.
 - **Pushes**, as specified in Apple's *Publishing remote media sessions*:
 
   | | |
   | --- | --- |
-  | Host | `api.sandbox.push.apple.com` (development) or `api.push.apple.com` |
+  | Host | `api.sandbox.push.apple.com` (development) or `api.push.apple.com` (production): `APNS_ENVIRONMENT` first; a `400 BadDeviceToken` is tried once in the other, and the one that delivers is kept for the pairing |
   | Headers | `apns-push-type: nowplaying`, `apns-topic: com.alistairmerritt.MusicStandBy.push-type.nowplaying`, `apns-priority: 10`, `apns-expiration: <now + 30 s>` |
   | Auth | ES256 JWT, `kid` = key id, `iss` = team id, refreshed every 20–60 minutes |
   | `start` | To the push-to-start token. `{"aps":{"event":"start","timestamp":<epoch s>,"attributes":<NowPlayingAttributes>}}` |

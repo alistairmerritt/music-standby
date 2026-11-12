@@ -73,7 +73,7 @@ from `playback.outputs` in `session`.
 | --- | --- | --- |
 | `PUSH_MODE` | `apns` | Sends real pushes with the three secrets below; without them, and with `mock`, it records them instead |
 | `APNS_KEY_P8`, `APNS_KEY_ID`, `APNS_TEAM_ID` | — | Secrets (`wrangler secret put`). Never in `wrangler.toml` |
-| `APNS_ENVIRONMENT` | `development` | `production` uses `api.push.apple.com` |
+| `APNS_ENVIRONMENT` | `development` | Where a pairing's pushes go first. A token refused there with `BadDeviceToken` is tried once in the other environment, and the one that delivers is kept for the pairing (see [APNs status](#apns-status)) |
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
 | `APNS_APP_TOPIC` | `APNS_TOPIC` without `.push-type.nowplaying` | Topic of reminder alerts |
 | `REMIND_AFTER_MS` | 1800000 | How long the Mac must not have played before a reminder |
@@ -136,14 +136,27 @@ session or a new token came in meanwhile. 60 tests pass. On the iPhone, with the
 uploading the artwork first and the extension fetching it at once, the artwork showed.
 
 On the evening of 11 November, seek, volume and output selection (contract branch
-`contract/seek-volume`), **not yet deployed**. The relay passes the three value commands
+`contract/seek-volume`). The relay passes the three value commands
 through with their `position`, `level` or `outputID`, refusing a non-numeric value with `400`,
 and copies the Mac's `volume` into push attributes; `playback.outputs` reaches the phone in
 `GET /v1/session` as the Mac sent it. 61 tests pass, and the local harness with `--playback`
 38/38 against the real Music: seek to 30 s, volume 1 → 0.3 → 1, an unknown output refused,
-the current output re-selected. The deployment before this one already forwards the commands
-(it checks only `id` and `kind`); what it lacks is `volume` in pushes, so the Lock Screen's
-slider waits for `npm run deploy`.
+the current output re-selected. Deployed early on 12 November as version `c8c0ac42`. From the
+real iPhone that morning, Control Centre's scrubber moved Music 14 s → 124 s, its volume
+slider showed and set Music's volume, and the app's Play To picker switched to a HomePod and
+back (see `docs/ios/STATUS.md` on `feature/ios`).
+
+Then the reminder became Time Sensitive (version `eeae1bd9`, 12 November): it carries
+`interruption-level: time-sensitive` and `relevance-score: 1`, still with no sound. As an
+ordinary alert, a Focus held it back, and StandBy usually runs under a Work or Sleep Focus, so
+it never appeared there. 61 tests pass. Not yet seen arriving in StandBy, which needs a
+30-minute break in playback.
+
+Later on 12 November, each pairing finds its own APNs environment (see
+[APNs status](#apns-status)), so TestFlight builds, whose tokens are production ones, get
+their pushes from the same relay as builds from Xcode. 65 tests pass, and the local harness
+21/21. **Not yet deployed.** Until it is, a TestFlight build's tokens are sent to the
+sandbox, refused with `BadDeviceToken` and forgotten.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
@@ -165,11 +178,19 @@ npx wrangler deploy
 
 ## APNs status
 
-- **Live since 11 November.** `APNsPushSender` sends `start`, `update` and `end` pushes to the
-  sandbox (`APNS_ENVIRONMENT=development`, for Xcode-signed builds). The provider token is
+- **Live since 11 November.** `APNsPushSender` sends `start`, `update` and `end` pushes, and
+  reminders. The provider token is
   stored in the pairing's Durable Object and reused for 30 minutes, so an evicted object
   doesn't sign a new one; APNs' `ExpiredProviderToken` drops it.
-- **Tokens APNs rejects are forgotten.** A start push to a token from an older build got
+- **Each pairing finds its own environment (12 November).** Builds from Xcode get sandbox
+  tokens; TestFlight and App Store builds get production ones, and a token doesn't say which.
+  Pushes go first to `APNS_ENVIRONMENT`. APNs answers `400 BadDeviceToken` to a token sent to
+  the wrong environment, so that answer is tried once in the other one; if it's delivered
+  there, that environment is stored with the pairing (`apnsEnvironment`) and used from then
+  on. A phone that moves between a development build and TestFlight costs one extra request.
+  The same provider token works in both.
+- **Tokens APNs rejects are forgotten**: `410`, `DeviceTokenNotForTopic`, or `BadDeviceToken`
+  from both environments. A start push to a token from an older build got
   `400 BadDeviceToken`, and the relay dropped it; the phone then registered fresh tokens.
 - **Locally, `workerd` can't reach APNs**: it has no HTTP/2 client. `npm run dev` and the
   tests have no secrets, so they record pushes (`/v1/dev/pushes`) instead.
