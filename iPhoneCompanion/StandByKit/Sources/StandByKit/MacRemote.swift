@@ -91,21 +91,6 @@ public final class MacRemote {
         try await run(.setVolume(min(max(level, 0), 1), issuedAt: now()))
     }
 
-    /// Where the Mac can play to, from its last state.
-    public func outputs() async throws -> [AudioOutput] {
-        try await current().playback?.outputs ?? []
-    }
-
-    /// Plays to this output alone. Music answers before the switch is
-    /// complete, and the output shows as selected a few seconds later.
-    @discardableResult
-    public func playTo(_ id: String) async throws -> AudioOutput {
-        guard let output = try await outputs().first(where: { $0.id == id }) else { throw MacRemoteError.outputNotFound }
-        guard output.isAvailable else { throw MacRemoteError.outputUnavailable(output.name) }
-        try await run(.selectOutput(id, issuedAt: now()))
-        return output
-    }
-
     /// Continue on iPhone and Continue on Mac from the relay's state. Read
     /// first: with no state, there is nothing to continue.
     public func handover(record: @escaping @MainActor (String) -> Void = { _ in }) -> Handover {
@@ -129,17 +114,11 @@ public final class MacRemote {
 }
 
 public enum MacRemoteError: Error, Equatable, Sendable, LocalizedError {
-    /// The Mac's last state doesn't list that output.
-    case outputNotFound
-    /// Listed, but Music says it can't be used now.
-    case outputUnavailable(String)
     /// A jump to a time the song doesn't reach. Carries the song's length.
     case pastTheEnd(TimeInterval)
 
     public var errorDescription: String? {
         switch self {
-        case .outputNotFound: "Your Mac can’t see that speaker right now."
-        case .outputUnavailable(let name): "\(name) isn’t available right now."
         case .pastTheEnd(let duration):
             "The song on your Mac is only \(Duration.seconds(duration.rounded(.down)).formatted(.time(pattern: .minuteSecond)))."
         }

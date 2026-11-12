@@ -8,7 +8,9 @@ Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at 
 
 ## Shortcuts actions, 12 November 2026 (evening)
 
-Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Shortcuts/`. Ten of them are ready-made App Shortcuts (`SecondChairShortcuts`). With no setup, these appear in the Shortcuts app under Second Chair and in Spotlight, can be put on the Action button, and answer to Siri phrases such as "Pause Second Chair" or "Next song in Second Chair". All twelve can be used in your own shortcuts and automations.
+Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Shortcuts/`: eleven in all. Ten of them are ready-made App Shortcuts (`SecondChairShortcuts`); Jump to Time is an action only. With no setup, these appear in the Shortcuts app under Second Chair and in Spotlight, can be put on the Action button, and answer to Siri phrases such as "Pause Second Chair" or "Next song in Second Chair". All of them can be used in your own shortcuts and automations.
+
+**Play To was removed on 12 November (evening)**, from the Shortcuts actions and from the app (the picker under the volume slider). Music on the Mac can't switch to some speakers at all: tried with AppleScript alone, with no Second Chair code involved, the switch to the Bedroom HomePod timed out after 20 s and the MacBook stayed selected, and Music refuses the Kitchen HomePod with -15014. Alistair found Play To to the Bedroom HomePod failed every time. The protocol (`selectOutput`, `playback.outputs`), the Mac and the relay keep their support, and so does `AppModel.selectOutput`; nothing on the phone sends it now. Its free App Shortcut slot went to Stop Showing.
 
 | Action | Runs | Does |
 | --- | --- | --- |
@@ -17,17 +19,16 @@ Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Sho
 | Next Song on Mac, Previous Song on Mac | in the background | `next` / `previous` |
 | Jump to Time on Mac *(action only)* | in the background | `seek`, in seconds (90 is 1:30); refused past the end of the song |
 | Set Volume on Mac | in the background | `setVolume`, 0–100: **Music's own volume**, as the app's slider |
-| Play To | in the background | `selectOutput`; the speaker is picked from the Mac's `outputs` (`MacSpeaker` entity, searchable by name). Refuses a speaker the Mac doesn't list or marks unavailable |
 | Continue on iPhone | in the background, opening the app if it must | The app's steps (`Handover`). If Apple Music here doesn't start within 6 s, it asks to open the app and tries again (`supportedModes` `.background` + `.foreground(.dynamic)`). Also opens the app first if Apple Music access hasn't been asked for yet |
 | Continue on Mac | in the background | The app's steps |
 | Show in Now Playing | opens the app | `AppModel.activateNowPlaying()`: only an app on screen can claim the Lock Screen |
-| Stop Showing *(action only)* | in the background | `AppModel.stopNowPlaying()`, which now first picks up a session the system kept from an earlier run (`RemoteSessionControlling.adoptExisting()`), since a fresh background launch holds none |
+| Stop Showing | in the background | `AppModel.stopNowPlaying()`, which now first picks up a session the system kept from an earlier run (`RemoteSessionControlling.adoptExisting()`), since a fresh background launch holds none |
 
 **How the background actions reach the Mac:** `MacRemote` (StandByKit), the same route as the Now Playing extension. It loads the pairing's credential from the shared Keychain, reads `GET /v1/session` once, and sends under the session the relay names. If that session changed in between, it reads again and retries once. It uses a fresh connection per request and doesn't touch the app's transport loop or its state. Before it sends, it checks the relay's state: with the Mac disconnected or no session, nothing is sent and the action says why. Commands still need a relay session, so as on the Lock Screen nothing can be controlled before Music has played since pairing, or after the phone dismissed the session for that listening session. Errors are reworded for Shortcuts and Siri (`ShortcutError`).
 
 **Continue Listening moved into `Handover`** (StandByKit) so the app and the actions share one copy. `AppModel` passes in its live state and transport; an action passes in `MacRemote`'s read. No behaviour change: the existing Continue tests pass unchanged.
 
-**All twelve tried on the iPhone 15 Pro on 12 November (evening)**, development build. Each was run from its tile in the Shortcuts app (Library → Second Chair), driven by the XCUITest driver, with Music's own volume on the Mac at 0 and the phone's media volume at 0 so nothing was heard. Jump to Time and Stop Showing aren't tiles, so a test build swapped them in for Play and Pause.
+**All twelve (Play To included) tried on the iPhone 15 Pro on 12 November (evening)**, development build. Each was run from its tile in the Shortcuts app (Library → Second Chair), driven by the XCUITest driver, with Music's own volume on the Mac at 0 and the phone's media volume at 0 so nothing was heard. Jump to Time and Stop Showing aren't tiles, so a test build swapped them in for Play and Pause.
 
 | Action | On the phone | On the Mac |
 | --- | --- | --- |
@@ -53,7 +54,7 @@ Three more controls, built end to end and **tried on the iPhone on 12 November**
 | --- | --- | --- | --- |
 | Drag the progress bar to a position | Lock Screen, StandBy, Control Centre, the app | `MediaCommand.seekToPosition` → `seek` with `position` | Logic tests; Mac end by hand and by harness |
 | Volume slider | Lock Screen, StandBy, Control Centre, the app | `MediaDevice.Capability.absoluteVolume` → `setVolume` with `level`; sets **Music's own volume**, not the Mac's | Same |
-| Choose where the Mac plays (HomePod, Apple TV, AirPods…) | **The app only**: a "Play To" picker | `selectOutput` with an `outputID` from `playback.outputs` | Same |
+| Choose where the Mac plays (HomePod, Apple TV, AirPods…) | **The app only**: a "Play To" picker. **Removed 12 November**, see Shortcuts actions above | `selectOutput` with an `outputID` from `playback.outputs` | Same |
 
 Why output switching is in the app and not on the Lock Screen: the NowPlaying framework's
 `devices` is a display list with volume capabilities and nothing else. There is no callback
@@ -190,7 +191,7 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 - Seek and volume from the StandBy screen and the locked Lock Screen. The XCUITest driver can't see either, so these are by hand.
 - A finger, rather than XCUITest's drag, ending a drag on the app's progress bar.
 - HTTPS and Keychain without USB, and over cellular.
-- The Shortcuts actions from Siri, the Action button and a locked phone (all twelve work from the Shortcuts app).
+- The Shortcuts actions from Siri, the Action button and a locked phone (all work from the Shortcuts app).
 
 ## Passes automated tests
 

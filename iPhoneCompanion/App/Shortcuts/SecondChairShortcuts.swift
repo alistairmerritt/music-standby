@@ -2,8 +2,7 @@ import AppIntents
 
 /// The ready-made shortcuts: in the Shortcuts app under Second Chair, in
 /// Spotlight, for the Action button, and for Siri by these phrases, with no
-/// setup. iOS allows ten. Jump to Time and Stop Showing are actions only, for
-/// building your own.
+/// setup. iOS allows ten. Jump to Time is an action only, for building your own.
 struct SecondChairShortcuts: AppShortcutsProvider {
     static let shortcutTileColor: ShortcutTileColor = .grayBlue
 
@@ -32,10 +31,6 @@ struct SecondChairShortcuts: AppShortcutsProvider {
             "Set the volume in \(.applicationName)",
             "Change the volume in \(.applicationName)",
         ], shortTitle: "Set Volume", systemImageName: "speaker.wave.2.fill")
-        AppShortcut(intent: PlayToSpeakerIntent(), phrases: [
-            "Play to a speaker in \(.applicationName)",
-            "Change speaker in \(.applicationName)",
-        ], shortTitle: "Play To", systemImageName: "airplayaudio")
         AppShortcut(intent: ContinueOnIPhoneIntent(), phrases: [
             "Continue on iPhone with \(.applicationName)",
             "Move the music to my iPhone with \(.applicationName)",
@@ -48,5 +43,9 @@ struct SecondChairShortcuts: AppShortcutsProvider {
             "Show \(.applicationName) on the Lock Screen",
             "Show \(.applicationName) in Now Playing",
         ], shortTitle: "Show in Now Playing", systemImageName: "rectangle.on.rectangle")
+        AppShortcut(intent: StopShowingIntent(), phrases: [
+            "Stop showing \(.applicationName)",
+            "Hide \(.applicationName) from the Lock Screen",
+        ], shortTitle: "Stop Showing", systemImageName: "eye.slash")
     }
 }

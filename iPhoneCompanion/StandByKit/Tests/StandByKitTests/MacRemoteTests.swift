@@ -77,22 +77,6 @@ import Testing
         #expect(MacRemoteError.pastTheEnd(200.7).errorDescription == "The song on your Mac is only 3:20.")
     }
 
-    @Test func playsToAListedAvailableSpeakerOnly() async throws {
-        var playback = message()
-        playback.outputs = [
-            AudioOutput(id: "mac", name: "MacBook Pro Speakers", kind: .computer, isSelected: true),
-            AudioOutput(id: "aa:bb", name: "Living Room", kind: .homePod, isSelected: false),
-            AudioOutput(id: "name:Kitchen", name: "Kitchen", kind: .homePod, isSelected: false, isAvailable: false),
-        ]
-        let relay = FakeRelay(state(playback: playback))
-        let remote = MacRemote(client: relay)
-        #expect(try await remote.outputs().map(\.name) == ["MacBook Pro Speakers", "Living Room", "Kitchen"])
-        #expect(try await remote.playTo("aa:bb").name == "Living Room")
-        await #expect(throws: MacRemoteError.outputUnavailable("Kitchen")) { try await remote.playTo("name:Kitchen") }
-        await #expect(throws: MacRemoteError.outputNotFound) { try await remote.playTo("cc:dd") }
-        #expect(await relay.sent.map(\.command.outputID) == ["aa:bb"])
-    }
-
     @Test func continuesOnThePhoneFromTheRelaysStateAndPausesTheMac() async throws {
         var song = track()
         song.catalogID = "1102360418"

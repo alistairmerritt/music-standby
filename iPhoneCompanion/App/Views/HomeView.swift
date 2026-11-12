@@ -27,11 +27,6 @@ struct HomeView: View {
                             Task { await model.setVolume(level) }
                         }
                     }
-                    if !model.outputs.isEmpty {
-                        OutputPicker(outputs: model.outputs) { id in
-                            Task { await model.selectOutput(id) }
-                        }
-                    }
                 } else {
                     Text("Nothing is playing on your Mac.")
                         .foregroundStyle(.secondary)
@@ -353,41 +348,6 @@ private struct VolumeRow: View {
             Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
         }
         .accessibilityLabel("Volume on your Mac")
-    }
-}
-
-/// Where the Mac plays to. Choosing one sends Music there alone.
-private struct OutputPicker: View {
-    let outputs: [AudioOutput]
-    let onSelect: (String) -> Void
-
-    private var selectedID: String { outputs.first { $0.isSelected }?.id ?? "" }
-
-    var body: some View {
-        Picker("Play To", selection: Binding(get: { selectedID }, set: { id in
-            if id != selectedID, !id.isEmpty { onSelect(id) }
-        })) {
-            ForEach(outputs) { output in
-                Label(output.name, systemImage: symbol(for: output.kind))
-                    .tag(output.id)
-                    .disabled(!output.isAvailable)
-            }
-        }
-    }
-
-    private func symbol(for kind: AudioOutput.Kind) -> String { kind.symbolName }
-}
-
-extension AudioOutput.Kind {
-    /// Also the Shortcuts speaker picker's.
-    var symbolName: String {
-        switch self {
-        case .computer: "laptopcomputer"
-        case .homePod: "homepod.fill"
-        case .appleTV, .tv: "appletv.fill"
-        case .bluetooth: "headphones"
-        default: "airplayaudio"
-        }
     }
 }
 
