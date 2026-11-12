@@ -18,6 +18,14 @@ public protocol RemoteSessionControlling: AnyObject {
     func deactivate() async
     func requestPrimary() async
     func observePushToStartTokens(registrar: any PushTokenRegistrar) async
+    /// Takes hold of a session the system kept from an earlier run of the
+    /// app, without changing it, so it can be ended. Does nothing while a
+    /// session is held.
+    func adoptExisting() async
+}
+
+extension RemoteSessionControlling {
+    public func adoptExisting() async {}
 }
 
 /// When a Now Playing session should end.

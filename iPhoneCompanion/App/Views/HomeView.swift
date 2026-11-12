@@ -375,8 +375,13 @@ private struct OutputPicker: View {
         }
     }
 
-    private func symbol(for kind: AudioOutput.Kind) -> String {
-        switch kind {
+    private func symbol(for kind: AudioOutput.Kind) -> String { kind.symbolName }
+}
+
+extension AudioOutput.Kind {
+    /// Also the Shortcuts speaker picker's.
+    var symbolName: String {
+        switch self {
         case .computer: "laptopcomputer"
         case .homePod: "homepod.fill"
         case .appleTV, .tv: "appletv.fill"

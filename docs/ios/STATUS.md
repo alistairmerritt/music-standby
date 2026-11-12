@@ -1,10 +1,35 @@
 # iOS status
 
-Last updated 12 November 2026, branch `feature/ios`.
+Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at db3a403).
 
 **Renamed to Second Chair on 11 November 2026.** Only the names people see changed (Home Screen, screens, notifications); bundle identifiers, App IDs, the push topic and the Keychain group keep `MusicStandBy`. Entries below that predate the rename use the old name.
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
+
+## Shortcuts actions, 12 November 2026 (evening)
+
+Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Shortcuts/`. Ten of them are ready-made App Shortcuts (`SecondChairShortcuts`). With no setup, these appear in the Shortcuts app under Second Chair and in Spotlight, can be put on the Action button, and answer to Siri phrases such as "Pause Second Chair" or "Next song in Second Chair". All twelve can be used in your own shortcuts and automations.
+
+| Action | Runs | Does |
+| --- | --- | --- |
+| Play or Pause on Mac | in the background | Pauses a playing Mac, plays a paused one (from the relay's state) |
+| Play on Mac, Pause on Mac | in the background | `play` / `pause` |
+| Next Song on Mac, Previous Song on Mac | in the background | `next` / `previous` |
+| Jump to Time on Mac *(action only)* | in the background | `seek` to a duration, such as 2 min |
+| Set Volume on Mac | in the background | `setVolume`, 0–100: **Music's own volume**, as the app's slider |
+| Play To | in the background | `selectOutput`; the speaker is picked from the Mac's `outputs` (`MacSpeaker` entity, searchable by name). Refuses a speaker the Mac doesn't list or marks unavailable |
+| Continue on iPhone | in the background, opening the app if it must | The app's steps (`Handover`). If Apple Music here doesn't start within 6 s, it asks to open the app and tries again (`supportedModes` `.background` + `.foreground(.dynamic)`). Also opens the app first if Apple Music access hasn't been asked for yet |
+| Continue on Mac | in the background | The app's steps |
+| Show in Now Playing | opens the app | `AppModel.activateNowPlaying()`: only an app on screen can claim the Lock Screen |
+| Stop Showing *(action only)* | in the background | `AppModel.stopNowPlaying()`, which now first picks up a session the system kept from an earlier run (`RemoteSessionControlling.adoptExisting()`), since a fresh background launch holds none |
+
+**How the background actions reach the Mac:** `MacRemote` (StandByKit), the same route as the Now Playing extension. It loads the pairing's credential from the shared Keychain, reads `GET /v1/session` once, and sends under the session the relay names. If that session changed in between, it reads again and retries once. It uses a fresh connection per request and doesn't touch the app's transport loop or its state. Before it sends, it checks the relay's state: with the Mac disconnected or no session, nothing is sent and the action says why. Commands still need a relay session, so as on the Lock Screen nothing can be controlled before Music has played since pairing, or after the phone dismissed the session for that listening session. Errors are reworded for Shortcuts and Siri (`ShortcutError`).
+
+**Continue Listening moved into `Handover`** (StandByKit) so the app and the actions share one copy. `AppModel` passes in its live state and transport; an action passes in `MacRemote`'s read. No behaviour change: the existing Continue tests pass unchanged.
+
+Built for the device and installed on the iPhone 15 Pro (development build). The extracted metadata lists all 12 actions, the 10 App Shortcuts and the speaker entity. 208 StandByKit tests pass (11 new: `MacRemoteTests`, `StopShowingFromAShortcutTests`). **Not yet run on the iPhone**: the XCUITest driver couldn't start ("Timed out while enabling automation mode").
+
+Open: whether Apple Music starts from a background action at all (the same question as the CarPlay probe). If it doesn't, Continue on iPhone opens the app and works from there. Whether `RemoteMediaSession.sessions()` and `end()` work from a background launch (Stop Showing) is also unknown.
 
 ## Seek, volume and output, 11 November 2026 (evening)
 
@@ -103,6 +128,7 @@ The extension logs each request for the image ("asked for at WxH, cached: …", 
 | App (intro, pairing, status, controls, diagnostics) | `iPhoneCompanion/App/` |
 | Remote media session extension | `iPhoneCompanion/NowPlayingExtension/` |
 | Shared logic, `AppModel`, session lifecycle | `iPhoneCompanion/StandByKit/` |
+| Shortcuts actions and App Shortcuts | `iPhoneCompanion/App/Shortcuts/`; relay route `StandByKit/…/MacRemote.swift` |
 | Relay client, credentials, command path | `StandByKit/Sources/StandByKit/Relay/` |
 | Mock transport for development | `StandByKit/Sources/StandByKit/Mock/` |
 | Wire protocol | `Shared/StandByProtocol/`, merged from `main` |
@@ -150,10 +176,11 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 - Seek and volume from the StandBy screen and the locked Lock Screen. The XCUITest driver can't see either, so these are by hand.
 - A finger, rather than XCUITest's drag, ending a drag on the app's progress bar.
 - HTTPS and Keychain without USB, and over cellular.
+- Every Shortcuts action, from the Shortcuts app, Siri and the Action button, with the app not running.
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **186 tests**, macOS, Xcode 27.2 (run again on 12 November). `Shared/StandByProtocol`: 59 tests on this branch. `feature/macos` has 60: its copy also has the song-ID change from 11 November (`pid:<id>-<12 hex>`), which the phone doesn't need, since it only compares IDs for equality. The extension's artwork prefetch has no automated test.
+`swift test` from `iPhoneCompanion/StandByKit`: **208 tests**, macOS, Xcode 27.2 (run again on 12 November, evening). `Shared/StandByProtocol`: 59 tests on this branch. `feature/macos` has 60: its copy also has the song-ID change from 11 November (`pid:<id>-<12 hex>`), which the phone doesn't need, since it only compares IDs for equality. The extension's artwork prefetch has no automated test.
 
 | Area | Covers |
 | --- | --- |

@@ -95,6 +95,16 @@ final class FakeSessionController: RemoteSessionControlling {
 
     func requestPrimary() async { primaryRequests += 1 }
     func observePushToStartTokens(registrar: any PushTokenRegistrar) async {}
+
+    /// A session the system kept from an earlier run of the app.
+    var leftoverSessionID: String?
+
+    func adoptExisting() async {
+        guard !isActive, let leftoverSessionID else { return }
+        isActive = true
+        sessionID = leftoverSessionID
+        self.leftoverSessionID = nil
+    }
 }
 
 /// Holds each `sleep` until the test releases it.

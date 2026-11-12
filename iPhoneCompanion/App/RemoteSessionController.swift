@@ -37,6 +37,14 @@ final class RemoteSessionController: RemoteSessionControlling {
         await requestPrimary()
     }
 
+    /// The system keeps a session after the app quits. A Shortcuts action
+    /// that stops showing runs in a fresh launch that hasn't picked it up,
+    /// because that happens only once the Mac's state arrives.
+    func adoptExisting() async {
+        guard session == nil, let existing = try? await Session.sessions().first else { return }
+        session = existing
+    }
+
     func publish(_ attributes: MacPlaybackAttributes) async {
         guard let session else { return }
         do {

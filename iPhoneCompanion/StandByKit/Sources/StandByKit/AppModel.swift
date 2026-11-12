@@ -200,6 +200,9 @@ public final class AppModel {
 
     public func stopNowPlaying() async {
         setNowPlayingEnabled(false)
+        // A session from an earlier run that this one hasn't picked up yet,
+        // as when a Shortcuts action stops showing without opening the app.
+        if !sessionController.isActive { await sessionController.adoptExisting() }
         await endSession(.userStopped)
     }
 
@@ -222,106 +225,33 @@ public final class AppModel {
         await send(.selectOutput(id, issuedAt: now()))
     }
 
-    /// Continue on iPhone: starts the Mac's song in this phone's Apple Music
-    /// at the Mac's position, with the Mac's Up Next after it, and once it's
-    /// playing here, pauses the Mac. Until then the Mac keeps playing, so a
-    /// failure costs nothing.
+    /// Continue on iPhone, from the Mac's live state. See `Handover`.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
-        guard let message = latestMessage, let catalogID = message.track?.catalogID else { return .unavailable }
-        guard await player.requestAccess() else {
-            record("Continue on iPhone: no access to Apple Music")
-            return .notAllowed
-        }
-        let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
-        let started = await player.play(catalogIDs: queue, position: { [weak self] in
-            guard let self, let latest = self.latestMessage, latest.track?.catalogID == catalogID else { return message.elapsed(at: Date()) }
-            return latest.elapsed(at: self.now())
-        }, timeout: timeout)
-        guard started else {
-            record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")
-            return .didNotStart
-        }
-        guard latestMessage?.state == .playing else {
-            record("Continue on iPhone: playing here; the Mac was already paused")
-            return .continued
-        }
-        // Once more after a second if the first try fails: the Mac can be busy
-        // just then, as when headphones follow the music to the phone.
-        for attempt in 1...2 {
-            do {
-                let ack = try await transport.send(RemoteCommand(kind: .pause, issuedAt: now()))
-                if ack.accepted {
-                    record("Continue on iPhone: playing here with \(queue.count - 1) songs after it; the Mac is paused")
-                    return .continued
-                }
-                record("Continue on iPhone: the Mac refused to pause (\(ack.error?.code.rawValue ?? "no reason")), try \(attempt)")
-            } catch {
-                record("Continue on iPhone: couldn't pause the Mac (\(error.localizedDescription)), try \(attempt)")
-            }
-            if attempt == 1 { try? await sleep(1) }
-        }
-        return .macStillPlaying
+        await handover.continueOnPhone(with: player, timeout: timeout)
     }
 
     /// How many songs ahead in the Mac's queue this catalogue ID is: 0 for
     /// the Mac's current song, 1 for the first of its Up Next. Nil when the
     /// Mac's last state doesn't have it.
     public func macQueuePosition(of catalogID: String?) -> Int? {
-        guard let catalogID, let message = latestMessage else { return nil }
-        let queue = [message.track?.catalogID] + (message.upNext ?? []).map(\.catalogID)
-        return queue.firstIndex(of: catalogID)
+        handover.macQueuePosition(of: catalogID)
     }
 
-    /// Send back to Mac: the reverse of Continue on iPhone, for a song in the
-    /// Mac's queue (the round trip). The Mac skips ahead to it, seeks to where
-    /// the phone is and plays; once its state shows that song playing, Apple
-    /// Music here pauses. Only existing commands, so it works for songs
-    /// outside the Mac's library too: it's Music's own queue.
+    /// Continue on Mac, from the Mac's live state. See `Handover`.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
-        // Playing or paused here: a paused song is still the phone's to hand on.
-        guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
-        guard let ahead = macQueuePosition(of: catalogID) else {
-            record("Send back to Mac: the song isn't in the Mac's queue")
-            return .notInMacQueue
-        }
-        /// False only when the Mac says no. A reply that doesn't come in time
-        /// isn't a no: the relay waits 1.2 s for the Mac, Music can take
-        /// longer (as while headphones move back to the Mac), and the step
-        /// usually happens anyway. The Mac's state decides below.
-        func step(_ command: RemoteCommand) async -> Bool {
-            do {
-                let ack = try await transport.send(command)
-                if !ack.accepted { record("Send back to Mac: \(command.kind.rawValue) refused (\(ack.error?.code.rawValue ?? "no reason"))") }
-                return ack.accepted
-            } catch TransportError.commandRejected(let code) {
-                record("Send back to Mac: \(command.kind.rawValue) refused (\(code.rawValue))")
-                return false
-            } catch {
-                record("Send back to Mac: no answer to \(command.kind.rawValue) (\(error.localizedDescription)); carrying on")
-                return true
-            }
-        }
-        for _ in 0..<ahead {
-            guard await step(RemoteCommand(kind: .next, issuedAt: now())) else { return .macRefused }
-        }
-        // Where the phone is now, plus about the time the seek takes to land.
-        let position = (player.nowPlaying()?.position ?? here.position) + 0.3
-        guard await step(.seek(to: position, issuedAt: now())), await step(RemoteCommand(kind: .play, issuedAt: now())) else {
-            return .macRefused
-        }
-        let deadline = now().addingTimeInterval(timeout)
-        while now() < deadline {
-            await transport.refreshState()
-            if let latest = latestMessage, latest.state == .playing, latest.track?.catalogID == catalogID {
-                // Headphones following the music to the Mac may have paused it already.
-                if player.nowPlaying()?.isPlaying == true { player.pause() }
-                record("Send back to Mac: playing on the Mac \(ahead) song\(ahead == 1 ? "" : "s") on; Apple Music here is paused")
-                return .sentBack
-            }
-            try? await sleep(0.5)
-        }
-        record("Send back to Mac: the Mac didn't start the song in \(Int(timeout)) s")
-        return .macDidNotStart
+        await handover.sendBackToMac(with: player, timeout: timeout)
+    }
+
+    /// The handover steps, reading the Mac through this model's transport.
+    private var handover: Handover {
+        Handover(
+            latest: { [weak self] in self?.latestMessage },
+            refresh: { [transport] in await transport.refreshState() },
+            send: { [transport] in try await transport.send($0) },
+            record: { [weak self] in self?.record($0) },
+            now: now,
+            sleep: sleep
+        )
     }
 
     public func send(_ command: RemoteCommand) async {

@@ -1,3 +1,4 @@
+import AppIntents
 import StandByKit
 import UIKit
 import UserNotifications
@@ -11,6 +12,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Show in Now Playing and Stop Showing act on the app's own model.
+        AppDependencyManager.shared.add(dependency: self.model)
         reminders.refresh()
         return true
     }
