@@ -429,6 +429,31 @@ describe("commands", () => {
   });
 });
 
+describe("catalogue ID and Up Next", () => {
+  it("reach the phone in the session as the Mac sent them, and stay out of pushes", async () => {
+    const { mac, phoneToken } = await playingSetup();
+    const before = (await pushes(phoneToken)).length;
+    const state = playback({
+      track: { id: "pid:71F8D70086B0C8D9-5242a41bbfa0", title: "Late Night Tales", artist: "Jon Hopkins", album: "Late Night Tales", duration: 4337.5, catalogID: "1102360418" },
+      upNext: [
+        { catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312.3 },
+        { title: "Uploaded demo", artist: "Me", duration: 0 },
+      ],
+    });
+    mac.send({ type: "state", message: state });
+    const s = await waitForRevision(phoneToken, state.revision);
+    expect(s.playback.track.catalogID).toBe("1102360418");
+    expect(s.playback.upNext).toEqual(state.upNext);
+    const sent = (await pushes(phoneToken)).slice(before);
+    expect(sent.length).toBeGreaterThan(0);
+    for (const push of sent) {
+      expect(push.payload.aps.attributes.track.catalogID).toBeUndefined();
+      expect(push.payload.aps.attributes.upNext).toBeUndefined();
+      expect(JSON.stringify(push.payload).length).toBeLessThan(4096);
+    }
+  });
+});
+
 describe("artwork follow-up", () => {
   it("pushes an update that brings new artwork again, once", async () => {
     const { mac, phoneToken } = await playingSetup();

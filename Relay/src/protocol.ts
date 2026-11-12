@@ -25,6 +25,17 @@ export interface TrackMetadata {
   album: string;
   duration: number;
   artworkID?: string;
+  /** Apple Music catalogue ID, when the Mac can read it. Added 12 November 2026. Not pushed. */
+  catalogID?: string;
+}
+
+/** A song in Up Next (Shared/StandByProtocol/Track.swift). */
+export interface QueuedTrack {
+  catalogID?: string;
+  title: string;
+  artist: string;
+  album?: string;
+  duration: number;
 }
 
 /** One place Music can play to (Shared/StandByProtocol/Output.swift). */
@@ -50,6 +61,8 @@ export interface PlaybackMessage {
   /** Music's own output volume, 0 to 1. Added 11 November 2026. */
   volume?: number;
   outputs?: AudioOutput[];
+  /** Up Next, at most 25. Added 12 November 2026. Reaches the phone in GET /v1/session; never pushed. */
+  upNext?: QueuedTrack[];
 }
 
 export interface ProtocolError {

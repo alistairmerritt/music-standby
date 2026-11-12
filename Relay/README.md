@@ -180,6 +180,12 @@ gone; the artwork showed. The follow-up pushes themselves can't be seen in `wran
 (neither kind has ever appeared there): what a Durable Object logs from a timer after its
 response has gone isn't streamed.
 
+Also on 12 November, Continue on iPhone (contract: `track.catalogID` and `upNext` on the
+Mac's state). Nothing to change here: the relay stores the Mac's state as sent and returns it
+whole in `GET /v1/session`, and builds pushes from chosen fields only, so the catalogue ID and
+Up Next reach the phone and stay out of pushes. A test pins both down (69 tests). No deploy
+was needed.
+
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
 ```bash
