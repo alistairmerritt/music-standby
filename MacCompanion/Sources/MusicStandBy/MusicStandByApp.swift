@@ -11,9 +11,9 @@ struct MusicStandByApp: App {
     @State private var launchAtLogin = LaunchAtLogin()
 
     init() {
-        // The relay is opt-in until one is deployed:
-        //   defaults write com.alistairmerritt.MusicStandBy.Mac relayURL http://127.0.0.1:8787
-        let relay = UserDefaults.standard.string(forKey: "relayURL").flatMap(URL.init(string:)).map {
+        // The build's own relay (MSBRelayHost in Info.plist), unless `relayURL`
+        // in defaults names another; see RelayEndpoint. Neither: the mock.
+        let relay = RelayEndpoint.current().map {
             RelayAccount(baseURL: $0, store: KeychainCredentialStore(account: $0.absoluteString))
         }
         let transport: any CompanionTransport = relay.map { RelayTransport(client: $0.client, token: $0.token) } ?? MockRelayTransport()

@@ -1,6 +1,6 @@
 # Mac companion — status
 
-11 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
+12 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
 SDK), Music.app 1.7.
 
 **Renamed to Second Chair on 11 November 2026.** The app is now `build/Second Chair.app`, and its menu and permission text say Second Chair. Its bundle identifier (`com.alistairmerritt.MusicStandBy.Mac`), its `defaults` domain and its Keychain items keep the old name, so approvals and the pairing carry over. Older entries use the old name.
@@ -13,13 +13,39 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 114 tests in 12 suites pass (`scripts/test.sh`, 11 November evening) |
-| Shared protocol | 56 tests in 10 suites pass (`scripts/test.sh`, 10 November); builds for iOS with `xcodebuild` |
+| Unit tests | 119 tests in 13 suites pass (`scripts/test.sh`, 12 November) |
+| Shared protocol | 60 tests in 10 suites pass (`scripts/test.sh`, 12 November); builds for iOS with `xcodebuild`. This branch's copy has the song-ID change of 11 November (`pid:<id>-<12 hex>`), which `feature/ios` and `feature/relay` don't (59 tests there); neither needs it, since both only compare IDs |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
 | Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. On 10 November it drove real Music from a real iPhone through the deployed relay (below). The menu has never been clicked by hand |
 | Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
+
+## Ready for other people's Macs (12 November 2026)
+
+Two of the three things a TestFlight beta needs from the Mac side.
+
+- **The relay is built in.** `build.sh` writes `MSBRelayHost` into the app's `Info.plist` from
+  `MSB_RELAY_HOST` or `~/.config/second-chair/relay-host` (outside the repository), and the
+  app connects to `https://<host>` unless `relayURL` in its defaults overrides it
+  (`RelayEndpoint`, 5 tests). Before, the relay could only be set by `defaults write`, so a
+  copy on someone else's Mac would have run on the mock. The URL it builds is the same string
+  as the hand-set one, so this Mac's Keychain credential and pairing carry over.
+- **A release script.** `scripts/release.sh` builds optimised, signs with a Developer ID
+  certificate, the hardened runtime and a timestamp, notarises, staples and zips
+  (README, "Release"). **Run end to end on 12 November**: version 0.1.0 (1) was signed with
+  the new Developer ID Application certificate, **accepted** by Apple's notary service
+  (submission `4c47da0f`), stapled, and assessed by Gatekeeper as `accepted,
+  source=Notarized Developer ID`. The release app is built in `build/release`, so the
+  development app's signature, and the approvals tied to it, stay as they were. The zip
+  hasn't been published or tried on another Mac.
+- **The hardened runtime works with Music.** A release-mode build (`MSB_RELEASE=1`, signed
+  `flags=0x10000(runtime)` with the Apple Development identity) was launched in place of the
+  running app while Music was paused. It read Music: its menu-bar icon stayed the note, which
+  turns to the warning triangle on `-1743`, and it uploaded about 119 KB at once, the
+  current song's artwork. So `com.apple.security.automation.apple-events` is what the
+  runtime needs. A command-line tool can't show this: its Apple Events count as the app
+  that launched it, so `msbctl` signed without the entitlement still read Music.
 
 ## Seek, volume and output (11 November 2026, evening)
 

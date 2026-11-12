@@ -41,6 +41,43 @@ With a development identity, Automation and Keychain approvals survive rebuilds.
 signature changes with every build, so macOS asks for both again.
 Launch at Login needs the app in `/Applications`.
 
+**The relay.** `build.sh` writes the relay host into the app's `Info.plist` as `MSBRelayHost`,
+from `MSB_RELAY_HOST` or the first line of `~/.config/second-chair/relay-host`. That file is
+outside every checkout, so the host never enters this public repository, and the script
+doesn't print it. The app uses `https://<host>`. `relayURL` in its defaults still overrides
+it, for a development relay (`defaults write com.alistairmerritt.MusicStandBy.Mac relayURL
+http://127.0.0.1:8787`); with neither, it runs on the built-in mock. See `RelayEndpoint`.
+
+## Release
+
+```bash
+scripts/release.sh --check
+```
+
+```bash
+scripts/release.sh
+```
+
+`release.sh` builds the app optimised (`-O`), signs it with a Developer ID Application
+certificate, the hardened runtime and a secure timestamp, has Apple notarise it, staples the
+ticket and zips it to `build/release/Second-Chair-<version>.zip` for GitHub Releases. It
+uploads and publishes nothing. The release app is built in `build/release`, leaving
+`build/Second Chair.app` alone: macOS ties Automation and Keychain approvals to the
+signature, so a Developer ID copy is a new app to it, and running one asks for both again. `--check` only checks the three things it needs, which are
+set up once:
+
+1. A **Developer ID Application** certificate. Only the team's Account Holder can make one:
+   Xcode → Settings → Accounts → the team → Manage Certificates → + → Developer ID Application.
+2. **notarytool credentials** in the keychain, under the profile name `SecondChair`
+   (`MSB_NOTARY_PROFILE` picks another):
+   `xcrun notarytool store-credentials SecondChair --apple-id <Apple ID> --team-id <team ID>`.
+   It asks for an app-specific password from account.apple.com.
+3. The **relay host**, as above.
+
+The version comes from `CFBundleShortVersionString` in `Resources/Info.plist`; raise it and
+`CFBundleVersion` before each release. The build is arm64 only, which is every Mac that runs
+macOS 27; `LSMinimumSystemVersion` says 14.0, but nothing has run below macOS 27.
+
 ## Artwork
 
 Music's own artwork comes first. Music often has none for streamed songs that aren't in the
