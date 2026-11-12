@@ -29,11 +29,24 @@ or pause the phone, so the relay wakes this app, which runs Continue on Mac
 - **Continue on iPhone's pause** now carries `reason: continue_on_phone`, so the Mac knows to
   offer the button.
 
-213 StandByKit tests pass (5 new in `HandBackResponderTests`). Installed on the iPhone 15 Pro
-(development build): the marked pause reached the real Mac through the deployed relay, which
-passes the field through. **Not yet run:** the wake or the notification, which need the relay
-deployed. iOS delivers background pushes as it sees fit: usually within seconds, later or never
-in Low Power Mode or after the app is swiped away, hence the notification.
+213 StandByKit tests pass (5 new in `HandBackResponderTests`).
+
+**Round trip on the iPhone 15 Pro and the Mac (21:41 and 21:47)**, relay version `c979d7d7`,
+development build, Alistair clicking the Mac's button. Both times the Mac resumed the song the
+phone was on, at the phone's position: the phone had moved on to the next song in the queue
+(Missing Photos is 2:02; the Mac resumed After Dawn at about 0:40, where the phone was).
+
+- **The background push didn't arrive on its own.** Sent at 21:41:14 and 21:46:55, it reached
+  the phone only at 21:41:18.6 and 21:47:01, together with the notification the relay sends
+  after 5 s: iOS held the priority-5 push until the priority-10 one came. Run 1: iOS then
+  launched the app for the push at once and it handed back with no tap (`working` 21:41:19),
+  and removed the notification. Run 2: iOS didn't launch it for the push; the tap on the
+  notification did, 7 s later. Click to music: about 6 s and 17 s.
+- **A Mac paused before Continue on iPhone never offered the button** (Alistair's first try):
+  no pause was sent. Fixed (9e21114): the marked pause goes either way, and Music ignores it.
+
+So in practice the notification does the work; shortening the relay's wait
+(`HAND_BACK_NOTIFY_MS`, 5 s) would make it faster without a new build.
 
 ## Shortcuts actions, 12 November 2026 (evening)
 
