@@ -25,8 +25,11 @@ final class LaunchAtLogin {
             isEnabled = false
             message = nil
         case .notFound:
+            // Also what macOS says for an app it has never registered, even in
+            // Applications (seen 13 Nov 2026), where ticking the box works.
             isEnabled = false
-            message = "Not available for this copy of the app. Move it to Applications first."
+            message = Bundle.main.bundlePath.hasPrefix("/Applications/")
+                ? nil : "Not available for this copy of the app. Move it to Applications first."
         @unknown default:
             isEnabled = false
             message = nil
