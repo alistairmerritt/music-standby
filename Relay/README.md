@@ -173,7 +173,12 @@ again. So the relay now also waits for the download: when the phone downloads th
 of the update it was last pushed, that update goes again a second later, once per artwork
 (`ARTWORK_DOWNLOAD_FOLLOW_UP_MS`). It costs at most one more push per song, and changes
 nothing when the artwork already shows. 68 tests pass (the new one fails without it), and
-the local harness 21/21.
+the local harness 21/21. Deployed as version `92691b85`. On the iPhone, with a song from
+another album: the Mac uploaded its artwork and sent the update naming it at 12:03:48.4,
+and the extension downloaded the image 1.2 s later, after the 0.7 s follow-up would have
+gone; the artwork showed. The follow-up pushes themselves can't be seen in `wrangler tail`
+(neither kind has ever appeared there): what a Durable Object logs from a timer after its
+response has gone isn't streamed.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
