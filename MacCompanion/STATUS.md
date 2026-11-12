@@ -1,6 +1,6 @@
 # Mac companion — status
 
-12 November 2026, branch `feature/macos`. macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
+12 November 2026, branch `feature/macos-hand-back` (off `feature/macos` at 1553014, with `contract/hand-back`). macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
 SDK), Music.app 1.7.
 
 **Renamed to Second Chair on 11 November 2026.** The app is now `build/Second Chair.app`, and its menu and permission text say Second Chair. Its bundle identifier (`com.alistairmerritt.MusicStandBy.Mac`), its `defaults` domain and its Keychain items keep the old name, so approvals and the pairing carry over. Older entries use the old name.
@@ -20,6 +20,39 @@ unit-tested at most.
 | Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. On 10 November it drove real Music from a real iPhone through the deployed relay (below). The menu has never been clicked by hand |
 | Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
+
+## Continue from iPhone (12 November 2026, night)
+
+The reverse of Continue on iPhone, asked for at the Mac. The Mac can't see what Apple Music on
+the phone plays and can't pause it, so it asks the relay to wake the phone's app, which runs its
+own Continue on Mac (docs/relay/API-v1.md §14).
+
+- **When it's offered.** Continue on iPhone's `pause` now carries `reason: continue_on_phone`.
+  Once Music takes it, `Companion.phoneHasMusic` turns on and the menu shows **Continue from
+  iPhone** under the transport controls, until Music *starts* playing here. A change to
+  playing, not any playing read: a read taken just before the pause took effect still said
+  playing and landed 8 ms after it, clearing the marker at once (executed, fixed in 8ba6c67).
+- **The button** sends `hand-back-request` and shows each `hand-back-status` from the relay
+  and the phone: "Asking your iPhone…", "Tap the notification on your iPhone.", "Your iPhone is
+  handing over…", then the music starting here, or why not. No final answer in 45 s:
+  "Your iPhone didn't answer. Try again." Not connected to the relay: "Couldn't reach your
+  iPhone" at once.
+- **A Shortcuts action**, `ContinueFromPhoneIntent`, also an App Shortcut ("Continue from iPhone
+  with Second Chair"): the button, waiting for the answer. The app isn't built by Xcode, so
+  `scripts/build.sh` makes the App Intents metadata the way Xcode does: swiftc writes const
+  values (`-emit-const-values-path`, `-const-gather-protocols-list`), the linker writes its
+  dependency info (`-dependency_info`; without it `appintentsmetadataprocessor` says "no
+  AppIntents.framework dependency found" and writes nothing), then the processor writes
+  `Contents/Resources/Metadata.appintents`. Skipped with the Command Line Tools only.
+- **Logs.** Each step also goes to the system log, subsystem
+  `com.alistairmerritt.MusicStandBy.Mac`, category `hand-back`: steps and statuses only.
+
+**Executed** on this Mac and the iPhone 15 Pro, before the relay was deployed (silent: Music's
+own volume 0 here, the phone's media volume 0): Continue on iPhone from the phone's Shortcuts
+tile → "the iPhone has the music now" in the log, and it stayed; Continue on Mac from the
+phone → "Music started here: Continue from iPhone is over". **Not yet run:** the button or the
+action through the relay, which needs `feature/relay-hand-back` deployed; the Shortcuts action
+showing in the Shortcuts app on the Mac. 143 tests pass (5 new).
 
 ## Continue on iPhone (12 November 2026)
 
