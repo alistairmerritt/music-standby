@@ -84,9 +84,16 @@ if [[ "$destination" == export ]]; then
   }
   check "$unpacked/Payload/MusicStandBy.app" aps-environment production
   check "$unpacked/Payload/MusicStandBy.app" com\\.apple\\.developer\\.usernotifications\\.time-sensitive true
+  # The Lock Screen extension is an ExtensionKit extension, so it lives in
+  # Extensions/, not PlugIns/. Without it nothing shows on the Lock Screen.
+  extension="$unpacked/Payload/MusicStandBy.app/Extensions/MusicStandByNowPlaying.appex"
+  [[ -d "$extension" ]] || fail "the Now Playing extension is missing from the package"
+  codesign --verify --strict "$extension" || fail "the Now Playing extension's signature doesn't verify"
+  codesign -d --entitlements - --xml "$extension" 2>/dev/null | grep -q "group.com.alistairmerritt.MusicStandBy" \
+    || fail "the Now Playing extension has no App Group"
   rm -rf "$unpacked"
   echo "› $ipa"
-  echo "  signed for production pushes, with Time Sensitive notifications"
+  echo "  signed for production pushes, with Time Sensitive notifications and the Now Playing extension"
   echo "  To send it to TestFlight: scripts/archive.sh --upload, or Xcode's Organizer, or Transporter"
 else
   echo "› uploaded build $build_number; it shows in App Store Connect → TestFlight after processing"
