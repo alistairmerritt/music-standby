@@ -1,0 +1,15 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Continue on Studio Mac?",
+      "body": "Tap to play this song on your Mac from where you are."
+    },
+    "thread-id": "hand-back",
+    "interruption-level": "time-sensitive",
+    "relevance-score": 1
+  },
+  "handBack": {
+    "requestID": "3E7A1C5B-9D2F-4A68-B0C4-6E8F1A3B5D7C",
+    "expiresAt": "2026-11-12T10:02:00.000Z"
+  }
+}

@@ -68,6 +68,8 @@ Three kinds, all opaque bearer strings. Clients never parse them.
 | `PUT /v1/tokens/alert` | phone | `{ "token": "<hex>" }` → `204` | §9, reminders on |
 | `DELETE /v1/tokens/alert` | phone | — → `204` | §9, reminders off |
 | `POST /v1/session/end` | phone | `SessionEndRequest` → `204` | Ends the session now |
+| `PUT /v1/tokens/device` | phone | `DeviceTokenRegistration` → `204` | §14. The app's APNs device token |
+| `POST /v1/hand-back/status` | phone | `HandBackStatusReport` → `204` | §14 |
 
 ---
 
@@ -337,3 +339,44 @@ Every value is a judgement call, and the relay can change them without a version
    group, which needs the `keychain-access-groups` entitlement on both targets.
 5. `GET /v1/session` when foregrounded, ending any local session the relay doesn't have.
 6. Accept `artworkID: ""` as "no artwork", and only fetch `artworkURL` from the relay's host.
+
+---
+
+## 14. Continue from iPhone (hand-back)
+
+Added 12 November 2026. The Mac can't see what Apple Music on the phone is playing, and can't
+pause it, so the phone does the work: the relay wakes the phone's app, which runs its own
+Continue on Mac (skip the Mac to the phone's song in the Mac's queue, seek to the phone's
+position, play, then pause the phone). Types in `StandByProtocol/HandBack.swift`.
+
+```
+Mac   → relay  hand-back-request {requestID}
+relay → phone  background push                     relay → Mac  hand-back-status asked
+        …no phone status within 5 s…
+relay → phone  Time Sensitive notification          relay → Mac  hand-back-status notified
+phone → relay  POST /v1/hand-back/status working    relay → Mac  hand-back-status working
+phone → relay  POST /v1/hand-back/status done       relay → Mac  hand-back-status done
+```
+
+- **The device token.** `PUT /v1/tokens/device` with the app's own APNs token, sent whenever the
+  app has one, whatever its reminder setting: a background push needs no notification
+  permission. Without one, the relay answers a request with `unreachable` at once.
+- **The background push.** `apns-push-type: background`, `apns-priority: 5` (Apple allows no
+  higher for it), `apns-topic` the app's bundle id, `apns-expiration` now + 2 minutes. Payload
+  `{"aps":{"content-available":1},"handBack":HandBackRequest}`
+  ([example](../../Shared/StandByProtocol/Examples/apns-hand-back-background.json)). iOS
+  delivers it when it sees fit: usually within seconds, later or never in Low Power Mode, after
+  the person swipes the app away, or after several in an hour. The app ignores one that wakes
+  it after `expiresAt`.
+- **The notification.** If no phone status has arrived 5 s after the background push, the relay
+  sends an alert to the same token: "Continue on <Mac>?", Time Sensitive, `thread-id` and
+  `apns-collapse-id` `hand-back`, with the same `handBack` key
+  ([example](../../Shared/StandByProtocol/Examples/apns-hand-back-alert.json)). A tap hands
+  back however late it comes: the tap is the request. It needs the app's notification
+  permission.
+- **Statuses.** `POST /v1/hand-back/status` with `HandBackStatusReport`; the relay forwards each
+  to the Mac as `hand-back-status`, and any phone status stops the notification. The phone sends
+  `working` as it starts, then one of `done`, `nothing_playing`, `not_in_queue`, `failed`. The
+  relay's own are `asked`, `notified` and `unreachable`. A request is forgotten 2 minutes
+  after it was made; a status for any other request id is accepted and dropped.
+- **Only one at a time.** A new request replaces the one before.

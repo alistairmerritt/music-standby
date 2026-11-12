@@ -142,6 +142,7 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 | `position` | Seconds into the track, for `seek`. Clamped to the track by the Mac |
 | `level` | Music's own output volume, 0 to 1, for `setVolume`. Clamped by the Mac. Not the Mac's system volume |
 | `outputID` | An `AudioOutput.id` from the last state, for `selectOutput`. Music then plays to that device alone |
+| `reason` | New on 12 November 2026, optional, an open set. `continue_on_phone` marks the `pause` Continue on iPhone sends once the song plays on the phone, so the Mac knows the phone has its music ([example](Examples/relay-command-continue-on-phone.json)). A Mac that doesn't know it runs the command as usual |
 
 The three value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,
 or with a non-finite number, the Mac answers `invalid_request`. The result reaches the phone as
@@ -186,6 +187,7 @@ for them; small frame-specific fields sit beside `type`.
 | `artwork` | `artwork`: `ArtworkDescriptor` | [mac-artwork](Examples/mac-artwork.json) |
 | `goodbye` | `reason` | [mac-goodbye](Examples/mac-goodbye.json) |
 | `pair-decision` | `claimID`, `approved` | [mac-pair-decision](Examples/mac-pair-decision.json) |
+| `hand-back-request` | `requestID` (UUID). Continue from iPhone: ask the phone to hand its music back (relay API §14) | [mac-hand-back-request](Examples/mac-hand-back-request.json) |
 | `error` | `error`: `ProtocolError` | |
 
 **Relay → Mac** (`RelayFrame`)
@@ -198,6 +200,7 @@ for them; small frame-specific fields sit beside `type`.
 | `pair-request` | `request`: `PairRequest` | [relay-pair-request](Examples/relay-pair-request.json) |
 | `paired` | `phone`: `DeviceIdentity` | [relay-paired](Examples/relay-paired.json) |
 | `revoked` | `reason` | [relay-revoked](Examples/relay-revoked.json) |
+| `hand-back-status` | `requestID`, `status`: `HandBackStatus`. Progress on a `hand-back-request` | [relay-hand-back-status](Examples/relay-hand-back-status.json) |
 | `error` | `error`: `ProtocolError` | [relay-error](Examples/relay-error.json) |
 
 **Phone → relay HTTP bodies:** `CommandRequest` / `CommandResponse` for
