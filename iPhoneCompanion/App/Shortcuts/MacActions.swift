@@ -67,10 +67,12 @@ struct PreviousSongOnMacIntent: AppIntent {
 
 struct JumpToTimeOnMacIntent: AppIntent {
     static let title: LocalizedStringResource = "Jump to Time on Mac"
-    static let description: IntentDescription? = IntentDescription("Jumps to a point in the song playing on your Mac, such as 2 minutes in. A time past the end goes to the end.")
+    static let description: IntentDescription? = IntentDescription("Jumps to a point in the song playing on your Mac, in seconds: 90 is 1:30 in.")
     static let supportedModes: IntentModes = .background
 
-    @Parameter(title: "Time", defaultUnit: .seconds, supportsNegativeNumbers: false)
+    /// Seconds only. With a unit to choose, the Shortcuts prompt ignored the
+    /// default of seconds and took 30 as 30 minutes (iPhone, 12 November 2026).
+    @Parameter(title: "Time", unit: .seconds, supportsNegativeNumbers: false)
     var time: Measurement<UnitDuration>
 
     static var parameterSummary: some ParameterSummary {
@@ -80,6 +82,7 @@ struct JumpToTimeOnMacIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         let seconds = time.converted(to: .seconds).value
+        shortcutLog.log("Jump to Time: \(time.value, privacy: .public) \(time.unit.symbol, privacy: .public) = \(seconds, privacy: .public) s")
         try await ShortcutRemote.run { try await $0.seek(to: seconds) }
         return .result()
     }

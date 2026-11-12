@@ -76,8 +76,13 @@ public final class MacRemote {
         return kind
     }
 
-    /// Jumps to `seconds` into the Mac's song. The Mac keeps it inside the song.
+    /// Jumps to `seconds` into the Mac's song. A time at or past the end is
+    /// refused: the Mac would run the song to its end and Music would move on
+    /// to the next one (seen on 12 November 2026).
     public func seek(to seconds: TimeInterval) async throws {
+        if let duration = try await current().playback?.track?.duration, duration > 0, seconds >= duration {
+            throw MacRemoteError.pastTheEnd(duration)
+        }
         try await run(.seek(to: max(0, seconds), issuedAt: now()))
     }
 
@@ -128,11 +133,15 @@ public enum MacRemoteError: Error, Equatable, Sendable, LocalizedError {
     case outputNotFound
     /// Listed, but Music says it can't be used now.
     case outputUnavailable(String)
+    /// A jump to a time the song doesn't reach. Carries the song's length.
+    case pastTheEnd(TimeInterval)
 
     public var errorDescription: String? {
         switch self {
         case .outputNotFound: "Your Mac can’t see that speaker right now."
         case .outputUnavailable(let name): "\(name) isn’t available right now."
+        case .pastTheEnd(let duration):
+            "The song on your Mac is only \(Duration.seconds(duration.rounded(.down)).formatted(.time(pattern: .minuteSecond)))."
         }
     }
 }

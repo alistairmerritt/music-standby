@@ -1,5 +1,9 @@
 import AppIntents
+import os
 import StandByKit
+
+/// One line per action run, for the device log (`idevicesyslog`).
+let shortcutLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "Shortcuts")
 
 /// The Mac for a Shortcuts action: the pairing's credential, straight to the
 /// relay. The app needn't be running and isn't opened.

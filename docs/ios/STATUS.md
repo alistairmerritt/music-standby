@@ -15,7 +15,7 @@ Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Sho
 | Play or Pause on Mac | in the background | Pauses a playing Mac, plays a paused one (from the relay's state) |
 | Play on Mac, Pause on Mac | in the background | `play` / `pause` |
 | Next Song on Mac, Previous Song on Mac | in the background | `next` / `previous` |
-| Jump to Time on Mac *(action only)* | in the background | `seek` to a duration, such as 2 min |
+| Jump to Time on Mac *(action only)* | in the background | `seek`, in seconds (90 is 1:30); refused past the end of the song |
 | Set Volume on Mac | in the background | `setVolume`, 0–100: **Music's own volume**, as the app's slider |
 | Play To | in the background | `selectOutput`; the speaker is picked from the Mac's `outputs` (`MacSpeaker` entity, searchable by name). Refuses a speaker the Mac doesn't list or marks unavailable |
 | Continue on iPhone | in the background, opening the app if it must | The app's steps (`Handover`). If Apple Music here doesn't start within 6 s, it asks to open the app and tries again (`supportedModes` `.background` + `.foreground(.dynamic)`). Also opens the app first if Apple Music access hasn't been asked for yet |
@@ -27,9 +27,23 @@ Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Sho
 
 **Continue Listening moved into `Handover`** (StandByKit) so the app and the actions share one copy. `AppModel` passes in its live state and transport; an action passes in `MacRemote`'s read. No behaviour change: the existing Continue tests pass unchanged.
 
-Built for the device and installed on the iPhone 15 Pro (development build). The extracted metadata lists all 12 actions, the 10 App Shortcuts and the speaker entity. 208 StandByKit tests pass (11 new: `MacRemoteTests`, `StopShowingFromAShortcutTests`). **Not yet run on the iPhone**: the XCUITest driver couldn't start ("Timed out while enabling automation mode").
+**All twelve tried on the iPhone 15 Pro on 12 November (evening)**, development build. Each was run from its tile in the Shortcuts app (Library → Second Chair), driven by the XCUITest driver, with Music's own volume on the Mac at 0 and the phone's media volume at 0 so nothing was heard. Jump to Time and Stop Showing aren't tiles, so a test build swapped them in for Play and Pause.
 
-Open: whether Apple Music starts from a background action at all (the same question as the CarPlay probe). If it doesn't, Continue on iPhone opens the app and works from there. Whether `RemoteMediaSession.sessions()` and `end()` work from a background launch (Stop Showing) is also unknown.
+| Action | On the phone | On the Mac |
+| --- | --- | --- |
+| Next Song, Previous Song | App ran in the background (state 3), never in front | Take Your Time → Saint → Take Your Time, paused throughout |
+| Set Volume (asks for the value) | Typed 0 | Music's volume 100 → 0 |
+| Play, Play or Pause (both ways), Pause | Background | paused → playing → paused → playing → paused |
+| Play To (picker lists every speaker, "Playing now" under the current one) | "Switching to Bathroom HomePod." | Bathroom HomePod selected, Music's volume 34 (the HomePod's); back to the MacBook the same way |
+| Continue on iPhone | "Continuing on your iPhone." **Background throughout**: Apple Music here started without the app opening | Paused at 1:04 |
+| Continue on Mac | "Continuing on your Mac." | Playing from the phone's point, 1:53 |
+| Show in Now Playing | Opened the app; its Stop Showing button appeared | — |
+| Stop Showing, with the app quit first | Background launch; Diagnostics then read "Now Playing session ended: userStopped" two seconds after the tap, and Show in Now Playing was back | — |
+| Jump to Time | First run took 30 as **30 minutes**: the prompt has a unit choice and ignored `defaultUnit: .seconds`. 1800 s ran the song to its end and Music moved on to the next song. Now seconds only (`unit: .seconds`), and a time at or past the end is refused | 0:30 with 30; 999 refused with "The song on your Mac is only 5:43." |
+
+So **a background App Intent can start Apple Music with `systemMusicPlayer`**, at least from the Shortcuts app with the phone unlocked. That was the open question for continuing in the car (an automation when CarPlay connects); a locked phone in a car is still untried. Jump to Time logs the time it was given to the device log (category `Shortcuts`).
+
+Not tried: Siri phrases, the Action button, and any action with the phone locked.
 
 ## Seek, volume and output, 11 November 2026 (evening)
 
@@ -176,11 +190,11 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 - Seek and volume from the StandBy screen and the locked Lock Screen. The XCUITest driver can't see either, so these are by hand.
 - A finger, rather than XCUITest's drag, ending a drag on the app's progress bar.
 - HTTPS and Keychain without USB, and over cellular.
-- Every Shortcuts action, from the Shortcuts app, Siri and the Action button, with the app not running.
+- The Shortcuts actions from Siri, the Action button and a locked phone (all twelve work from the Shortcuts app).
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **208 tests**, macOS, Xcode 27.2 (run again on 12 November, evening). `Shared/StandByProtocol`: 59 tests on this branch. `feature/macos` has 60: its copy also has the song-ID change from 11 November (`pid:<id>-<12 hex>`), which the phone doesn't need, since it only compares IDs for equality. The extension's artwork prefetch has no automated test.
+`swift test` from `iPhoneCompanion/StandByKit`: **209 tests**, macOS, Xcode 27.2 (run again on 12 November, evening). `Shared/StandByProtocol`: 59 tests on this branch. `feature/macos` has 60: its copy also has the song-ID change from 11 November (`pid:<id>-<12 hex>`), which the phone doesn't need, since it only compares IDs for equality. The extension's artwork prefetch has no automated test.
 
 | Area | Covers |
 | --- | --- |

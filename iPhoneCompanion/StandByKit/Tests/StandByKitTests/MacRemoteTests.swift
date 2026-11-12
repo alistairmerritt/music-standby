@@ -67,6 +67,16 @@ import Testing
         #expect(values == [1, 0, 0])
     }
 
+    @Test func aJumpPastTheEndOfTheSongIsRefused() async throws {
+        let relay = FakeRelay(state(playback: message()))   // a 200 s song
+        let remote = MacRemote(client: relay)
+        await #expect(throws: MacRemoteError.pastTheEnd(200)) { try await remote.seek(to: 1800) }
+        await #expect(throws: MacRemoteError.pastTheEnd(200)) { try await remote.seek(to: 200) }
+        try await remote.seek(to: 199)
+        #expect(await relay.sent.map(\.command.position) == [199])
+        #expect(MacRemoteError.pastTheEnd(200.7).errorDescription == "The song on your Mac is only 3:20.")
+    }
+
     @Test func playsToAListedAvailableSpeakerOnly() async throws {
         var playback = message()
         playback.outputs = [
