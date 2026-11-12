@@ -41,17 +41,22 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     public var level: Double?
     /// `AudioOutput.id`, for `selectOutput`.
     public var outputID: String?
+    /// Why the phone sent it, when that matters to the Mac. Added 12 November
+    /// 2026; an older Mac ignores it.
+    public var reason: CommandReason?
 
     public static let maximumAge: TimeInterval = 10
 
     public init(id: UUID = UUID(), kind: CommandKind, issuedAt: Date? = nil,
-                position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil) {
+                position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil,
+                reason: CommandReason? = nil) {
         self.id = id
         self.kind = kind
         self.issuedAt = issuedAt
         self.position = position
         self.level = level
         self.outputID = outputID
+        self.reason = reason
     }
 
     public static func seek(to position: TimeInterval, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
