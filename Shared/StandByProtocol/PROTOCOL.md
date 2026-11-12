@@ -81,6 +81,18 @@ something visible changes (`hasVisibleChange(from:)`), never for ordinary progre
 | `canGoNext`, `canGoPrevious` | bool | |
 | `listeningSessionID` | UUID? | New. Absent outside a session |
 | `detail` | string? | New. Diagnostic text for `automation_denied` and `error`. Not for display |
+| `volume`, `outputs` | number?, `[AudioOutput]`? | 11 November 2026. See §5 |
+| `upNext` | `[QueuedTrack]`? | 12 November 2026. What Music plays after `track`, in order, at most 25 (`upNextLimit`). Absent when the Mac can't read it. Not part of a visible change |
+
+`TrackMetadata.catalogID` (string?, 12 November 2026) is the song's Apple Music catalogue
+ID, the number `MPMusicPlayerController.setQueue(with:)` takes, and `QueuedTrack` carries
+the same for each song in `upNext`, with `title`, `artist`, `album` (optional) and `duration`. Music's
+AppleScript has no such ID. The Mac reads both through Music's remote-control protocol
+(DACP, the one Apple's iTunes Remote app uses), which needs the companion paired with Music
+once, from Music's sidebar, and the song in the Mac's library; otherwise they're absent.
+They let the phone take over: "Continue on iPhone" starts the same song and Up Next in the
+phone's Apple Music at the Mac's position, then pauses the Mac with an ordinary `pause`.
+Relays pass both through untouched, and leave them out of pushes.
 
 `PlaybackState` values, matching the prototype's JSON:
 
@@ -93,9 +105,11 @@ something visible changes (`hasVisibleChange(from:)`), never for ordinary progre
 | `automation_denied` | AppleScript −1743. Lasts until the user changes System Settings | Yes |
 | `error` | Music running but unreadable. Usually transient | No |
 
-**Visible change** = a different `state`, `track`, `canGoNext`, `canGoPrevious` or
-`listeningSessionID`, or a position more than 2 s from where the previous message
-predicts (a seek). The relay can coalesce pushes on the same rule.
+**Visible change** = a different `state`, `track` (its `catalogID` included), `canGoNext`,
+`canGoPrevious`, `listeningSessionID`, `volume` or `outputs`, or a position more than 2 s
+from where the previous message predicts (a seek). `upNext` alone isn't one: a reordered
+queue would otherwise cost a push, so it travels with the next visible change. The relay can
+coalesce pushes on the same rule.
 
 ---
 
