@@ -33,7 +33,11 @@ the one Apple's iTunes Remote app uses), in `Sources/CompanionCore/Remote`:
   companion as a remote (`_touch-remote._tcp`); Music lists it under Devices in its sidebar,
   the person types the 4-digit code, and Music calls `/pair` with its service name. The GUID
   and service name go in the Keychain (`MusicRemotePairingStore`). Undo in Music: Settings ›
-  Advanced › Forget All Remotes (all remotes at once; there's no single removal).
+  Advanced › Forget All Remotes (all remotes at once; there's no single removal). **Neither
+  Home Sharing nor Media Sharing is needed:** with both off (12 November; mediasharingd not
+  even running), Music still advertised and served its remote protocol, a fresh pairing
+  worked, and so did Continue on iPhone. Music keeps pairings in its own preferences
+  (`Touch Remote Preferences`).
 - **Reading.** `MusicRemoteClient` finds Music's server through Bonjour (`_touch-able._tcp`,
   advertised once a remote is paired; the port changed from 58003 to 50520 when Music
   restarted, and the pairing survived), logs in, and reads `playqueue-contents` (Up Next)
