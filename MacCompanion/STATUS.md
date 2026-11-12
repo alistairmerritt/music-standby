@@ -37,8 +37,10 @@ Two of the three things a TestFlight beta needs from the Mac side.
   the new Developer ID Application certificate, **accepted** by Apple's notary service
   (submission `4c47da0f`), stapled, and assessed by Gatekeeper as `accepted,
   source=Notarized Developer ID`. The release app is built in `build/release`, so the
-  development app's signature, and the approvals tied to it, stay as they were. The zip
-  hasn't been published or tried on another Mac.
+  development app's signature, and the approvals tied to it, stay as they were. Published
+  the same day as the GitHub pre-release `mac-v0.1.0` (tagged at `73de3ea`). Downloaded
+  back and marked as from the internet, it was identical (same SHA-256) and Gatekeeper still
+  accepted it as Notarized Developer ID. Not yet installed on another Mac.
 - **The hardened runtime works with Music.** A release-mode build (`MSB_RELEASE=1`, signed
   `flags=0x10000(runtime)` with the Apple Development identity) was launched in place of the
   running app while Music was paused. It read Music: its menu-bar icon stayed the note, which
