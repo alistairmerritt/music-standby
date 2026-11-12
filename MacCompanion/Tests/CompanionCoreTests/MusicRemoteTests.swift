@@ -27,6 +27,10 @@ private enum Fake {
         node("ceQS", node("mlit", u32("ceQk", 0x6D61_696E), u32("ceQm", 100))),
         node("mlit", spec(item: 40778), text("ceQn", "Lady Divine"), text("ceQr", "Alela Diane"), u32("astm", 312_308)),
         node("mlit", spec(item: 99999), text("ceQn", "Not in the library"), text("ceQr", "Nobody"), u32("astm", 1000))))
+    static func playing(_ title: String, by artist: String) -> Data {
+        node("cmst", u32("mstt", 200), u32("cmsr", 7), u32("caps", 4), text("cann", title), text("cana", artist), text("canl", "Album"))
+    }
+    static let artwork = Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3])
 }
 
 /// Answers by path, counting what was asked.
@@ -145,6 +149,28 @@ private func standardMusic() -> FakeDACP {
         #expect(music.count("/databases/61/items") == 2)
         _ = await remote.queue(current: song("71F8D70086B0C8D9"))   // known: no read
         #expect(music.count("/databases/61/items") == 2)
+    }
+
+    @Test func takesMusicsArtworkWhenItsPlayingTheSameSong() async {
+        let music = FakeDACP([("/login", 200, Fake.login), ("/ctrl-int/1/playstatusupdate", 200, Fake.playing("SONG", by: "artist")),
+                              ("/ctrl-int/1/nowplayingartwork", 200, Fake.artwork)])
+        #expect(await client(music).artwork(for: song("71F8D70086B0C8D9")) == Fake.artwork, "matched ignoring case")
+        #expect(music.asked.withLock { $0 }.contains { $0.hasPrefix("/ctrl-int/1/nowplayingartwork?mw=600&mh=600&session-id=850003812") })
+    }
+
+    @Test func leavesArtworkAloneWhenMusicHasMovedOn() async {
+        let music = FakeDACP([("/login", 200, Fake.login), ("/ctrl-int/1/playstatusupdate", 200, Fake.playing("Next Song", by: "Artist")),
+                              ("/ctrl-int/1/nowplayingartwork", 200, Fake.artwork)])
+        #expect(await client(music).artwork(for: song("71F8D70086B0C8D9")) == nil)
+        #expect(music.count("/ctrl-int/1/nowplayingartwork") == 0, "never asked: it would be the next song's cover")
+    }
+
+    @Test func hasNoArtworkWhenMusicHasNone() async {
+        let music = FakeDACP([("/login", 200, Fake.login), ("/ctrl-int/1/playstatusupdate", 200, Fake.playing("Song", by: "Artist"))])
+        let remote = client(music)
+        #expect(await remote.artwork(for: song("71F8D70086B0C8D9")) == nil, "Music answers 404")
+        #expect(await remote.artwork(for: song("71F8D70086B0C8D9")) == nil)
+        #expect(music.count("/login") == 1, "a 404 doesn't cost the session")
     }
 
     @Test func isUnreachableWhenMusicIsntAdvertised() async {

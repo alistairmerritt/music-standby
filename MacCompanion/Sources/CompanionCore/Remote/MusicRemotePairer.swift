@@ -60,9 +60,23 @@ public final class MusicRemotePairer: Sendable {
                 connection.send(content: Self.http(status: "404 Not Found", body: Data()), completion: .contentProcessed { _ in connection.cancel() })
                 return
             }
+            // Pairing counts only once the reply has gone out whole. A caller that
+            // quits straight away (msbctl) otherwise cut it short, and Music 1.7
+            // crashed twice right after such a pairing (12 Nov 2026, "pointer
+            // being freed was not allocated" on its main thread).
             let reply = Self.http(status: "200 OK", body: Self.pairResponse(guid: self.guid, name: self.name))
-            connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
-            self.finish(.success(MusicRemotePairing(guid: self.guid, serviceName: serviceName)))
+            connection.send(content: reply, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { error in
+                if let error {
+                    connection.cancel()
+                    self.finish(.failure(Failure.couldNotListen("reply to Music failed: \(error)")))
+                    return
+                }
+                // A moment for Music to read it before the connection goes.
+                queue.asyncAfter(deadline: .now() + 0.5) {
+                    connection.cancel()
+                    self.finish(.success(MusicRemotePairing(guid: self.guid, serviceName: serviceName)))
+                }
+            })
         }
     }
 

@@ -100,6 +100,16 @@ public final class Companion {
     /// snapshots in between (Up Next lags an edit until the next of those).
     @ObservationIgnored private var remoteRead: (key: String, task: Task<RemoteQueue?, Never>)?
     static let remoteWait: Duration = .milliseconds(400)
+
+    private enum RemoteArtworkEntry {
+        case asking(Task<ProcessedArtwork?, Never>)
+        case found(ProcessedArtwork)
+        case missing(retryAt: Date)
+    }
+    /// Music's own artwork over its remote protocol, by track: see `remoteArtwork(for:)`.
+    @ObservationIgnored private var remoteArtworkByTrack: [String: RemoteArtworkEntry] = [:]
+    static let remoteArtworkRetry: TimeInterval = 20
+    private static let artworkLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy.Mac", category: "artwork")
     static let catalogRetryAfterFailure: TimeInterval = 60
     static let catalogRetryAfterNoMatch: TimeInterval = 1800
 
@@ -409,7 +419,12 @@ public final class Companion {
         let processed: ProcessedArtwork?
         switch await musicArtwork(for: track) {
         case .found(let art): processed = art
-        case .none: processed = catalogArtwork(for: track)
+        case .none:
+            switch await remoteArtwork(for: track) {
+            case .found(let art): processed = art
+            case .waiting: processed = nil
+            case .notThere: processed = catalogArtwork(for: track)
+            }
         case .unavailable: processed = nil
         }
         artwork = processed
@@ -483,6 +498,57 @@ public final class Companion {
         let ms = Int(now().timeIntervalSince(started) * 1000)
         record("artwork \(processed.artworkID.prefix(12))… \(bytes.count) bytes '\(type)' \(processed.sourceFormat) → \(processed.descriptor.byteCount) byte JPEG, \(ms) ms")
         return .found(processed)
+    }
+
+    private enum RemoteArtwork {
+        case found(ProcessedArtwork)
+        /// Asked; the answer isn't in yet. A fresh read follows it.
+        case waiting
+        /// Not paired, or Music has none there either: try the catalogue.
+        case notThere
+    }
+
+    /// Music's own artwork over its remote protocol, for a track AppleScript
+    /// reports none for: songs streamed from Apple Music without being in the
+    /// library, which would otherwise take the catalogue's. Asked once per
+    /// track; an answer slower than `remoteWait` is picked up by a fresh read,
+    /// so the state never waits long for it.
+    private func remoteArtwork(for track: MusicTrack) async -> RemoteArtwork {
+        guard let remote else { return .notThere }
+        let key = track.trackID
+        let task: Task<ProcessedArtwork?, Never>
+        switch remoteArtworkByTrack[key] {
+        case .found(let art)?:
+            artworkByID[art.artworkID] = art   // may have been trimmed since
+            return .found(art)
+        case .missing(let retryAt)? where now() < retryAt:
+            return .notThere
+        case .asking(let pending)?:
+            task = pending
+        case .missing?, nil:
+            if remoteArtworkByTrack.count > 64 { remoteArtworkByTrack.removeAll() }
+            task = Task.detached(priority: .utility) {
+                guard let bytes = await remote.artwork(for: track) else { return nil }
+                return ArtworkProcessor.process(bytes)
+            }
+            remoteArtworkByTrack[key] = .asking(task)
+            Task { [weak self] in
+                _ = await task.value
+                guard let self, self.snapshot?.track?.trackID == key else { return }
+                self.refresh()
+            }
+        }
+        guard let answer = await Self.waitAtMost(Self.remoteWait, { await task.value }) else { return .waiting }
+        guard let art = answer, !isStale(art, for: track) else {
+            remoteArtworkByTrack[key] = .missing(retryAt: now().addingTimeInterval(answer == nil ? Self.remoteArtworkRetry : Self.staleArtworkRetry))
+            if answer != nil { readAgain(key, after: Self.staleArtworkRetry) }
+            return answer == nil ? .notThere : .waiting
+        }
+        remoteArtworkByTrack[key] = .found(art)
+        artworkByID[art.artworkID] = art
+        record("artwork \(art.artworkID.prefix(12))… from Music's remote protocol")
+        Self.artworkLog.info("artwork \(art.artworkID.prefix(12), privacy: .public)… from Music's remote protocol")
+        return .found(art)
     }
 
     /// The album a track's artwork belongs to: its name and album artist (or

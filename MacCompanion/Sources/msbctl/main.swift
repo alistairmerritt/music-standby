@@ -344,10 +344,10 @@ case "remote":
     // remote protocol, with a pairing made elsewhere (the app, or a probe).
     run {
         let options = Array(arguments.dropFirst())
-        if options.first == "pair", options.count == 2 {
+        if options.first == "pair", options.count == 2 || options.count == 3 {
             // Pairs a test remote and writes "GUID SERVICE-NAME" to the file
             // (owner-only), never to the screen: the GUID lets Music be read.
-            let pairer = MusicRemotePairer(name: "Second Chair test")
+            let pairer = MusicRemotePairer(name: options.count == 3 ? options[2] : "Second Chair test")
             print("In Music, click “\(pairer.name)” under Devices in the sidebar and enter \(pairer.code). Waiting…")
             do {
                 let pairing = try await pairer.pair()
@@ -391,7 +391,7 @@ default:
            msbctl artwork [--out DIR]
            msbctl compare [ROUNDS]
            msbctl control play|pause|playpause|next|previous
-           msbctl remote GUID SERVICE-NAME [--no-catalog] | pair FILE
+           msbctl remote GUID SERVICE-NAME [--no-catalog] | pair FILE [NAME]
            msbctl watch [SECONDS] [--no-catalog] [--relay URL [--credentials FILE] [--pair] [--auto-approve]]
     """)
     exit(arguments.isEmpty ? 0 : 2)

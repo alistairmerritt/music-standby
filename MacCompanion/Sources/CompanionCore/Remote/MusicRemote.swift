@@ -32,6 +32,13 @@ public protocol MusicRemoteReading: Sendable {
     /// The current song's catalogue ID (by its persistent ID), and Up Next.
     /// Nil when Music can't be reached or has forgotten the pairing.
     func queue(current track: MusicTrack?) async -> RemoteQueue?
+    /// Music's own now-playing artwork, when Music is still playing this
+    /// track. Nil when it isn't, has none, or can't be reached.
+    func artwork(for track: MusicTrack) async -> Data?
+}
+
+extension MusicRemoteReading {
+    public func artwork(for track: MusicTrack) async -> Data? { nil }
 }
 
 public enum MusicRemoteStatus: Equatable, Sendable {
@@ -110,6 +117,25 @@ public actor MusicRemoteClient: MusicRemoteReading {
             session = nil
         }
         return nil
+    }
+
+    /// `nowplayingartwork` at 600 px, after checking Music's now-playing title
+    /// and artist are the track's, so a skip in between can't hand over the
+    /// wrong cover. Measured 12 Nov 2026 on a song streamed from Apple Music,
+    /// not in the library: AppleScript had no artwork, this had Music's 600 px
+    /// cover (a 488 KB PNG) in 97 ms.
+    public func artwork(for track: MusicTrack) async -> Data? {
+        do {
+            let status = DMAPNode.parse(try await get("/ctrl-int/1/playstatusupdate?revision-number=1"))
+            func same(_ tag: String, _ value: String) -> Bool {
+                status.first(tag).map { $0.string.compare(value, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame } ?? false
+            }
+            guard same("cann", track.title), same("cana", track.artist) else { return nil }
+            let image = try await get("/ctrl-int/1/nowplayingartwork?mw=600&mh=600")
+            return image.isEmpty ? nil : image
+        } catch {
+            return nil
+        }
     }
 
     /// Persistent ID → catalogue ID for the whole library: about 0.3 s for

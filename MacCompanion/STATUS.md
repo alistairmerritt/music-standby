@@ -54,8 +54,22 @@ the one Apple's iTunes Remote app uses), in `Sources/CompanionCore/Remote`:
   playback state. A state waits at most 0.4 s for it; a slower answer (a catalogue search
   takes 1–4 s) triggers a fresh read so it goes out anyway. Up Next alone isn't a visible
   change, so a queue edit costs no push.
-- `msbctl remote GUID SERVICE-NAME [--no-catalog]` and `msbctl remote pair FILE` exercise
-  the same code from the shell.
+- **Artwork.** When AppleScript has none for a song (streamed from Apple Music, not in the
+  library) and the Mac is connected to Music, the companion takes Music's own cover over
+  this protocol (`nowplayingartwork`, 600 px) before searching the catalogue. It first
+  checks Music's now-playing title and artist are the song's, so a skip can't hand over the
+  next cover; Music is asked once per song, a miss retried after 20 s; a state waits at most
+  0.4 s and a slower answer follows in the next. Measured: Music's 600 px cover in 97 ms,
+  against a catalogue search that took 0.7–0.9 s. On the real app (12 November): Music
+  reported 0 artworks for "It is What It Is (feat. Samantha Urbani)" and the companion took
+  Music's cover (logged under the `artwork` category), which the phone showed. Not
+  connected: catalogue search as before.
+- **Pairing reply.** Music crashed twice (SIGABRT in Music, "pointer being freed was not
+  allocated") right after `msbctl remote pair` runs that exited as soon as Music had asked.
+  The pairer now finishes only after its reply has been sent, then 0.5 s later. Whether
+  that was the cause isn't known: no pairing has been tried since.
+- `msbctl remote GUID SERVICE-NAME [--no-catalog]` and `msbctl remote pair FILE [NAME]`
+  exercise the same code from the shell.
 
 Released as **0.2.0 (2)**, the GitHub pre-release `mac-v0.2.0` (tagged at `df939b3`): notarised (accepted), stapled, and accepted by Gatekeeper as an internet download. The matching iPhone build is TestFlight 202611121413.
 

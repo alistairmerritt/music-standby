@@ -103,6 +103,8 @@ public struct CatalogFillingRemote: MusicRemoteReading {
         self.lookup = lookup
     }
 
+    public func artwork(for track: MusicTrack) async -> Data? { await remote.artwork(for: track) }
+
     public func queue(current track: MusicTrack?) async -> RemoteQueue? {
         guard var queue = await remote.queue(current: track) else { return nil }
         var queries: [CatalogQuery] = []

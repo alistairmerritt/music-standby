@@ -16,7 +16,8 @@ import StandByProtocol
     private static let device = DeviceIdentity(id: "test-mac", name: "Test Mac", kind: .mac, appVersion: "test")
 
     private func rig(state: String = "playing", defaults: UserDefaults? = nil, now: @escaping @Sendable () -> Date = { Date() },
-                     tracks: [FakeMusic.Track] = FakeMusic.standardTracks, artworkLookup: (any CatalogArtworkLookup)? = nil) async -> Rig {
+                     tracks: [FakeMusic.Track] = FakeMusic.standardTracks, artworkLookup: (any CatalogArtworkLookup)? = nil,
+                     remote: (any MusicRemoteReading)? = nil) async -> Rig {
         let music = FakeMusic(tracks: tracks, state: state)
         let relay = MockRelayTransport()
         let defaults = defaults ?? UserDefaults(suiteName: "CompanionTests-\(UUID().uuidString)")!
@@ -26,6 +27,7 @@ import StandByProtocol
         companion.settleDelay = .zero
         companion.artworkSettle = 0
         for state in PlaybackState.allCases { companion.monitor.pollIntervals[state] = .seconds(3600) }
+        companion.remote = remote
         companion.start()
         let ok = await eventually { await relay.sent.contains { if case .state = $0 { true } else { false } } }
         if !ok {
@@ -234,6 +236,57 @@ import StandByProtocol
         #expect(await catalogue.queries == [CatalogQuery(title: "Idontknow", artist: "Jamie xx", album: "Idontknow", duration: 240.5)])
         await eventually { await r.relay.uploads[expectedID] != nil }
         #expect(await r.relay.uploads[expectedID]?.width == 400)
+    }
+
+    /// Music's remote protocol, giving artwork (or none) after a delay.
+    private actor ArtworkRemote: MusicRemoteReading {
+        let image: Data?
+        let delay: Duration
+        private(set) var asked: [String] = []
+        init(_ image: Data?, after delay: Duration = .zero) { self.image = image; self.delay = delay }
+        func queue(current track: MusicTrack?) async -> RemoteQueue? { nil }
+        func artwork(for track: MusicTrack) async -> Data? {
+            asked.append(track.title)
+            try? await Task.sleep(for: delay)
+            return image
+        }
+    }
+
+    @Test func musicsRemoteArtworkComesBeforeTheCatalogue() async throws {
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let remote = ArtworkRemote(FakeMusic.png(side: 300))
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue, remote: remote)
+        let expectedID = ArtworkID.make(sourceBytes: FakeMusic.png(side: 300))
+        await eventually { await states(r.relay).last?.track?.artworkID == expectedID }
+        await eventually { await r.relay.uploads[expectedID] != nil }
+        #expect(await r.relay.uploads[expectedID]?.width == 300)
+        await r.companion.settle()
+        #expect(await catalogue.queries.isEmpty)
+        #expect(await remote.asked == ["Idontknow"])
+    }
+
+    @Test func slowRemoteArtworkFollowsInALaterState() async throws {
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let remote = ArtworkRemote(FakeMusic.png(side: 300), after: .milliseconds(800))
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue, remote: remote)
+        let first = try #require(await states(r.relay).first)
+        #expect(first.track?.artworkID == nil, "the title isn't held up for Music's artwork")
+        let expectedID = ArtworkID.make(sourceBytes: FakeMusic.png(side: 300))
+        await eventually { await states(r.relay).last?.track?.artworkID == expectedID }
+        #expect(await catalogue.queries.isEmpty, "a slow answer isn't taken as none")
+        #expect(await remote.asked.count == 1)
+    }
+
+    @Test func noRemoteArtworkFallsBackToTheCatalogue() async throws {
+        let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
+        let remote = ArtworkRemote(nil)
+        let r = await rig(tracks: [Self.bareTrack], artworkLookup: catalogue, remote: remote)
+        await eventually { await states(r.relay).last?.track?.artworkID == ArtworkID.make(sourceBytes: FakeMusic.png(side: 400)) }
+        r.music.position = 120
+        r.companion.refresh()
+        await eventually { await states(r.relay).last.map { abs($0.elapsedTime - 120) < 1 } ?? false }
+        #expect(await remote.asked.count == 1, "a miss isn't asked again on every read")
+        #expect(await catalogue.queries.count == 1)
     }
 
     @Test func catalogueIsAskedOncePerTrack() async throws {
