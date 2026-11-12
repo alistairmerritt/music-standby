@@ -155,8 +155,8 @@ it never appeared there. 61 tests pass. Not yet seen arriving in StandBy, which 
 Later on 12 November, each pairing finds its own APNs environment (see
 [APNs status](#apns-status)), so TestFlight builds, whose tokens are production ones, get
 their pushes from the same relay as builds from Xcode. 65 tests pass, and the local harness
-21/21. **Not yet deployed.** Until it is, a TestFlight build's tokens are sent to the
-sandbox, refused with `BadDeviceToken` and forgotten.
+21/21. Deployed the same day as version `bda19049`; the deployment answered an
+unauthenticated `GET /v1/session` with `401`. Not yet seen with a TestFlight build.
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
