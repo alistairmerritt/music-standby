@@ -6,6 +6,35 @@ Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at 
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Continue from iPhone, asked for at the Mac (12 November 2026, night)
+
+A button (and a Shortcuts action) on the Mac brings the phone's music back. The Mac can't see
+or pause the phone, so the relay wakes this app, which runs Continue on Mac
+(docs/relay/API-v1.md §14; contract `contract/hand-back`, relay `feature/relay-hand-back`, Mac
+`feature/macos-hand-back`).
+
+- **The device token** now goes to the relay at every launch and on pairing
+  (`PUT /v1/tokens/device`), whatever the reminder setting: a background push needs no
+  notification permission. `remote-notification` is a background mode (`Signing/App-Info.plist`).
+- **The background push** (`content-available`, priority 5) reaches
+  `application(_:didReceiveRemoteNotification:)`; `HandBackResponder` (StandByKit) runs
+  `Handover.sendBackToMac` from the relay's state, as the Shortcuts action does, reporting
+  `working`, then `done` / `nothing_playing` / `not_in_queue` / `failed`
+  (`POST /v1/hand-back/status`). A wake after the request's `expiresAt` (2 minutes) is ignored.
+- **The notification**, "Continue on <Mac>?", comes from the relay when the background push
+  gets no answer in 5 s; its tap does the same, however late. Shown even with the app open.
+  It needs notification permission, which the reminder setting asks for.
+- **Once per request**: the newest 20 request ids are kept in the App Group defaults, so a late
+  wake and a tap don't hand back twice.
+- **Continue on iPhone's pause** now carries `reason: continue_on_phone`, so the Mac knows to
+  offer the button.
+
+213 StandByKit tests pass (5 new in `HandBackResponderTests`). Installed on the iPhone 15 Pro
+(development build): the marked pause reached the real Mac through the deployed relay, which
+passes the field through. **Not yet run:** the wake or the notification, which need the relay
+deployed. iOS delivers background pushes as it sees fit: usually within seconds, later or never
+in Low Power Mode or after the app is swiped away, hence the notification.
+
 ## Shortcuts actions, 12 November 2026 (evening)
 
 Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Shortcuts/`: eleven in all. Ten of them are ready-made App Shortcuts (`SecondChairShortcuts`); Jump to Time is an action only. With no setup, these appear in the Shortcuts app under Second Chair and in Spotlight, can be put on the Action button, and answer to Siri phrases such as "Pause Second Chair" or "Next song in Second Chair". All of them can be used in your own shortcuts and automations.
