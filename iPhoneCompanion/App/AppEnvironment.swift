@@ -82,6 +82,31 @@ enum AppEnvironment {
         }
     }
 
+    /// Continue from iPhone, asked for at the Mac: straight to the relay with
+    /// the pairing's credential, like the Shortcuts actions.
+    static func makeHandBack() -> HandBackResponder {
+        let defaults = UserDefaults(suiteName: AppGroup.identifier) ?? .standard
+        let configured = relayConfiguration != nil
+        return HandBackResponder(defaults: defaults, makeRemote: {
+            guard configured else { throw TransportError.notPaired }
+            return try MacRemote.paired(credentials: KeychainCredentialStore())
+        }, report: { report in
+            try await pairedClient()?.reportHandBack(report)
+        })
+    }
+
+    /// The app's device token, for Continue from iPhone, whatever the
+    /// reminder setting. Without a pairing there's nowhere to send it; the
+    /// next launch, or pairing, registers again.
+    static func uploadDeviceToken(_ token: Data) async {
+        try? await pairedClient()?.registerDeviceToken(token.hexString)
+    }
+
+    private static func pairedClient() -> RelayClient? {
+        guard relayConfiguration != nil, let credential = (try? KeychainCredentialStore().load()).flatMap({ $0 }) else { return nil }
+        return RelayClient(credential: credential, http: URLSessionHTTP(reuseConnections: false))
+    }
+
     /// A random identifier kept for the life of the install. Never hardware-derived.
     private static func currentDevice(defaults: UserDefaults) -> DeviceIdentity {
         let key = "deviceIdentifier"

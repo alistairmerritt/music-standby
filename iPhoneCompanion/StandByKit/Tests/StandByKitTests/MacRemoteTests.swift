@@ -93,6 +93,7 @@ import Testing
         #expect(phone.asked.first?.position == 42, "the Mac's position, run on to now")
         #expect(await relay.sent.map(\.command.kind) == [.pause])
         #expect(await relay.sent.first?.sessionID == "s1")
+        #expect(await relay.sent.first?.command.reason == .continueOnPhone, "so the Mac offers Continue from iPhone")
     }
 
     @Test func continuesOnTheMacOnceTheRelaySaysItPlays() async throws {
@@ -132,7 +133,7 @@ import Testing
 
 /// The relay for one pairing: a state to read and commands that come back
 /// accepted, unless told otherwise.
-private actor FakeRelay: MacRemote.Client {
+actor FakeRelay: MacRemote.Client {
     private var state: SessionState
     private var next: SessionState?
     private var currentSession: String?

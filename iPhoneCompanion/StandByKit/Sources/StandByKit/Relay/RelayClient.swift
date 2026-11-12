@@ -186,6 +186,21 @@ public struct RelayClient: CommandSender, SessionReading, Sendable {
         _ = try await perform(try makeRequest(RelayPath.alertToken, method: "DELETE"))
     }
 
+    /// The same token for Continue from iPhone, whatever the reminder setting
+    /// (API-v1 §14): a background push needs no notification permission.
+    public func registerDeviceToken(_ hex: String) async throws {
+        var request = try makeRequest(RelayPath.deviceToken, method: "PUT")
+        try attach(DeviceTokenRegistration(token: hex), to: &request)
+        _ = try await perform(request)
+    }
+
+    /// Progress on a Continue from iPhone request, for the Mac.
+    public func reportHandBack(_ report: HandBackStatusReport) async throws {
+        var request = try makeRequest(RelayPath.handBackStatus, method: "POST")
+        try attach(report, to: &request)
+        _ = try await perform(request)
+    }
+
     // MARK: Requests
 
     /// Authenticated with the phone token unless `bearer` says otherwise.

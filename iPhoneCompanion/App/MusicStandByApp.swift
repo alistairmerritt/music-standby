@@ -13,9 +13,11 @@ struct MusicStandByApp: App {
                 .environment(model)
                 .environment(appDelegate.reminders)
                 .task { await model.start() }
-                // A new pairing has a new relay record, without the token.
+                // A new pairing has a new relay record, without the tokens.
                 .onChange(of: model.pairedMac) { _, mac in
-                    if mac != nil { appDelegate.reminders.refresh() }
+                    guard mac != nil else { return }
+                    UIApplication.shared.registerForRemoteNotifications()
+                    appDelegate.reminders.refresh()
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     switch phase {

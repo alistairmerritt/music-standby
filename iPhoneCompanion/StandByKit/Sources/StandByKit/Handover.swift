@@ -59,7 +59,9 @@ public struct Handover {
         // just then, as when headphones follow the music to the phone.
         for attempt in 1...2 {
             do {
-                let ack = try await send(RemoteCommand(kind: .pause, issuedAt: now()))
+                // The reason tells the Mac the phone has its music, so it
+                // offers Continue from iPhone.
+                let ack = try await send(RemoteCommand(kind: .pause, issuedAt: now(), reason: .continueOnPhone))
                 if ack.accepted {
                     record("Continue on iPhone: playing here with \(queue.count - 1) songs after it; the Mac is paused")
                     return .continued

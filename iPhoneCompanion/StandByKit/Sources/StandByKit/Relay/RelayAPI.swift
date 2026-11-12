@@ -9,6 +9,8 @@ enum RelayPath {
     static let commands = "v1/commands"
     static let startToken = "v1/tokens/start"
     static let alertToken = "v1/tokens/alert"
+    static let deviceToken = "v1/tokens/device"
+    static let handBackStatus = "v1/hand-back/status"
     static let sessionToken = "v1/tokens/session"
     static func sessionToken(id: String) -> String { "v1/tokens/session/\(id.relayPathComponent)" }
     static let session = "v1/session"
