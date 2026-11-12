@@ -47,12 +47,15 @@ own Continue on Mac (docs/relay/API-v1.md §14).
 - **Logs.** Each step also goes to the system log, subsystem
   `com.alistairmerritt.MusicStandBy.Mac`, category `hand-back`: steps and statuses only.
 
-**Executed** on this Mac and the iPhone 15 Pro, before the relay was deployed (silent: Music's
-own volume 0 here, the phone's media volume 0): Continue on iPhone from the phone's Shortcuts
+**Executed** on this Mac and the iPhone 15 Pro: Continue on iPhone from the phone's Shortcuts
 tile → "the iPhone has the music now" in the log, and it stayed; Continue on Mac from the
-phone → "Music started here: Continue from iPhone is over". **Not yet run:** the button or the
-action through the relay, which needs `feature/relay-hand-back` deployed; the Shortcuts action
-showing in the Shortcuts app on the Mac. 143 tests pass (5 new).
+phone → "Music started here: Continue from iPhone is over". **The button through the deployed
+relay** (`c979d7d7`), clicked by Alistair, twice: `asking` → `asked` (0.8 s) → `notified` (5 s
+later) → `working` → Music started here, on the phone's song at the phone's position, about 6 s
+and 17 s after the click (details in docs/ios/STATUS.md on `feature/shortcuts`: the background
+push only reached the phone with the notification). With Music paused here before Continue on
+iPhone the button never showed, as the phone sent no pause; fixed on the phone. **Not yet run:**
+the Shortcuts action, and whether it shows in the Shortcuts app on the Mac. 143 tests pass.
 
 ## Continue on iPhone (12 November 2026)
 
