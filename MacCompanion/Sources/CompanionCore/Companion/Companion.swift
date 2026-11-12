@@ -222,11 +222,11 @@ public final class Companion {
         let id = UUID()
         guard connection.phase == .connected else {
             handBack = HandBackProgress(id: id, status: .unreachable)
-            record("continue from iPhone: not connected to the relay")
+            recordHandBack("continue from iPhone: not connected to the relay")
             return
         }
         handBack = HandBackProgress(id: id)
-        record("continue from iPhone: asking")
+        recordHandBack("continue from iPhone: asking")
         enqueue { [weak self] in await self?.send(.handBackRequest(id: id)) }
         Task { [weak self, handBackTimeout] in
             try? await Task.sleep(for: handBackTimeout)
@@ -238,7 +238,7 @@ public final class Companion {
         guard var progress = handBack, progress.id == id, !progress.isFinished else { return }
         progress.timedOut = true
         handBack = progress
-        record("continue from iPhone: no answer from the iPhone")
+        recordHandBack("continue from iPhone: no answer from the iPhone")
     }
 
     // MARK: Inbound frames
@@ -284,7 +284,7 @@ public final class Companion {
             progress.status = status
             progress.timedOut = false
             handBack = progress
-            record("continue from iPhone: \(status)")
+            recordHandBack("continue from iPhone: \(status)")
         case .error(let error):
             record("relay error \(error.code): \(error.message ?? "")")
         case .unknown(let type):
@@ -362,7 +362,7 @@ public final class Companion {
                 ack = .accepted(command.id, revision: publisher.latestRevision)
                 if command.kind == .pause, command.reason == .continueOnPhone {
                     phoneHasMusic = true
-                    record("the iPhone has the music now")
+                    recordHandBack("the iPhone has the music now")
                 }
             }
         }
@@ -413,10 +413,11 @@ public final class Companion {
             record("music \(snapshot.state.rawValue)\(snapshot.track.map { ": \($0.title) — \($0.artist)" } ?? "") [\(trigger.rawValue)]")
         }
         self.snapshot = snapshot
-        if snapshot.state == .playing {
+        if snapshot.state == .playing, phoneHasMusic || handBack != nil {
             // Here now, by Continue from iPhone or otherwise.
-            if phoneHasMusic { phoneHasMusic = false }
-            if handBack != nil { handBack = nil }
+            phoneHasMusic = false
+            handBack = nil
+            recordHandBack("Music plays here: Continue from iPhone is over")
         }
         let artworkID = await artworkID(for: snapshot)
         let queue = await remoteQueue(for: snapshot)
@@ -783,6 +784,16 @@ public final class Companion {
         let task = Task { await previous?.value; return await work() }
         tail = Task { _ = await task.value }
         return await task.value
+    }
+
+    /// Continue from iPhone's steps also go to the system log, for following
+    /// one end to end: `log stream --predicate 'category == "hand-back"'`.
+    /// Only steps and statuses, never what's playing.
+    private static let handBackLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy.Mac", category: "hand-back")
+
+    private func recordHandBack(_ text: String) {
+        Self.handBackLog.log("\(text, privacy: .public)")
+        record(text)
     }
 
     private func record(_ text: String) {
