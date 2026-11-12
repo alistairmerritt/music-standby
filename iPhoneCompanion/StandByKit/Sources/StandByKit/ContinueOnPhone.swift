@@ -33,7 +33,7 @@ public struct PhoneNowPlaying: Equatable, Sendable {
 public enum SendBackOutcome: Equatable, Sendable {
     /// Playing on the Mac; Apple Music here is paused.
     case sentBack
-    /// Apple Music here isn't playing a song with a catalogue ID.
+    /// Apple Music here has no song with a catalogue ID loaded.
     case nothingPlayingHere
     /// The song isn't the Mac's current song or in its Up Next.
     case notInMacQueue

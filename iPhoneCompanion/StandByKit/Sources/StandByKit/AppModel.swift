@@ -278,19 +278,27 @@ public final class AppModel {
     /// Music here pauses. Only existing commands, so it works for songs
     /// outside the Mac's library too: it's Music's own queue.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
-        guard let here = player.nowPlaying(), here.isPlaying, let catalogID = here.catalogID else { return .nothingPlayingHere }
+        // Playing or paused here: a paused song is still the phone's to hand on.
+        guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
         guard let ahead = macQueuePosition(of: catalogID) else {
             record("Send back to Mac: the song isn't in the Mac's queue")
             return .notInMacQueue
         }
+        /// False only when the Mac says no. A reply that doesn't come in time
+        /// isn't a no: the relay waits 1.2 s for the Mac, Music can take
+        /// longer (as while headphones move back to the Mac), and the step
+        /// usually happens anyway. The Mac's state decides below.
         func step(_ command: RemoteCommand) async -> Bool {
             do {
                 let ack = try await transport.send(command)
                 if !ack.accepted { record("Send back to Mac: \(command.kind.rawValue) refused (\(ack.error?.code.rawValue ?? "no reason"))") }
                 return ack.accepted
-            } catch {
-                record("Send back to Mac: \(command.kind.rawValue) failed (\(error.localizedDescription))")
+            } catch TransportError.commandRejected(let code) {
+                record("Send back to Mac: \(command.kind.rawValue) refused (\(code.rawValue))")
                 return false
+            } catch {
+                record("Send back to Mac: no answer to \(command.kind.rawValue) (\(error.localizedDescription)); carrying on")
+                return true
             }
         }
         for _ in 0..<ahead {
@@ -305,7 +313,8 @@ public final class AppModel {
         while now() < deadline {
             await transport.refreshState()
             if let latest = latestMessage, latest.state == .playing, latest.track?.catalogID == catalogID {
-                player.pause()
+                // Headphones following the music to the Mac may have paused it already.
+                if player.nowPlaying()?.isPlaying == true { player.pause() }
                 record("Send back to Mac: playing on the Mac \(ahead) song\(ahead == 1 ? "" : "s") on; Apple Music here is paused")
                 return .sentBack
             }

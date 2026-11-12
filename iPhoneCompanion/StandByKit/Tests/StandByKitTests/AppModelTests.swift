@@ -38,8 +38,17 @@ actor FakeTransport: PlaybackTransport {
         hub.send(.connection(.disconnected))
         hub.reset()
     }
-    func send(_ command: RemoteCommand) -> CommandAck {
+    /// Commands of these kinds get no answer in time, as from a slow Mac.
+    private var unanswered: Set<CommandKind> = []
+    /// Commands of these kinds the Mac refuses.
+    private var refused: Set<CommandKind> = []
+    func leaveUnanswered(_ kinds: Set<CommandKind>) { unanswered = kinds }
+    func refuse(_ kinds: Set<CommandKind>) { refused = kinds }
+
+    func send(_ command: RemoteCommand) throws -> CommandAck {
         sent.append(command)
+        if unanswered.contains(command.kind) { throw TransportError.macUnreachable }
+        if refused.contains(command.kind) { return .rejected(command.id, revision: 1, ProtocolError(.noCurrentTrack)) }
         return .accepted(command.id, revision: 1)
     }
     func artwork(id: String) throws -> Data { throw TransportError.artworkUnavailable }

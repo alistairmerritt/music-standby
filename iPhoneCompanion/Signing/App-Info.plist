@@ -5,7 +5,7 @@
 	<key>MSBRelayHost</key>
 	<string>$(MSB_RELAY_HOST)</string>
 	<key>NSAppleMusicUsageDescription</key>
-	<string>Continue on iPhone starts the song your Mac is playing in Apple Music on this iPhone, where the Mac had got to.</string>
+	<string>Second Chair needs access to Apple Music to continue playback on your iPhone.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

@@ -126,15 +126,75 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         #expect(phone.pauses == 1)
     }
 
+    @Test func aSlowReplyIsntARefusalWhenTheMacPlaysAnyway() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        await h.transport.leaveUnanswered([.play])   // the relay's 1.2 s passed; Music played regardless
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "1102360418", position: 50, isPlaying: true)
+        let sending = Task { await h.model.sendBackToMac(with: phone) }
+        await eventually("seek and play sent") { await h.transport.sent.map(\.kind) == [.seek, .play] }
+        var playing = continuable(state: .playing, revision: 2)
+        playing.elapsedTime = 50
+        await h.transport.emit(.playback(playing))
+        await eventually("Mac playing seen") { h.model.attributes?.isPlaying == true }
+        h.sleeper.releaseAll()
+        #expect(await sending.value == .sentBack)
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func aRealRefusalStopsAtOnceAndLeavesThePhoneAlone() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        await h.transport.refuse([.seek])
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "1102359994", position: 10, isPlaying: true)
+        #expect(await h.model.sendBackToMac(with: phone) == .macRefused)
+        #expect(await h.transport.sent.map(\.kind) == [.next, .seek], "nothing after the refusal")
+        #expect(phone.pauses == 0)
+    }
+
+    @Test func doesntPauseAPhoneHeadphonesAlreadyPaused() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "1102360418", position: 50, isPlaying: true)
+        let sending = Task { await h.model.sendBackToMac(with: phone) }
+        await eventually("play sent") { await h.transport.sent.map(\.kind) == [.seek, .play] }
+        phone.current?.isPlaying = false   // AirPods moved to the Mac and paused it here
+        await h.transport.emit(.playback(continuable(state: .playing, revision: 2)))
+        await eventually("Mac playing seen") { h.model.attributes?.isPlaying == true }
+        h.sleeper.releaseAll()
+        #expect(await sending.value == .sentBack)
+        #expect(phone.pauses == 0)
+    }
+
     @Test func sendsNothingForASongTheMacDoesntHave() async {
         let (h, task) = await handedOver()
         defer { task.cancel() }
         let phone = FakePhoneMusic()
         phone.current = PhoneNowPlaying(catalogID: "999", position: 10, isPlaying: true)
         #expect(await h.model.sendBackToMac(with: phone) == .notInMacQueue)
-        phone.current = PhoneNowPlaying(catalogID: "1102360418", position: 10, isPlaying: false)
+        phone.current = PhoneNowPlaying(catalogID: nil, position: 10, isPlaying: false)
         #expect(await h.model.sendBackToMac(with: phone) == .nothingPlayingHere)
         #expect(await h.transport.sent.isEmpty)
+    }
+
+    @Test func continuesOnTheMacFromAPausedPhoneToo() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "1102359994", position: 64, isPlaying: false)   // paused here, one song on
+        let sending = Task { await h.model.sendBackToMac(with: phone) }
+        await eventually("next, seek and play sent") { await h.transport.sent.map(\.kind) == [.next, .seek, .play] }
+        var playing = continuable(state: .playing, revision: 2)
+        playing.track?.catalogID = "1102359994"
+        await h.transport.emit(.playback(playing))
+        await eventually("Mac playing seen") { h.model.attributes?.isPlaying == true }
+        h.sleeper.releaseAll()
+        #expect(await sending.value == .sentBack)
+        #expect(await h.transport.sent[1].position == 64.3, "from the phone's paused point")
+        #expect(phone.pauses == 0, "already paused here")
     }
 
     @Test func keepsThePhonePlayingWhenTheMacDoesntStart() async {
