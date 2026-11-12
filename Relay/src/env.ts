@@ -26,6 +26,10 @@ export interface Env {
   ARTWORK_DOWNLOAD_FOLLOW_UP_MS?: string;
   /** Topic for reminder alerts; defaults to APNS_TOPIC without ".push-type.nowplaying". */
   APNS_APP_TOPIC?: string;
+  /** Continue from iPhone: how long the background push gets before the notification. Default 5000. */
+  HAND_BACK_NOTIFY_MS?: string;
+  /** Continue from iPhone: when a request is forgotten. Default 120000. */
+  HAND_BACK_EXPIRY_MS?: string;
 }
 
 export function directory(env: Env) {

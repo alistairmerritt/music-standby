@@ -6,7 +6,7 @@
 // over HTTP/2, which a deployed Worker has and local workerd doesn't.
 
 import { base64url } from "./crypto";
-import type { NowPlayingAttributes } from "./protocol";
+import type { HandBackRequest, NowPlayingAttributes } from "./protocol";
 
 export type PushEvent = "start" | "update" | "end";
 
@@ -27,6 +27,7 @@ export interface PushResult {
 export interface PushSender {
   send(push: Push): Promise<PushResult>;
   sendAlert(push: AlertPush): Promise<PushResult>;
+  sendBackground(push: BackgroundPush): Promise<PushResult>;
 }
 
 /**
@@ -40,10 +41,48 @@ export interface AlertPush {
   collapseID: string;
   payload: {
     aps: { alert: { title: string; body: string }; "thread-id": string; "interruption-level": "time-sensitive"; "relevance-score": number };
+    /** Continue from iPhone's notification (API-v1 §14). */
+    handBack?: HandBackRequest;
   };
 }
 
+/**
+ * A background push: it wakes the app without showing anything, and needs no
+ * notification permission. iOS delivers it when it sees fit (API-v1 §14).
+ */
+export interface BackgroundPush {
+  token: string;
+  payload: { aps: { "content-available": 1 }; handBack: HandBackRequest };
+}
+
 export const REMINDER_ID = "mac-playing";
+export const HAND_BACK_ID = "hand-back";
+
+/** Continue from iPhone, first try: wake the app to hand the music back. */
+export function makeHandBackWake(token: string, request: HandBackRequest): BackgroundPush {
+  return { token, payload: { aps: { "content-available": 1 }, handBack: request } };
+}
+
+/**
+ * Continue from iPhone, second try, when the background push got no answer:
+ * a notification whose tap hands back. Time Sensitive and silent, like the
+ * reminder, and one at a time.
+ */
+export function makeHandBackAlert(token: string, macName: string, request: HandBackRequest): AlertPush {
+  return {
+    token,
+    collapseID: HAND_BACK_ID,
+    payload: {
+      aps: {
+        alert: { title: `Continue on ${macName}?`, body: "Tap to play this song on your Mac from where you are." },
+        "thread-id": HAND_BACK_ID,
+        "interruption-level": "time-sensitive",
+        "relevance-score": 1,
+      },
+      handBack: request,
+    },
+  };
+}
 
 /**
  * No sound: the reminder should be noticed, not heard. Time Sensitive, so it
@@ -90,12 +129,16 @@ export function tokenIsDead(result: PushResult): boolean {
 
 /** Records pushes instead of sending them. */
 export class MockPushSender implements PushSender {
-  constructor(private readonly record: (push: Push | AlertPush) => Promise<void>) {}
+  constructor(private readonly record: (push: Push | AlertPush | BackgroundPush) => Promise<void>) {}
   async send(push: Push): Promise<PushResult> {
     await this.record(push);
     return { status: 200 };
   }
   async sendAlert(push: AlertPush): Promise<PushResult> {
+    await this.record(push);
+    return { status: 200 };
+  }
+  async sendBackground(push: BackgroundPush): Promise<PushResult> {
     await this.record(push);
     return { status: 200 };
   }
@@ -178,15 +221,37 @@ export class APNsPushSender implements PushSender {
     return this.post(push.token, this.alertHeaders(push, await this.providerToken()), push.payload);
   }
 
+  async sendBackground(push: BackgroundPush): Promise<PushResult> {
+    return this.post(push.token, this.backgroundHeaders(await this.providerToken()), push.payload);
+  }
+
+  /** Apple: a background push must have priority 5 and the app's own topic. */
+  backgroundHeaders(jwt: string): Record<string, string> {
+    return {
+      authorization: `bearer ${jwt}`,
+      "apns-push-type": "background",
+      "apns-topic": this.appTopic,
+      "apns-priority": "5",
+      // The request is forgotten after 2 minutes; a later wake would surprise.
+      "apns-expiration": String(Math.floor(Date.now() / 1000) + 2 * 60),
+      "content-type": "application/json",
+    };
+  }
+
+  private get appTopic(): string {
+    return this.config.appTopic ?? this.config.topic.replace(/\.push-type\.nowplaying$/, "");
+  }
+
   alertHeaders(push: AlertPush, jwt: string): Record<string, string> {
     return {
       authorization: `bearer ${jwt}`,
       "apns-push-type": "alert",
-      "apns-topic": this.config.appTopic ?? this.config.topic.replace(/\.push-type\.nowplaying$/, ""),
+      "apns-topic": this.appTopic,
       "apns-priority": "10",
       "apns-collapse-id": push.collapseID,
-      // A reminder that arrives much later than the music started is noise.
-      "apns-expiration": String(Math.floor(Date.now() / 1000) + 10 * 60),
+      // A reminder that arrives much later than the music started is noise;
+      // a hand-back prompt outlives its request by no more than that request.
+      "apns-expiration": String(Math.floor(Date.now() / 1000) + (push.collapseID === HAND_BACK_ID ? 2 : 10) * 60),
       "content-type": "application/json",
     };
   }

@@ -19,8 +19,27 @@ import {
   type RelayFrame,
   type RemoteCommand,
   type TrackMetadata,
+  isHandBackStatus,
+  isUUID,
 } from "./protocol";
-import { APNsPushSender, MockPushSender, makePush, makeReminder, tokenIsDead, type AlertPush, type APNsEnvironment, type ProviderToken, type Push, type PushEvent, type PushSender } from "./push";
+import {
+  APNsPushSender,
+  MockPushSender,
+  REMINDER_ID,
+  makeHandBackAlert,
+  makeHandBackWake,
+  makePush,
+  makeReminder,
+  tokenIsDead,
+  type AlertPush,
+  type APNsEnvironment,
+  type BackgroundPush,
+  type ProviderToken,
+  type Push,
+  type PushEvent,
+  type PushResult,
+  type PushSender,
+} from "./push";
 
 // One Durable Object per pairing (one Mac, at most one phone). It holds the
 // credentials' hashes, the Mac's WebSocket, the latest playback, the Now
@@ -74,6 +93,21 @@ interface PushTokens {
   session?: { sessionID: string; token: string };
   /** The app's ordinary push token; present only while the phone wants reminders. */
   alert?: string;
+  /** The same kind of token, whatever the reminder setting: for Continue from iPhone (API-v1 §14). */
+  device?: string;
+}
+
+/** A Continue from iPhone request the relay is working on (API-v1 §14). */
+interface HandBack {
+  requestID: string;
+  askedAt: number;
+  /** When to show the notification if the phone hasn't answered the background push. */
+  notifyAt: number;
+  /** When the request is forgotten. */
+  expiresAt: number;
+  /** The phone has sent a status, so no notification is needed. */
+  answered: boolean;
+  notified: boolean;
 }
 
 interface StoredArtwork {
@@ -83,10 +117,10 @@ interface StoredArtwork {
 
 interface RecordedPush {
   at: string;
-  event: PushEvent | "reminder";
+  event: PushEvent | "reminder" | "hand-back" | "hand-back-alert";
   sessionID: string;
   status: number;
-  payload: Push["payload"] | AlertPush["payload"];
+  payload: Push["payload"] | AlertPush["payload"] | BackgroundPush["payload"];
   collapseID?: string;
 }
 
@@ -146,6 +180,13 @@ export class Pairing extends DurableObject<Env> {
   }
   private get remindAfter(): number {
     return Number(this.env.REMIND_AFTER_MS ?? 30 * 60_000);
+  }
+  /** How long a background hand-back push gets before the notification. */
+  private get handBackNotifyAfter(): number {
+    return Number(this.env.HAND_BACK_NOTIFY_MS ?? 5_000);
+  }
+  private get handBackLifetime(): number {
+    return Number(this.env.HAND_BACK_EXPIRY_MS ?? 2 * 60_000);
   }
 
   // MARK: RPC from the Worker
@@ -228,6 +269,8 @@ export class Pairing extends DurableObject<Env> {
     if (method === "PUT" && path === "/v1/tokens/start") return this.putStartToken(request);
     if (method === "PUT" && path === "/v1/tokens/alert") return this.putAlertToken(request);
     if (method === "DELETE" && path === "/v1/tokens/alert") return this.deleteAlertToken();
+    if (method === "PUT" && path === "/v1/tokens/device") return this.putDeviceToken(request);
+    if (method === "POST" && path === "/v1/hand-back/status") return this.handBackStatus(request);
     if (method === "PUT" && path === "/v1/tokens/session") return this.putSessionToken(request, record);
     const deleteToken = /^\/v1\/tokens\/session\/([^/]+)$/.exec(path);
     if (deleteToken && method === "DELETE") return this.deleteSessionToken(decodeURIComponent(deleteToken[1]));
@@ -362,6 +405,8 @@ export class Pairing extends DurableObject<Env> {
         return;
       case "pair-decision":
         return this.decide(String(frame.claimID), frame.approved === true);
+      case "hand-back-request":
+        return this.handBackRequested(frame.requestID);
       case "error":
         // The Mac can't supply artwork it was asked for: stop holding its GETs.
         if (frame.error?.code === "artwork_unavailable" && typeof frame.error.message === "string") {
@@ -671,6 +716,16 @@ export class Pairing extends DurableObject<Env> {
     return empty();
   }
 
+  /** The app's device token, for Continue from iPhone; sent whatever the reminder setting. */
+  private async putDeviceToken(request: Request): Promise<Response> {
+    const body = await readJSON<{ token?: string }>(request);
+    if (!body?.token || !HEX_TOKEN.test(body.token)) throw new HttpError(400, "invalid_request", "token must be hex");
+    const tokens = await this.tokens();
+    tokens.device = body.token.toLowerCase();
+    await this.ctx.storage.put("tokens", tokens);
+    return empty();
+  }
+
   private async deleteAlertToken(): Promise<Response> {
     const tokens = await this.tokens();
     if (tokens.alert) {
@@ -758,10 +813,13 @@ export class Pairing extends DurableObject<Env> {
     }
     return new MockPushSender(async (push) => {
       const pushes = (await this.ctx.storage.get<RecordedPush[]>("pushes")) ?? [];
+      const at = iso(Date.now());
       pushes.push(
         "collapseID" in push
-          ? { at: iso(Date.now()), event: "reminder", sessionID: "", status: 200, payload: push.payload, collapseID: push.collapseID }
-          : { at: iso(Date.now()), event: push.event, sessionID: push.sessionID, status: 200, payload: push.payload },
+          ? { at, event: push.collapseID === REMINDER_ID ? "reminder" : "hand-back-alert", sessionID: "", status: 200, payload: push.payload, collapseID: push.collapseID }
+          : "event" in push
+            ? { at, event: push.event, sessionID: push.sessionID, status: 200, payload: push.payload }
+            : { at, event: "hand-back", sessionID: "", status: 200, payload: push.payload },
       );
       await this.ctx.storage.put("pushes", pushes.slice(-PUSHES_KEEP));
     });
@@ -862,6 +920,101 @@ export class Pairing extends DurableObject<Env> {
     await this.push("update", token, await this.attributes(session, playback));
   }
 
+  // MARK: Continue from iPhone (API-v1 §14)
+
+  /**
+   * The Mac asks for the phone's music. The phone's app is woken by a
+   * background push; if it hasn't said anything within HAND_BACK_NOTIFY_MS,
+   * the alarm shows a notification instead. A new request replaces the last.
+   */
+  private async handBackRequested(requestID: unknown): Promise<void> {
+    if (!isUUID(requestID)) {
+      this.sendToMac({ type: "error", error: { code: "invalid_frame", message: "hand-back-request needs a UUID requestID" } });
+      return;
+    }
+    const now = Date.now();
+    const handBack: HandBack = {
+      requestID,
+      askedAt: now,
+      notifyAt: now + this.handBackNotifyAfter,
+      expiresAt: now + this.handBackLifetime,
+      answered: false,
+      notified: false,
+    };
+    const token = (await this.tokens()).device;
+    if (!token) {
+      console.log(`hand-back ${short(requestID)}: no device token`);
+      this.sendToMac({ type: "hand-back-status", requestID, status: "unreachable" });
+      return;
+    }
+    await this.ctx.storage.put("handBack", handBack);
+    const result = await this.pushSender().sendBackground(makeHandBackWake(token, { requestID, expiresAt: iso(handBack.expiresAt) }));
+    console.log(`hand-back ${short(requestID)}: background push → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
+    if (await this.dropDeadDeviceToken(token, result)) {
+      await this.ctx.storage.delete("handBack");
+      this.sendToMac({ type: "hand-back-status", requestID, status: "unreachable" });
+      return;
+    }
+    if (result.status >= 200 && result.status < 300) {
+      this.sendToMac({ type: "hand-back-status", requestID, status: "asked" });
+    } else {
+      // APNs took no background push: show the notification now.
+      handBack.notifyAt = now;
+      await this.ctx.storage.put("handBack", handBack);
+    }
+    await this.scheduleAlarm();
+    if (handBack.notifyAt <= now) await this.notifyHandBack();
+  }
+
+  /** The phone's progress. Any status means it's awake: no notification needed. */
+  private async handBackStatus(request: Request): Promise<Response> {
+    const body = await readJSON<{ requestID?: string; status?: string }>(request);
+    if (!isUUID(body?.requestID) || !isHandBackStatus(body?.status)) {
+      throw new HttpError(400, "invalid_request", "requestID must be a UUID and status a short word");
+    }
+    const handBack = await this.ctx.storage.get<HandBack>("handBack");
+    if (!handBack || handBack.requestID.toLowerCase() !== body.requestID.toLowerCase()) return empty();
+    if (!handBack.answered) {
+      handBack.answered = true;
+      await this.ctx.storage.put("handBack", handBack);
+      await this.scheduleAlarm();
+    }
+    console.log(`hand-back ${short(handBack.requestID)}: phone says ${body.status}`);
+    this.sendToMac({ type: "hand-back-status", requestID: handBack.requestID, status: body.status });
+    return empty();
+  }
+
+  /** The background push got no answer in time: a notification whose tap hands back. */
+  private async notifyHandBack(): Promise<void> {
+    const handBack = await this.ctx.storage.get<HandBack>("handBack");
+    if (!handBack || handBack.answered || handBack.notified) return;
+    const token = (await this.tokens()).device;
+    const record = await this.record();
+    handBack.notified = true;
+    await this.ctx.storage.put("handBack", handBack);
+    if (!token || !record) {
+      this.sendToMac({ type: "hand-back-status", requestID: handBack.requestID, status: "unreachable" });
+      return;
+    }
+    const request = { requestID: handBack.requestID, expiresAt: iso(handBack.expiresAt) };
+    const result = await this.pushSender().sendAlert(makeHandBackAlert(token, record.mac.name, request));
+    console.log(`hand-back ${short(handBack.requestID)}: notification → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
+    const delivered = result.status >= 200 && result.status < 300;
+    if (!delivered) await this.dropDeadDeviceToken(token, result);
+    this.sendToMac({ type: "hand-back-status", requestID: handBack.requestID, status: delivered ? "notified" : "unreachable" });
+  }
+
+  /** True, having forgotten it, when APNs says the device token is dead. */
+  private async dropDeadDeviceToken(token: string, result: PushResult): Promise<boolean> {
+    if (!tokenIsDead(result)) return false;
+    const tokens = await this.tokens();
+    if (tokens.device === token) {
+      delete tokens.device;
+      await this.ctx.storage.put("tokens", tokens);
+    }
+    return true;
+  }
+
   // MARK: Timers
 
   async alarm(): Promise<void> {
@@ -882,6 +1035,12 @@ export class Pairing extends DurableObject<Env> {
       }
     }
     if (changed) await this.ctx.storage.put("claims", claims);
+    const handBack = await this.ctx.storage.get<HandBack>("handBack");
+    if (handBack && now >= handBack.expiresAt) {
+      await this.ctx.storage.delete("handBack");
+    } else if (handBack && !handBack.answered && !handBack.notified && now >= handBack.notifyAt) {
+      await this.notifyHandBack();
+    }
     await this.scheduleAlarm();
   }
 
@@ -892,6 +1051,8 @@ export class Pairing extends DurableObject<Env> {
     if (session && !session.macAway && disconnectedAt) deadlines.push(disconnectedAt + this.disconnectGrace);
     if (this.pausedTimeout > 0 && session?.pausedSince) deadlines.push(session.pausedSince + this.pausedTimeout);
     for (const claim of Object.values(await this.claims())) deadlines.push(claim.expiresAt);
+    const handBack = await this.ctx.storage.get<HandBack>("handBack");
+    if (handBack) deadlines.push(handBack.answered || handBack.notified ? handBack.expiresAt : handBack.notifyAt);
     if (deadlines.length === 0) {
       await this.ctx.storage.deleteAlarm();
       return;

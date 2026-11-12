@@ -818,3 +818,114 @@ describe("artwork", () => {
     expect((await call("PUT", `/v1/artwork/${id}`, { token: phoneToken, raw: jpeg, headers: { "Content-Type": "image/jpeg" } })).status).toBe(404);
   });
 });
+
+describe("continue from iPhone (hand-back)", () => {
+  const deviceToken = "9a".repeat(32);
+  const requestID = () => crypto.randomUUID().toUpperCase();
+
+  async function withDevice() {
+    const setup = await playingSetup();
+    expect((await call("PUT", "/v1/tokens/device", { token: setup.phoneToken, body: { token: deviceToken } })).status).toBe(204);
+    return setup;
+  }
+
+  const report = (phoneToken: string, id: string, status: string) =>
+    call("POST", "/v1/hand-back/status", { token: phoneToken, body: { requestID: id, status } });
+
+  it("stores the phone's device token, whatever its reminder setting", async () => {
+    const { phoneToken } = await pairedSetup();
+    expect((await call("PUT", "/v1/tokens/device", { token: phoneToken, body: { token: "nothex" } })).status).toBe(400);
+    expect((await call("PUT", "/v1/tokens/device", { token: phoneToken, body: { token: deviceToken } })).status).toBe(204);
+  });
+
+  it("wakes the phone, then passes its progress to the Mac, with no notification", async () => {
+    const { mac, pairingID, phoneToken } = await withDevice();
+    const id = requestID();
+    mac.send({ type: "hand-back-request", requestID: id });
+    expect(await mac.next("hand-back-status")).toEqual({ type: "hand-back-status", requestID: id, status: "asked" });
+    const wake = (await pushes(phoneToken)).filter((p) => p.event === "hand-back");
+    expect(wake).toHaveLength(1);
+    expect(wake[0].payload.aps).toEqual({ "content-available": 1 });
+    expect(wake[0].payload.handBack.requestID).toBe(id);
+    expect(Date.parse(wake[0].payload.handBack.expiresAt) - Date.now()).toBeGreaterThan(100_000);
+
+    expect((await report(phoneToken, id, "working")).status).toBe(204);
+    expect((await mac.next("hand-back-status")).status).toBe("working");
+    // Answered: the deadline passing shows nothing.
+    await editStorage(pairingID, async (storage) => {
+      const h = (await storage.get<any>("handBack"))!;
+      await storage.put("handBack", { ...h, notifyAt: Date.now() - 1 });
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await pushes(phoneToken)).filter((p) => p.event === "hand-back-alert")).toHaveLength(0);
+    expect((await report(phoneToken, id, "done")).status).toBe(204);
+    expect((await mac.next("hand-back-status")).status).toBe("done");
+  });
+
+  it("shows a notification when the background push gets no answer in time", async () => {
+    const { mac, pairingID, phoneToken } = await withDevice();
+    const id = requestID();
+    mac.send({ type: "hand-back-request", requestID: id });
+    await mac.next("hand-back-status");
+    await editStorage(pairingID, async (storage) => {
+      const h = (await storage.get<any>("handBack"))!;
+      await storage.put("handBack", { ...h, notifyAt: Date.now() - 1 });
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await mac.next("hand-back-status")).status).toBe("notified");
+    const alerts = (await pushes(phoneToken)).filter((p) => p.event === "hand-back-alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].collapseID).toBe("hand-back");
+    expect(alerts[0].payload.aps).toEqual({
+      alert: { title: "Continue on Studio Mac?", body: "Tap to play this song on your Mac from where you are." },
+      "thread-id": "hand-back",
+      "interruption-level": "time-sensitive",
+      "relevance-score": 1,
+    });
+    expect(alerts[0].payload.handBack.requestID).toBe(id);
+    // Once only.
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await pushes(phoneToken)).filter((p) => p.event === "hand-back-alert")).toHaveLength(1);
+    // A tap later still reaches the Mac.
+    await report(phoneToken, id, "working");
+    expect((await mac.next("hand-back-status")).status).toBe("working");
+  });
+
+  it("answers unreachable at once without a device token", async () => {
+    const { mac, phoneToken } = await playingSetup();
+    const id = requestID();
+    mac.send({ type: "hand-back-request", requestID: id });
+    expect((await mac.next("hand-back-status")).status).toBe("unreachable");
+    expect((await pushes(phoneToken)).filter((p) => p.event === "hand-back")).toHaveLength(0);
+  });
+
+  it("drops a status for another request, refuses a malformed one, and forgets an old request", async () => {
+    const { mac, pairingID, phoneToken } = await withDevice();
+    const id = requestID();
+    mac.send({ type: "hand-back-request", requestID: id });
+    await mac.next("hand-back-status");
+    expect((await report(phoneToken, requestID(), "done")).status).toBe(204);
+    expect((await report(phoneToken, "not-a-uuid", "done")).status).toBe(400);
+    expect((await report(phoneToken, id, "Done!")).status).toBe(400);
+    await expect(mac.next("hand-back-status", 200)).rejects.toThrow();
+    await editStorage(pairingID, async (storage) => {
+      const h = (await storage.get<any>("handBack"))!;
+      await storage.put("handBack", { ...h, answered: true, expiresAt: Date.now() - 1 });
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await runInDurableObject(pairingStub(pairingID), async (_i, state) => state.storage.get("handBack"))).toBeUndefined();
+    expect((await report(phoneToken, id, "done")).status).toBe(204);
+    await expect(mac.next("hand-back-status", 200)).rejects.toThrow();
+  });
+
+  it("passes the reason on Continue on iPhone's pause through to the Mac", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const id = newCommandID();
+    const command = { id, kind: "pause", issuedAt: new Date().toISOString(), reason: "continue_on_phone" };
+    const answer = call("POST", "/v1/commands", { token: phoneToken, headers: { "Idempotency-Key": id }, body: { command, sessionID } });
+    const forwarded = await mac.next("command");
+    expect(forwarded.command).toEqual(command);
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 1 } });
+    expect((await answer).status).toBe(200);
+  });
+});

@@ -81,6 +81,8 @@ export interface RemoteCommand {
   level?: number;
   /** An `AudioOutput.id`, for `selectOutput`. */
   outputID?: string;
+  /** Why the phone sent it; `continue_on_phone` on Continue on iPhone's pause. Passed through. */
+  reason?: string;
 }
 
 export interface CommandAck {
@@ -135,6 +137,7 @@ export type MacFrame =
   | { type: "artwork"; artwork: ArtworkDescriptor }
   | { type: "goodbye"; reason: string }
   | { type: "pair-decision"; claimID: string; approved: boolean }
+  | { type: "hand-back-request"; requestID: string }
   | { type: "error"; error: ProtocolError };
 
 export type RelayFrame =
@@ -144,6 +147,7 @@ export type RelayFrame =
   | { type: "pair-request"; request: PairRequest }
   | { type: "paired"; phone: DeviceIdentity }
   | { type: "revoked"; reason: string }
+  | { type: "hand-back-status"; requestID: string; status: string }
   | { type: "error"; error: ProtocolError };
 
 
@@ -183,8 +187,25 @@ export function isCommand(v: unknown): v is RemoteCommand {
     text(c.kind, 32) &&
     (c.position === undefined || Number.isFinite(c.position)) &&
     (c.level === undefined || Number.isFinite(c.level)) &&
-    (c.outputID === undefined || text(c.outputID, 256))
+    (c.outputID === undefined || text(c.outputID, 256)) &&
+    (c.reason === undefined || text(c.reason, 64))
   );
+}
+
+/** What a hand-back push carries for the app (API-v1 §14). */
+export interface HandBackRequest {
+  requestID: string;
+  /** ISO-8601. A background push that wakes the app later than this is ignored. */
+  expiresAt: string;
+}
+
+/** A `HandBackStatus` from the phone: an open set of short snake_case words. */
+export function isHandBackStatus(v: unknown): v is string {
+  return typeof v === "string" && /^[a-z_]{1,32}$/.test(v);
+}
+
+export function isUUID(v: unknown): v is string {
+  return typeof v === "string" && UUID.test(v);
 }
 
 export function isAck(v: unknown): v is CommandAck {

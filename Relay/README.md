@@ -186,6 +186,17 @@ whole in `GET /v1/session`, and builds pushes from chosen fields only, so the ca
 Up Next reach the phone and stay out of pushes. A test pins both down (69 tests). No deploy
 was needed.
 
+Continue from iPhone, asked for at the Mac (`contract/hand-back`, API-v1 §14, branch
+`feature/relay-hand-back`). The Mac sends `hand-back-request`; the relay sends the phone's
+app a background push (`apns-push-type: background`, priority 5, to the device token the app
+registers with `PUT /v1/tokens/device`) and tells the Mac `asked`. If no status has come from
+the phone after 5 s (`HAND_BACK_NOTIFY_MS`), the alarm sends a Time Sensitive notification,
+"Continue on <Mac>?", collapse id `hand-back`, expiring after 2 minutes, and tells the Mac
+`notified`. The phone's `POST /v1/hand-back/status` reports go to the Mac as
+`hand-back-status`. A request is forgotten after 2 minutes (`HAND_BACK_EXPIRY_MS`). Without a
+device token, the Mac hears `unreachable` at once. The `reason` on Continue on iPhone's pause
+passes through to the Mac. 76 tests pass. **Not deployed yet.**
+
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
 ```bash

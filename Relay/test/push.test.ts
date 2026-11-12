@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { APNsPushSender, makePush, makeReminder, tokenIsDead, type APNsEnvironment, type EnvironmentStore, type ProviderToken, type ProviderTokenStore } from "../src/push";
+import { APNsPushSender, makeHandBackAlert, makeHandBackWake, makePush, makeReminder, tokenIsDead, type APNsEnvironment, type EnvironmentStore, type ProviderToken, type ProviderTokenStore } from "../src/push";
 import type { NowPlayingAttributes } from "../src/protocol";
 
 const attributes: NowPlayingAttributes = {
@@ -113,6 +113,35 @@ describe("APNsPushSender", () => {
     expect(body.aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." });
     expect(body.aps.sound).toBeUndefined();
     expect(body.aps["interruption-level"]).toBe("time-sensitive");
+  });
+
+  it("wakes the app for Continue from iPhone with a priority-5 background push, and its fallback expires sooner", async () => {
+    const { pem } = await testKey();
+    const seen: Request[] = [];
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(new Request(input, init));
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const sender = new APNsPushSender(
+      { keyP8: pem, keyID: "K", teamID: "T", topic: "com.alistairmerritt.MusicStandBy.push-type.nowplaying", environment: "production" },
+      fetcher,
+    );
+    const request = { requestID: "3E7A1C5B-9D2F-4A68-B0C4-6E8F1A3B5D7C", expiresAt: "2026-11-12T10:02:00.000Z" };
+    expect(await sender.sendBackground(makeHandBackWake("0123abcd", request))).toEqual({ status: 200 });
+    const wake = seen[0];
+    expect(wake.url).toBe("https://api.push.apple.com/3/device/0123abcd");
+    expect(wake.headers.get("apns-push-type")).toBe("background");
+    expect(wake.headers.get("apns-priority")).toBe("5");
+    expect(wake.headers.get("apns-topic")).toBe("com.alistairmerritt.MusicStandBy");
+    expect(wake.headers.get("apns-collapse-id")).toBeNull();
+    expect(await wake.json()).toEqual({ aps: { "content-available": 1 }, handBack: request });
+
+    await sender.sendAlert(makeHandBackAlert("0123abcd", "Studio Mac", request));
+    const alert = seen[1];
+    expect(alert.headers.get("apns-push-type")).toBe("alert");
+    expect(alert.headers.get("apns-collapse-id")).toBe("hand-back");
+    expect(Number(alert.headers.get("apns-expiration"))).toBeLessThanOrEqual(Date.now() / 1000 + 2 * 60 + 1);
+    expect(((await alert.json()) as any).handBack).toEqual(request);
   });
 
   describe("the APNs environment", () => {
