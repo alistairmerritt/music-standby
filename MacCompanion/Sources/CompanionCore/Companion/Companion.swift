@@ -412,12 +412,15 @@ public final class Companion {
         if self.snapshot?.state != snapshot.state || self.snapshot?.track != snapshot.track {
             record("music \(snapshot.state.rawValue)\(snapshot.track.map { ": \($0.title) — \($0.artist)" } ?? "") [\(trigger.rawValue)]")
         }
+        let wasPlaying = self.snapshot?.state == .playing
         self.snapshot = snapshot
-        if snapshot.state == .playing, phoneHasMusic || handBack != nil {
-            // Here now, by Continue from iPhone or otherwise.
+        // Only Music starting here counts. A read taken just before Continue on
+        // iPhone's pause took effect still says playing, and arrives just after
+        // it: seen on the real Mac, 8 ms after the pause, 12 Nov 2026.
+        if snapshot.state == .playing, !wasPlaying, phoneHasMusic || handBack != nil {
             phoneHasMusic = false
             handBack = nil
-            recordHandBack("Music plays here: Continue from iPhone is over")
+            recordHandBack("Music started here: Continue from iPhone is over")
         }
         let artworkID = await artworkID(for: snapshot)
         let queue = await remoteQueue(for: snapshot)

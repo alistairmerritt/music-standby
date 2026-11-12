@@ -100,6 +100,18 @@ import StandByProtocol
         await eventually { !r.companion.phoneHasMusic }
     }
 
+    @Test func aReadFromBeforeThePauseDoesntTakeContinueFromIPhoneAway() async throws {
+        let r = await rig()
+        r.companion.settleDelay = .milliseconds(300)
+        let marked = await r.relay.simulate(RemoteCommand(kind: .pause, reason: .continueOnPhone))
+        await eventually { await r.relay.ack(for: marked)?.accepted == true }
+        // A read taken while Music still said playing lands after the pause.
+        r.music.state = "playing"
+        r.companion.refresh()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(r.companion.phoneHasMusic)
+    }
+
     @Test func continueFromIPhoneAsksTheRelayAndFollowsItsAnswers() async throws {
         let r = await rig(state: "paused")
         r.companion.continueFromPhone()
