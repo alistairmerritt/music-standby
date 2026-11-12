@@ -91,6 +91,15 @@ public final class Companion {
 
     @ObservationIgnored private let artworkLookup: (any CatalogArtworkLookup)?
     @ObservationIgnored private var catalogArtwork: [String: CatalogEntry] = [:]
+    /// Music's remote protocol, once the companion is paired with Music: the
+    /// catalogue ID and Up Next. Nil leaves both out of the state.
+    @ObservationIgnored public var remote: (any MusicRemoteReading)? {
+        didSet { remoteRead = nil }
+    }
+    /// One read of `remote` per song and playback state, shared by the
+    /// snapshots in between (Up Next lags an edit until the next of those).
+    @ObservationIgnored private var remoteRead: (key: String, task: Task<RemoteQueue?, Never>)?
+    static let remoteWait: Duration = .milliseconds(400)
     static let catalogRetryAfterFailure: TimeInterval = 60
     static let catalogRetryAfterNoMatch: TimeInterval = 1800
 
@@ -345,12 +354,34 @@ public final class Companion {
         }
         self.snapshot = snapshot
         let artworkID = await artworkID(for: snapshot)
-        guard let message = publisher.ingest(snapshot, artworkID: artworkID) else { return }
+        let queue = await remoteQueue(for: snapshot)
+        guard let message = publisher.ingest(snapshot, artworkID: artworkID, queue: queue) else { return }
         store.lastRevision = message.revision
         store.saveListeningSession(message.listeningSessionID, now: now())
         self.message = message
         await uploadAhead(message)
         await send(.state(message))
+    }
+
+    /// The remote's answer for this song, if it comes within `remoteWait`; a
+    /// later answer serves the next snapshot of the same song, such as the
+    /// one that brings its artwork.
+    private func remoteQueue(for snapshot: MusicSnapshot) async -> RemoteQueue? {
+        guard let remote, let track = snapshot.track else { return nil }
+        let key = "\(track.trackID)|\(snapshot.state.rawValue)"
+        if remoteRead?.key != key {
+            remoteRead = (key, Task { await remote.queue(current: track) })
+        }
+        guard let task = remoteRead?.task else { return nil }
+        if let answer = await Self.waitAtMost(Self.remoteWait, { await task.value }) { return answer }
+        // Slower than that (a catalogue lookup): read Music again once it's in,
+        // so the answer goes out without waiting for the next change.
+        Task { [weak self] in
+            _ = await task.value
+            guard let self, self.remoteRead?.key == key else { return }
+            self.refresh()
+        }
+        return nil
     }
 
     private func sendCurrentState() async {

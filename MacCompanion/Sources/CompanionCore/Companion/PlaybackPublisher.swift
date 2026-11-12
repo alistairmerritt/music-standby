@@ -26,7 +26,10 @@ public struct PlaybackPublisher: Sendable {
 
     /// Returns a message when the snapshot differs visibly from the last one
     /// sent, with a fresh revision. Returns nil for progress and repeats.
-    public mutating func ingest(_ snapshot: MusicSnapshot, artworkID: String?, makeSessionID: () -> UUID = UUID.init) -> PlaybackMessage? {
+    /// `queue`, from Music's remote protocol, adds the catalogue ID and Up
+    /// Next; Up Next alone never makes a message.
+    public mutating func ingest(_ snapshot: MusicSnapshot, artworkID: String?, queue: RemoteQueue? = nil,
+                                makeSessionID: () -> UUID = UUID.init) -> PlaybackMessage? {
         if snapshot.state == .error, heldErrors < errorsToHold, let last = lastSent, last.state == .playing || last.state == .paused {
             heldErrors += 1
             return nil
@@ -34,22 +37,25 @@ public struct PlaybackPublisher: Sendable {
         if snapshot.state != .error { heldErrors = 0 }
 
         let session = sessions.update(for: snapshot.state, makeID: makeSessionID)
-        var candidate = Self.message(for: snapshot, artworkID: artworkID, session: session, revision: latestRevision)
+        var candidate = Self.message(for: snapshot, artworkID: artworkID, queue: queue, session: session, revision: latestRevision)
         guard candidate.hasVisibleChange(from: lastSent) else { return nil }
         candidate.revision = revisions.next()
         lastSent = candidate
         return candidate
     }
 
-    static func message(for snapshot: MusicSnapshot, artworkID: String?, session: UUID?, revision: UInt64) -> PlaybackMessage {
+    static func message(for snapshot: MusicSnapshot, artworkID: String?, queue: RemoteQueue? = nil, session: UUID?,
+                        revision: UInt64) -> PlaybackMessage {
         let track = snapshot.track.map {
-            TrackMetadata(id: $0.trackID, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration, artworkID: artworkID)
+            TrackMetadata(id: $0.trackID, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration, artworkID: artworkID,
+                          catalogID: queue?.catalogID)
         }
         let canSkip = track != nil && (snapshot.state == .playing || snapshot.state == .paused)
         return PlaybackMessage(
             revision: revision, state: snapshot.state, elapsedTime: track == nil ? 0 : snapshot.position,
             capturedAt: StandByWire.wirePrecision(snapshot.capturedAt), track: track, canGoNext: canSkip, canGoPrevious: canSkip,
             listeningSessionID: session, detail: snapshot.detail,
-            volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs)
+            volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs,
+            upNext: track == nil ? nil : queue?.upNext)
     }
 }

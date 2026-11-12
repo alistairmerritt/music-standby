@@ -339,12 +339,59 @@ case "watch":
         return 0
     }
 
+case "remote":
+    // Read-only: the current song's catalogue ID and Up Next over Music's
+    // remote protocol, with a pairing made elsewhere (the app, or a probe).
+    run {
+        let options = Array(arguments.dropFirst())
+        if options.first == "pair", options.count == 2 {
+            // Pairs a test remote and writes "GUID SERVICE-NAME" to the file
+            // (owner-only), never to the screen: the GUID lets Music be read.
+            let pairer = MusicRemotePairer(name: "Second Chair test")
+            print("In Music, click “\(pairer.name)” under Devices in the sidebar and enter \(pairer.code). Waiting…")
+            do {
+                let pairing = try await pairer.pair()
+                FileManager.default.createFile(atPath: options[1], contents: Data("\(pairing.guid) \(pairing.serviceName)".utf8),
+                                               attributes: [.posixPermissions: 0o600])
+                print("paired with Music's \(pairing.serviceName); saved to \(options[1])")
+                return 0
+            } catch {
+                print("pairing failed: \(error)")
+                return 1
+            }
+        }
+        guard options.count >= 2 else {
+            print("usage: msbctl remote GUID SERVICE-NAME   (from a pairing: 16 hex digits, and Music's _touch-able name)")
+            return 2
+        }
+        let client = MusicRemoteClient(pairing: MusicRemotePairing(guid: options[0], serviceName: options[1]))
+        let reader = options.contains("--no-catalog") ? client as any MusicRemoteReading
+            : CatalogFillingRemote(remote: client, lookup: ITunesCatalogIDs())
+        let snapshot = await MusicController().snapshot()
+        let started = Date()
+        let queue = await reader.queue(current: snapshot.track)
+        print("now: \(snapshot.track.map { "\($0.title) — \($0.artist), persistent ID \($0.persistentID ?? "-")" } ?? "nothing")")
+        print("remote: \(await client.status) in \(ms(since: started)) ms")
+        guard let queue else { return 1 }
+        print("catalogue ID: \(queue.catalogID ?? "-")")
+        print("Up Next: \(queue.upNext.count)")
+        print("  with a catalogue ID: \(queue.upNext.filter { $0.catalogID != nil }.count)")
+        for (index, entry) in queue.upNext.prefix(5).enumerated() {
+            print("  \(index + 1). \(entry.title) — \(entry.artist) (\(Int(entry.duration)) s) catalogue \(entry.catalogID ?? "-")")
+        }
+        let again = Date()
+        _ = await reader.queue(current: snapshot.track)
+        print("second read (library cached): \(ms(since: again)) ms")
+        return 0
+    }
+
 default:
     print("""
     usage: msbctl snapshot
            msbctl artwork [--out DIR]
            msbctl compare [ROUNDS]
            msbctl control play|pause|playpause|next|previous
+           msbctl remote GUID SERVICE-NAME [--no-catalog] | pair FILE
            msbctl watch [SECONDS] [--no-catalog] [--relay URL [--credentials FILE] [--pair] [--auto-approve]]
     """)
     exit(arguments.isEmpty ? 0 : 2)

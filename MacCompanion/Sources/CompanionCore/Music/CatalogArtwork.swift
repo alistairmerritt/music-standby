@@ -69,15 +69,18 @@ public struct ITunesCatalogArtwork: CatalogArtworkLookup {
         public var collectionName: String?
         public var trackTimeMillis: Int?
         public var artworkUrl100: String?
+        /// The catalogue ID, as `TrackMetadata.catalogID`.
+        public var trackId: Int?
 
         public init(kind: String? = "song", trackName: String?, artistName: String?, collectionName: String?,
-                    trackTimeMillis: Int?, artworkUrl100: String?) {
+                    trackTimeMillis: Int?, artworkUrl100: String?, trackId: Int? = nil) {
             self.kind = kind
             self.trackName = trackName
             self.artistName = artistName
             self.collectionName = collectionName
             self.trackTimeMillis = trackTimeMillis
             self.artworkUrl100 = artworkUrl100
+            self.trackId = trackId
         }
     }
 
@@ -97,13 +100,22 @@ public struct ITunesCatalogArtwork: CatalogArtworkLookup {
     /// `search?term=…&media=music&entity=song`, encoded by hand: URLComponents
     /// leaves `+` alone, which the server reads as a space.
     public static func searchURL(for query: CatalogQuery, country: String) -> URL {
-        let term = "\(query.artist) \(withoutCredits(query.title))"
-            .replacingOccurrences(of: "&", with: " ")
-            .split(separator: " ").joined(separator: " ")
+        searchURL(term: "\(query.artist) \(withoutCredits(query.title))", limit: 25, country: country)
+    }
+
+    /// Every song of an album in one search: the lead artist and the album name.
+    public static func albumSearchURL(artist: String, album: String, country: String) -> URL {
+        let lead = artist.components(separatedBy: CharacterSet(charactersIn: ",&;")).first ?? artist
+        let name = album.replacingOccurrences(of: #"\s+-\s+(single|ep)\s*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+        return searchURL(term: "\(lead) \(name)", limit: 200, country: country)
+    }
+
+    static func searchURL(term rawTerm: String, limit: Int, country: String) -> URL {
+        let term = rawTerm.replacingOccurrences(of: "&", with: " ").split(separator: " ").joined(separator: " ")
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         func encode(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: allowed) ?? "" }
-        let items = [("term", term), ("media", "music"), ("entity", "song"), ("limit", "25"), ("country", country)]
+        let items = [("term", term), ("media", "music"), ("entity", "song"), ("limit", String(limit)), ("country", country)]
         let query = items.map { "\($0.0)=\(encode($0.1))" }.joined(separator: "&")
         return URL(string: "https://itunes.apple.com/search?\(query)")!
     }

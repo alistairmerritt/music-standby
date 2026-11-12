@@ -6,6 +6,7 @@ import SwiftUI
 struct MenuContent: View {
     let companion: Companion
     let relay: RelayAccount?
+    let musicRemote: MusicRemoteAccount
     let launchAtLogin: LaunchAtLogin
 
     var body: some View {
@@ -13,6 +14,8 @@ struct MenuContent: View {
             NowPlayingSection(companion: companion)
             Divider()
             ConnectionSection(companion: companion, relay: relay)
+            Divider()
+            MusicRemoteSection(account: musicRemote)
             Divider()
             LaunchAtLoginRow(launchAtLogin: launchAtLogin)
             if let mock = companion.transport as? MockRelayTransport {
@@ -180,6 +183,42 @@ private struct Notice: View {
                 if let action { Button(action.0, action: action.1).padding(.top, 2) }
             }
         }
+    }
+}
+
+// MARK: - Music's remote protocol
+
+/// Pairing with Music as a remote, for Up Next and Continue on iPhone.
+private struct MusicRemoteSection: View {
+    let account: MusicRemoteAccount
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Continue on iPhone").font(.headline)
+            switch account.state {
+            case .unpaired:
+                note("Pair once with Music, and your iPhone can pick up the song and Up Next where the Mac is.")
+                Button("Pair with Music…") { account.startPairing() }
+            case .pairing(let code):
+                note("In Music, click “Second Chair” under Devices in the sidebar, then enter this code:")
+                Text(code.map(String.init).joined(separator: " ")).font(.system(.title, design: .monospaced))
+                Button("Cancel") { account.cancelPairing() }
+            case .paired:
+                note("Paired with Music. Your iPhone sees what’s playing and what’s next.")
+                Button("Unpair") { account.forget() }
+            case .forgottenByMusic:
+                note("Music has forgotten this pairing (Forget All Remotes). Pair again to continue on iPhone.")
+                Button("Pair with Music…") { account.startPairing() }
+            case .failed(let message):
+                note(message)
+                Button("Try Again") { account.startPairing() }
+            }
+        }
+        .task { await account.checkStatus() }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }
 

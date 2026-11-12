@@ -8,6 +8,7 @@ struct MusicStandByApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var companion: Companion
     @State private var relay: RelayAccount?
+    @State private var musicRemote: MusicRemoteAccount
     @State private var launchAtLogin = LaunchAtLogin()
 
     init() {
@@ -30,15 +31,27 @@ struct MusicStandByApp: App {
                 }
             }
         }
+        let musicRemote = MusicRemoteAccount()
+        // Songs not in the library have no catalogue ID over Music's remote
+        // protocol; they're looked up, unless `catalogArtwork` is off.
+        let lookup: (any CatalogIDLookup)? = (UserDefaults.standard.object(forKey: "catalogArtwork") as? Bool) == false ? nil : ITunesCatalogIDs()
+        let reader = { (client: MusicRemoteClient?) -> (any MusicRemoteReading)? in
+            guard let client else { return nil }
+            guard let lookup else { return client }
+            return CatalogFillingRemote(remote: client, lookup: lookup)
+        }
+        companion.remote = reader(musicRemote.client)
+        musicRemote.onClientChange = { [weak companion] client in companion?.remote = reader(client) }
         companion.start()
         AppDelegate.companion = companion
         _companion = State(initialValue: companion)
         _relay = State(initialValue: relay)
+        _musicRemote = State(initialValue: musicRemote)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(companion: companion, relay: relay, launchAtLogin: launchAtLogin)
+            MenuContent(companion: companion, relay: relay, musicRemote: musicRemote, launchAtLogin: launchAtLogin)
         } label: {
             Image(systemName: companion.snapshot?.state == .automationDenied ? "exclamationmark.triangle" : "music.note")
                 .accessibilityLabel("Second Chair")

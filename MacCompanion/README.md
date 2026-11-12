@@ -48,6 +48,12 @@ doesn't print it. The app uses `https://<host>`. `relayURL` in its defaults stil
 it, for a development relay (`defaults write com.alistairmerritt.MusicStandBy.Mac relayURL
 http://127.0.0.1:8787`); with neither, it runs on the built-in mock. See `RelayEndpoint`.
 
+**Continue on iPhone.** The menu's Continue on iPhone section pairs the companion with
+Music as a remote (Music's sidebar, Devices, a 4-digit code). After that every state carries
+the song's Apple Music catalogue ID and Up Next, which the iPhone app uses to carry on in
+Apple Music there. `msbctl remote pair FILE` makes a test pairing, and
+`msbctl remote GUID SERVICE-NAME` reads the queue with it. See STATUS.
+
 ## Release
 
 ```bash

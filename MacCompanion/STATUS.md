@@ -13,13 +13,49 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 119 tests in 13 suites pass (`scripts/test.sh`, 12 November) |
+| Unit tests | 132 tests in 19 suites pass (`scripts/test.sh`, 12 November) |
 | Shared protocol | 60 tests in 10 suites pass (`scripts/test.sh`, 12 November); builds for iOS with `xcodebuild`. This branch's copy has the song-ID change of 11 November (`pid:<id>-<12 hex>`), which `feature/ios` and `feature/relay` don't (59 tests there); neither needs it, since both only compare IDs |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
 | Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. On 10 November it drove real Music from a real iPhone through the deployed relay (below). The menu has never been clicked by hand |
 | Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
+
+## Continue on iPhone (12 November 2026)
+
+**Built and working on the real devices.** The phone's app starts the Mac's song in Apple
+Music on the iPhone, at the Mac's position and with its Up Next, then pauses the Mac.
+
+The Mac side reads what AppleScript can't through Music's remote-control protocol (DACP,
+the one Apple's iTunes Remote app uses), in `Sources/CompanionCore/Remote`:
+
+- **Pairing.** The menu's Continue on iPhone section → Pair with Music… advertises the
+  companion as a remote (`_touch-remote._tcp`); Music lists it under Devices in its sidebar,
+  the person types the 4-digit code, and Music calls `/pair` with its service name. The GUID
+  and service name go in the Keychain (`MusicRemotePairingStore`). Undo in Music: Settings ›
+  Advanced › Forget All Remotes (all remotes at once; there's no single removal).
+- **Reading.** `MusicRemoteClient` finds Music's server through Bonjour (`_touch-able._tcp`,
+  advertised once a remote is paired; the port changed from 58003 to 50520 when Music
+  restarted, and the pairing survived), logs in, and reads `playqueue-contents` (Up Next)
+  plus the library's catalogue IDs (`aeSI`, `com.apple.itunes.itms-songid`): 12,679 songs in
+  0.3 s, re-read at most once a minute. `mper` equals AppleScript's persistent ID, which is
+  how the current song is matched. It only reads.
+- **Songs outside the library** have no catalogue ID over DACP (database 0, only title,
+  artist, album, genre, length). `ITunesCatalogIDs` looks them up through the iTunes Search
+  API, one album search at a time (lead artist and album), at most 4 a read, matching title,
+  artist and album or a length within 3 s; found IDs are kept, misses retried after 30
+  minutes. On the real queue (an album played from Apple Music): the current song and 12 of
+  19 Up Next found, three checked against Apple's lookup. Off with `catalogArtwork` false.
+- **In the state.** `track.catalogID` and `upNext` (at most 25), from one read per song and
+  playback state. A state waits at most 0.4 s for it; a slower answer (a catalogue search
+  takes 1–4 s) triggers a fresh read so it goes out anyway. Up Next alone isn't a visible
+  change, so a queue edit costs no push.
+- `msbctl remote GUID SERVICE-NAME [--no-catalog]` and `msbctl remote pair FILE` exercise
+  the same code from the shell.
+
+On the devices: the song moved to the phone at once; the phone's pause reached the Mac
+(`accepted`) a second later; with the lookup, the queue came too. Not yet seen: a Mac with
+a Local Network prompt for this (none was reported here), and a queue of many albums.
 
 ## Ready for other people's Macs (12 November 2026)
 
