@@ -2,14 +2,25 @@ import AppIntents
 import MediaPlayer
 import StandByKit
 
-/// Continue on iPhone as an action, the same steps as the app's button.
-/// It tries without opening the app. If Apple Music here won't start that
-/// way, it asks to open the app and tries again: whether a background action
-/// may start Apple Music hasn't been seen on an iPhone yet.
+/// Continue on iPhone as an action, the same steps as the app's button,
+/// then the Music app, as the button does. It runs without opening Second
+/// Chair: on an iPhone on 12 November 2026 Apple Music started from the
+/// background. Should that ever fail, it opens Second Chair and tries again.
 struct ContinueOnIPhoneIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on iPhone"
     static let description: IntentDescription? = IntentDescription("Plays the song from your Mac on this iPhone, from the same point and with your Up Next queue, then pauses your Mac. Your Mac keeps playing if the song can’t start here.")
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
+
+    /// On by default, as the app's button opens Music. Off for an automation
+    /// that shouldn't bring an app to the screen, such as one in the car.
+    @Parameter(title: "Open Music", description: "Show the Music app once the song is playing here.", default: true)
+    var opensMusic: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Continue on iPhone") {
+            \.$opensMusic
+        }
+    }
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -30,13 +41,16 @@ struct ContinueOnIPhoneIntent: AppIntent {
                 return await remote.handover().continueOnPhone(with: player)
             }
         }
+        let dialog: IntentDialog
         switch outcome {
-        case .continued: return .result(dialog: "Continuing on your iPhone.")
-        case .macStillPlaying: return .result(dialog: "Playing on your iPhone, but your Mac didn’t pause.")
+        case .continued: dialog = "Continuing on your iPhone."
+        case .macStillPlaying: dialog = "Playing on your iPhone, but your Mac didn’t pause."
         case .unavailable: throw ShortcutError("Nothing on your Mac can be continued here. The song has to be in Apple Music.")
         case .notAllowed: throw ShortcutError("Allow access to Apple Music in Settings to continue listening on your iPhone.")
         case .didNotStart: throw ShortcutError("Couldn’t start playback on your iPhone. Music is still playing on your Mac.")
         }
+        guard opensMusic else { return .result(dialog: dialog) }
+        return .result(opensIntent: OpenURLIntent(SystemMusicPhonePlayer.appURL), dialog: dialog)
     }
 }
 

@@ -231,6 +231,7 @@ private struct SeekBar: View {
 /// while the music is already on that side; with both paused, both work.
 private struct HandoffSection: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
     let player: SystemMusicPhonePlayer
     @Binding var here: PhoneNowPlaying?
     @State private var working = false
@@ -272,10 +273,13 @@ private struct HandoffSection: View {
 
     private func continueHere() async -> String? {
         switch await model.continueOnPhone(with: player) {
-        case .unavailable: "This song couldn’t be found in Apple Music."
-        case .notAllowed: "Allow access to Apple Music in Settings to continue listening on your iPhone."
-        case .didNotStart: "Couldn’t start playback on your iPhone. Music is still playing on your Mac."
-        case .continued, .macStillPlaying: nil
+        case .unavailable: return "This song couldn’t be found in Apple Music."
+        case .notAllowed: return "Allow access to Apple Music in Settings to continue listening on your iPhone."
+        case .didNotStart: return "Couldn’t start playback on your iPhone. Music is still playing on your Mac."
+        case .continued, .macStillPlaying:
+            // The song is Apple Music's now: show it there.
+            openURL(SystemMusicPhonePlayer.appURL)
+            return nil
         }
     }
 

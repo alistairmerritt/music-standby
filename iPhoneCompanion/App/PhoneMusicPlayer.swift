@@ -7,6 +7,9 @@ import StandByKit
 /// matching the catalogue on an iPhone on 11 November 2026.
 @MainActor
 final class SystemMusicPhonePlayer: PhoneMusicPlaying {
+    /// Opens the Music app, where Continue on iPhone leaves the song.
+    nonisolated static let appURL = URL(string: "music://")!
+
     private let player = MPMusicPlayerController.systemMusicPlayer
 
     func requestAccess() async -> Bool {
