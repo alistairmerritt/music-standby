@@ -54,6 +54,33 @@ app=$archive/Products/Applications/MusicStandBy.app
 [[ "$(plutil -extract MSBRelayHost raw "$app/Info.plist" 2>/dev/null)" == "$host" ]] || fail "the archived app has no relay host"
 echo "› archived, relay host built in"
 
+# App Store Connect refuses an App Intent description that contains an Apple
+# product name, even inside a word (ITMS-90626, 12 Nov 2026: "cannot contain
+# 'mac'"). Titles, Siri phrases and summaries passed.
+intents=$app/Metadata.appintents/extract.actionsdata
+if [[ -f "$intents" ]]; then
+  python3 - "$intents" <<'PY' || fail "an App Intent description names an Apple product; see above"
+import json, re, sys
+banned = re.compile(r"mac|iphone|ipad|apple|siri", re.IGNORECASE)
+bad = []
+def walk(node, path):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            walk(value, path + [key])
+    elif isinstance(node, list):
+        for value in node:
+            walk(value, path)
+    elif isinstance(node, str) and any("description" in p.lower() for p in path) and banned.search(node):
+        bad.append(f"{path[1] if len(path) > 1 else '?'}: {node}")
+for name, action in json.load(open(sys.argv[1])).get("actions", {}).items():
+    walk(action, ["actions", name])
+for line in bad:
+    print("✗ " + line, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+  echo "› App Intent descriptions name no Apple product"
+fi
+
 cat > "$out/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

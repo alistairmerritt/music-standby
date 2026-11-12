@@ -8,7 +8,7 @@ import StandByKit
 /// background. Should that ever fail, it opens Second Chair and tries again.
 struct ContinueOnIPhoneIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on iPhone"
-    static let description: IntentDescription? = IntentDescription("Plays the song from your Mac on this iPhone, from the same point and with your Up Next queue, then pauses your Mac. Your Mac keeps playing if the song can’t start here.")
+    static let description: IntentDescription? = IntentDescription("Plays the song from your computer on this phone, from the same point and with your Up Next queue, then pauses your computer. Your computer keeps playing if the song can’t start here.")
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
 
     /// On by default, as the app's button opens Music. Off for an automation
@@ -58,7 +58,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
 /// the Mac from the same point, when it's in the Mac's queue.
 struct ContinueOnMacIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on Mac"
-    static let description: IntentDescription? = IntentDescription("Plays the song from this iPhone on your Mac from the same point, then pauses Apple Music here. The song has to be in your Mac’s queue, as it is after Continue on iPhone.")
+    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. The song has to be in your computer’s queue, as it is after continuing on this phone.")
     static let supportedModes: IntentModes = .background
 
     @MainActor
