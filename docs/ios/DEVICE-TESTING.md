@@ -6,12 +6,44 @@ You need a Mac with Xcode 27, an iPhone on iOS 27, and a charger that holds the 
 
 1. Open `iPhoneCompanion/MusicStandBy.xcodeproj`.
 2. For both the **MusicStandBy** and **MusicStandByNowPlaying** targets, open **Signing & Capabilities** and choose your team. Don't commit the team change.
-3. On a free Personal Team, remove `aps-environment` and the App Group from both files in `Signing/`, and don't commit that either. Personal Teams can't use push, and `xcodebuild` can't register the group. Keep `keychain-access-groups`. On the paid team, remove only the App Group, until it's registered on the developer site.
+3. On a free Personal Team, remove `aps-environment` and the App Group from both files in `Signing/`, and don't commit that either. Personal Teams can't use push, and `xcodebuild` can't register the group. Keep `keychain-access-groups`. On the paid team nothing needs removing: the App Group was registered for both App IDs on 12 November.
 4. Turn on Developer Mode, build and run, then trust your profile under Settings > General > VPN & Device Management.
 
 **Before installing a new build, tap Stop Showing, and open the app about a minute after the install.** Installing over a live session left an extension running from the old copy of the app, with every command failing.
 
 Without a relay, Debug builds use a built-in fake Mac. Tap **Continue**, then enter any six digits except `000000`, which simulates a rejected code. "Harbour Lights" appears with artwork and moving progress.
+
+## TestFlight and the App Store
+
+```bash
+iPhoneCompanion/scripts/archive.sh
+```
+
+```bash
+iPhoneCompanion/scripts/archive.sh --upload
+```
+
+`archive.sh` archives the Release build with the relay host built in, exports an App Store
+Connect package and checks it carries `aps-environment` `production` and Time Sensitive
+notifications. `--upload` sends it to App Store Connect for TestFlight instead. A plain
+Product → Archive in Xcode leaves `MSB_RELAY_HOST` empty, so that build couldn't pair.
+The script reads the team ID and relay host from `MSB_TEAM_ID` and `MSB_RELAY_HOST`, or from
+`~/.config/second-chair/team-id` and `relay-host`, outside the repository. Build numbers are
+the time (`yyyymmddHHMM`) unless `MSB_BUILD_NUMBER` says otherwise.
+
+Before the first archive:
+1. **The App Group** is registered and enabled for both App IDs (12 November; done by
+   choosing the paid team in Xcode, then `xcodebuild -allowProvisioningUpdates`). Both
+   development profiles now carry it, and a build with the committed entitlements signs.
+   With it, the app and the extension share their artwork cache and command log, which no
+   relay build had done before, so check a build on the phone before inviting anyone.
+2. For `--upload`, create the app in App Store Connect with the bundle ID
+   `com.alistairmerritt.MusicStandBy`.
+
+The first export makes an Apple Distribution certificate and App Store profiles through
+automatic signing. TestFlight builds get **production** push tokens. The relay finds that
+out by itself: a token the sandbox refuses with `BadDeviceToken` is tried in production, and
+the environment that works is kept for the pairing (relay README, "APNs status").
 
 ## With the relay
 

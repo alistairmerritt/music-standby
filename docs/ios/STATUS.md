@@ -1,10 +1,10 @@
 # iOS status
 
-Last updated 11 November 2026, branch `feature/ios`.
+Last updated 12 November 2026, branch `feature/ios`.
 
 **Renamed to Second Chair on 11 November 2026.** Only the names people see changed (Home Screen, screens, notifications); bundle identifiers, App IDs, the push topic and the Keychain group keep `MusicStandBy`. Entries below that predate the rename use the old name.
 
-**A remote media session appears in landscape StandBy on a real iPhone, and the new extension sends HTTPS requests and reads a shared Keychain item when its controls are tapped.** All of this used the built-in mock transport. Nothing has talked to a real Mac or relay.
+**A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
 ## Seek, volume and output, 11 November 2026 (evening)
 
@@ -76,7 +76,9 @@ The app registered its push-to-start token 6–13 times within a second of each 
 
 **Reminders (opt-in, 11 November).** Home has a "Remind When Music Starts" toggle, off by default. Turning it on asks for notification permission (alerts only, no sound) and sends the app's push token to the relay (`PUT /v1/tokens/alert`). The relay then sends "Music playing on <Mac>", "Tap to show on your Lock Screen." when the Mac starts playing after 30 minutes without, or when it starts a new session. Each reminder replaces the last. Tapping it opens the app, which brings the player back. It is sent blind, since nothing shows whether the player is on screen, and it isn't shown while the app is open. Tapping it turns showing back on, even after Stop Showing (`activateNowPlaying()` now works before the Mac's state has arrived). `ReminderModel`, the relay calls and the tap have 8 tests. On the iPhone, with the relay's break set to 20 s: turning it on asked for permission and registered the token. After the player was dismissed (Control Centre: "Not Playing"), playing on the Mac delivered the notification, and tapping it brought the player back. A first try had used the in-app Stop Showing button instead of dismissing, which then stopped the tap from bringing it back; that was fixed and retested.
 
-**Reminders are Time Sensitive (12 November).** In StandBy the reminder never appeared. It was an ordinary ("active") alert, and a Focus holds those back; StandBy usually runs under a Work or Sleep Focus (Home Assistant showed Work Focus on). The relay now sends it with `interruption-level: time-sensitive`, and the app has the Time Sensitive Notifications entitlement (added to the App ID by automatic provisioning). On the iPhone, Settings → Notifications → Second Chair now shows "Time Sensitive Notifications: on". Not yet seen arriving in StandBy: it needs the relay deployed and a 30-minute break in playback. Settings that still affect it: a Focus can turn off "Time Sensitive" for its apps; Show Previews "When Unlocked" hides the text in StandBy; StandBy's own "Show Notifications".
+**Reminders are Time Sensitive (12 November).** In StandBy the reminder never appeared. It was an ordinary ("active") alert, and a Focus holds those back; StandBy usually runs under a Work or Sleep Focus (Home Assistant showed Work Focus on). The relay now sends it with `interruption-level: time-sensitive`, and the app has the Time Sensitive Notifications entitlement (added to the App ID by automatic provisioning). On the iPhone, Settings → Notifications → Second Chair now shows "Time Sensitive Notifications: on". The relay with it was deployed the same morning (version `eeae1bd9`). Not yet seen arriving in StandBy: that needs a 30-minute break in playback. Settings that still affect it: a Focus can turn off "Time Sensitive" for its apps; Show Previews "When Unlocked" hides the text in StandBy; StandBy's own "Show Notifications".
+
+**Getting ready for TestFlight (12 November).** `iPhoneCompanion/scripts/archive.sh` archives and exports with the relay host built in, and checks the export is signed for production pushes with Time Sensitive (DEVICE-TESTING, "TestFlight and the App Store"). The Release configuration compiles with the host in its `Info.plist` (unsigned build). The archive itself hasn't run yet; its export will make the team's first Apple Distribution certificate. The App Group was then registered for both App IDs, so builds no longer need temporary entitlements: a Debug build with the committed ones signed for the device. Production push tokens are handled by the relay, which retries a sandbox `BadDeviceToken` in production and remembers the answer per pairing; no app change was needed.
 
 **A session without a track still shows (11 November).** To hide a long-paused player without ending the session, a test relay pushed the session with its track removed 45 s after a pause. Control Centre and the Lock Screen (checked by hand) both kept an empty player, with Previous, Play and Next but no song, rather than hiding it. When Music played again, the song came back by itself, with no need to open the app. Not adopted: an empty player is no better than the paused song, and ending the session would hide the next song until the app is opened. My XCUITest driver can't see the Lock Screen's player while the phone is locked and the screen asleep, even while playing, so Lock Screen checks are by hand.
 
@@ -140,12 +142,14 @@ Once, on an older build, neither app appeared when audio started. That wasn't re
 ## Still to test on a device
 
 - Real-sized artwork as image data. Only a 100-pixel image has run through that route with logging, and the 600 and 1200-pixel test was blocked by the stale process above.
-- Everything committed after `4b306d5`.
+- The Time Sensitive reminder arriving in StandBy under a Focus.
+- Seek and volume from the StandBy screen and the locked Lock Screen. The XCUITest driver can't see either, so these are by hand.
+- A finger, rather than XCUITest's drag, ending a drag on the app's progress bar.
 - HTTPS and Keychain without USB, and over cellular.
 
 ## Passes automated tests
 
-`swift test` from `iPhoneCompanion/StandByKit`: **186 tests**, macOS, Xcode 27.2 (11 November evening). `Shared/StandByProtocol`: 56 tests. The extension's artwork prefetch has no automated test.
+`swift test` from `iPhoneCompanion/StandByKit`: **186 tests**, macOS, Xcode 27.2 (run again on 12 November). `Shared/StandByProtocol`: 59 tests on this branch. `feature/macos` has 60: its copy also has the song-ID change from 11 November (`pid:<id>-<12 hex>`), which the phone doesn't need, since it only compares IDs for equality. The extension's artwork prefetch has no automated test.
 
 | Area | Covers |
 | --- | --- |
