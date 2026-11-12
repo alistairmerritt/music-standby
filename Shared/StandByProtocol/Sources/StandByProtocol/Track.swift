@@ -15,14 +15,41 @@ public struct TrackMetadata: Codable, Equatable, Sendable {
     public var duration: TimeInterval
     /// `ArtworkID` of the album art, or nil when the track has none.
     public var artworkID: String?
+    /// The song's Apple Music catalogue ID (Music's `com.apple.itunes.itms-songid`),
+    /// the id `MPMusicPlayerController.setQueue(with:)` takes on the phone. Nil
+    /// when the Mac can't tell: it needs the companion paired with Music as a
+    /// remote, and the song in the Mac's library. Added 12 November 2026.
+    public var catalogID: String?
 
-    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, artworkID: String? = nil) {
+    public init(id: String, title: String, artist: String, album: String, duration: TimeInterval, artworkID: String? = nil,
+                catalogID: String? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
         self.album = album
         self.duration = duration
         self.artworkID = artworkID
+        self.catalogID = catalogID
+    }
+}
+
+/// A song Music will play after the current one (its Up Next).
+public struct QueuedTrack: Codable, Equatable, Sendable {
+    /// Apple Music catalogue ID, as `TrackMetadata.catalogID`. Nil when unknown.
+    public var catalogID: String?
+    public var title: String
+    public var artist: String
+    /// Nil from a Mac that doesn't say.
+    public var album: String?
+    /// Seconds. `0` means unknown.
+    public var duration: TimeInterval
+
+    public init(catalogID: String?, title: String, artist: String, album: String? = nil, duration: TimeInterval) {
+        self.catalogID = catalogID
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.duration = duration
     }
 }
 
