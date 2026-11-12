@@ -29,7 +29,7 @@ Music on the iPhone, at the Mac's position and with its Up Next, then pauses the
 The Mac side reads what AppleScript can't through Music's remote-control protocol (DACP,
 the one Apple's iTunes Remote app uses), in `Sources/CompanionCore/Remote`:
 
-- **Pairing.** The menu's Continue on iPhone section → Pair with Music… advertises the
+- **Pairing.** The menu's Continue on iPhone section → Connect to Music… advertises the
   companion as a remote (`_touch-remote._tcp`); Music lists it under Devices in its sidebar,
   the person types the 4-digit code, and Music calls `/pair` with its service name. The GUID
   and service name go in the Keychain (`MusicRemotePairingStore`). Undo in Music: Settings ›

@@ -43,7 +43,7 @@
 		<string>_touch-able._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Second Chair pairs with Music on this Mac, as Apple’s iTunes Remote app does, to read Up Next so your iPhone can continue where the Mac is.</string>
+	<string>Second Chair connects to Music on this Mac to let you continue listening on your iPhone, including your Up Next queue.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Second Chair reads what is playing in Music and passes your iPhone's play, pause and skip controls back to it.</string>
 	<key>NSHumanReadableCopyright</key>

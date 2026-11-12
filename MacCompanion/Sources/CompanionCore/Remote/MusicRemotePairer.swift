@@ -178,7 +178,9 @@ public final class MusicRemoteAccount {
             } catch MusicRemotePairer.Failure.cancelled {
                 state = client == nil ? .unpaired : .paired
             } catch {
-                state = .failed("Couldn’t pair with Music: \(error.localizedDescription)")
+                Logger(subsystem: "com.alistairmerritt.MusicStandBy.Mac", category: "music-remote")
+                    .error("pairing with Music failed: \(String(describing: error), privacy: .public)")
+                state = .failed("Couldn’t connect to Music. Try again.")
             }
             self.pairer = nil
         }

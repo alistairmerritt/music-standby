@@ -197,18 +197,18 @@ private struct MusicRemoteSection: View {
             Text("Continue on iPhone").font(.headline)
             switch account.state {
             case .unpaired:
-                note("Pair once with Music, and your iPhone can pick up the song and Up Next where the Mac is.")
-                Button("Pair with Music…") { account.startPairing() }
+                note("Connect Second Chair to Music to continue listening on your iPhone, including your Up Next queue.")
+                Button("Connect to Music…") { account.startPairing() }
             case .pairing(let code):
-                note("In Music, click “Second Chair” under Devices in the sidebar, then enter this code:")
+                note("In Music, select Second Chair under Devices, then enter this code:")
                 Text(code.map(String.init).joined(separator: " ")).font(.system(.title, design: .monospaced))
                 Button("Cancel") { account.cancelPairing() }
             case .paired:
-                note("Paired with Music. Your iPhone sees what’s playing and what’s next.")
-                Button("Unpair") { account.forget() }
+                note("Connected to Music. Your iPhone can pick up where your Mac leaves off.")
+                Button("Disconnect") { account.forget() }
             case .forgottenByMusic:
-                note("Music has forgotten this pairing (Forget All Remotes). Pair again to continue on iPhone.")
-                Button("Pair with Music…") { account.startPairing() }
+                note("The connection to Music has been lost. Connect again to continue listening on your iPhone.")
+                Button("Reconnect…") { account.startPairing() }
             case .failed(let message):
                 note(message)
                 Button("Try Again") { account.startPairing() }
