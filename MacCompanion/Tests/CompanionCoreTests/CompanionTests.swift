@@ -83,6 +83,62 @@ import StandByProtocol
         #expect(ackIndex! < stateIndex!)
     }
 
+    // MARK: Continue from iPhone (docs/relay/API-v1.md §14)
+
+    @Test func continueOnIPhonesPauseOffersContinueFromIPhoneUntilMusicPlaysHere() async throws {
+        let r = await rig()
+        let plain = await r.relay.simulateCommand(.pause)
+        await eventually { await r.relay.ack(for: plain) != nil }
+        #expect(!r.companion.phoneHasMusic, "an ordinary pause doesn't")
+        r.music.state = "playing"
+        let marked = await r.relay.simulate(RemoteCommand(kind: .pause, reason: .continueOnPhone))
+        await eventually { await r.relay.ack(for: marked)?.accepted == true }
+        #expect(r.companion.phoneHasMusic)
+        #expect(r.companion.events.contains { $0.text.contains("pause (continue_on_phone)") })
+        let play = await r.relay.simulateCommand(.play)
+        await eventually { await r.relay.ack(for: play) != nil }
+        await eventually { !r.companion.phoneHasMusic }
+    }
+
+    @Test func continueFromIPhoneAsksTheRelayAndFollowsItsAnswers() async throws {
+        let r = await rig(state: "paused")
+        r.companion.continueFromPhone()
+        let progress = try #require(r.companion.handBack)
+        #expect(progress.status == nil && !progress.isFinished)
+        await eventually { await r.relay.sent.contains(.handBackRequest(id: progress.id)) }
+        await r.relay.simulate(.handBackStatus(id: UUID(), status: .done))   // someone else's
+        await r.relay.simulate(.handBackStatus(id: progress.id, status: .asked))
+        await eventually { r.companion.handBack?.status == .asked }
+        await r.relay.simulate(.handBackStatus(id: progress.id, status: .working))
+        await eventually { r.companion.handBack?.status == .working }
+        await r.relay.simulate(.handBackStatus(id: progress.id, status: .done))
+        await eventually { r.companion.handBack?.isFinished == true }
+        // The phone's play arrives; once Music plays here the row goes.
+        let play = await r.relay.simulateCommand(.play)
+        await eventually { await r.relay.ack(for: play) != nil }
+        await eventually { r.companion.handBack == nil }
+    }
+
+    @Test func continueFromIPhoneGivesUpWhenNothingAnswers() async throws {
+        let r = await rig(state: "paused")
+        r.companion.handBackTimeout = .milliseconds(50)
+        r.companion.continueFromPhone()
+        await eventually { r.companion.handBack?.timedOut == true }
+        #expect(r.companion.handBack?.isFinished == true)
+        // A late answer still counts.
+        await r.relay.simulate(.handBackStatus(id: r.companion.handBack!.id, status: .working))
+        await eventually { r.companion.handBack?.timedOut == false && r.companion.handBack?.status == .working }
+    }
+
+    @Test func continueFromIPhoneSaysAtOnceWhenTheRelayIsntThere() async throws {
+        let r = await rig(state: "paused")
+        await r.relay.simulateDrop(retryAt: Date().addingTimeInterval(30))
+        await eventually { r.companion.connection.phase != .connected }
+        r.companion.continueFromPhone()
+        #expect(r.companion.handBack?.status == .unreachable)
+        #expect(await !r.relay.sent.contains { if case .handBackRequest = $0 { true } else { false } })
+    }
+
     @Test func pairRequestsWaitForTheMac() async throws {
         let r = await rig()
         let phone = DeviceIdentity(id: "p", name: "Test iPhone", kind: .iPhone)

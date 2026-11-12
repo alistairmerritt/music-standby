@@ -64,6 +64,9 @@ private struct NowPlayingSection: View {
                        detail: companion.snapshot?.detail, action: nil)
             }
             TransportControls(companion: companion)
+            if companion.pairedPhone != nil, companion.phoneHasMusic || companion.handBack != nil {
+                ContinueFromPhoneRow(companion: companion)
+            }
         }
     }
 
@@ -165,6 +168,32 @@ private struct TransportControls: View {
         .font(.title2)
         .frame(maxWidth: .infinity)
         .disabled(!enabled)
+    }
+}
+
+/// Shown once Continue on iPhone has paused this Mac: bring the music back
+/// from the phone (docs/relay/API-v1.md §14).
+private struct ContinueFromPhoneRow: View {
+    let companion: Companion
+
+    var body: some View {
+        let progress = companion.handBack
+        let waiting = progress.map { !$0.isFinished } ?? false
+        VStack(spacing: 4) {
+            Button {
+                companion.continueFromPhone()
+            } label: {
+                Label("Continue from iPhone", systemImage: "iphone.and.arrow.forward")
+            }
+            .disabled(waiting)
+            if let line = progress?.message {
+                HStack(spacing: 6) {
+                    if waiting { ProgressView().controlSize(.mini) }
+                    Text(line).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

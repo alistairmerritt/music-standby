@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import CompanionCore
 import StandByProtocol
@@ -44,6 +45,8 @@ struct MusicStandByApp: App {
         musicRemote.onClientChange = { [weak companion] client in companion?.remote = reader(client) }
         companion.start()
         AppDelegate.companion = companion
+        // The Continue from iPhone Shortcuts action works on this companion.
+        AppDependencyManager.shared.add(dependency: companion)
         _companion = State(initialValue: companion)
         _relay = State(initialValue: relay)
         _musicRemote = State(initialValue: musicRemote)

@@ -27,6 +27,13 @@ public final class Companion {
     public private(set) var pairRequests: [PairRequest] = []
     public private(set) var lastAck: CommandAck?
     public private(set) var events: [CompanionEvent] = []
+    /// True once Continue on iPhone has paused this Mac: the phone has its
+    /// music, so the menu offers Continue from iPhone. False again as soon as
+    /// Music plays here.
+    public private(set) var phoneHasMusic = false
+    /// The last Continue from iPhone request and how far it got. Nil once
+    /// Music plays here, or before the first.
+    public private(set) var handBack: HandBackProgress?
 
     // MARK: Parts
 
@@ -36,6 +43,9 @@ public final class Companion {
     @ObservationIgnored public let device: DeviceIdentity
     /// Wait between a command and re-reading Music. 0.4 s was verified enough.
     @ObservationIgnored public var settleDelay: Duration = .milliseconds(400)
+    /// How long Continue from iPhone waits for the phone before saying it
+    /// didn't answer. The relay forgets a request after 2 minutes.
+    @ObservationIgnored public var handBackTimeout: Duration = .seconds(45)
     /// How long after a track change Music's artwork isn't trusted. Music can
     /// report the previous track's image in that time, then none at all. Was
     /// 1.5 s; 0.75 s since 11 Nov 2026, as the previous track's image from
@@ -203,6 +213,34 @@ public final class Companion {
         monitor.requestRead(.start)
     }
 
+    // MARK: Continue from iPhone
+
+    /// Asks the phone to hand its music back (docs/relay/API-v1.md §14). The
+    /// relay wakes the phone's app, or shows it a notification; the phone
+    /// then skips this Mac to its song, seeks to its position and plays.
+    public func continueFromPhone() {
+        let id = UUID()
+        guard connection.phase == .connected else {
+            handBack = HandBackProgress(id: id, status: .unreachable)
+            record("continue from iPhone: not connected to the relay")
+            return
+        }
+        handBack = HandBackProgress(id: id)
+        record("continue from iPhone: asking")
+        enqueue { [weak self] in await self?.send(.handBackRequest(id: id)) }
+        Task { [weak self, handBackTimeout] in
+            try? await Task.sleep(for: handBackTimeout)
+            self?.handBackTimedOut(id)
+        }
+    }
+
+    private func handBackTimedOut(_ id: UUID) {
+        guard var progress = handBack, progress.id == id, !progress.isFinished else { return }
+        progress.timedOut = true
+        handBack = progress
+        record("continue from iPhone: no answer from the iPhone")
+    }
+
     // MARK: Inbound frames
 
     public func receive(_ frame: RelayFrame) async {
@@ -238,7 +276,15 @@ public final class Companion {
         case .revoked(let reason):
             pairedPhone = nil
             pairRequests.removeAll()
+            phoneHasMusic = false
+            handBack = nil
             record("pairing revoked: \(reason)")
+        case .handBackStatus(let id, let status):
+            guard var progress = handBack, progress.id == id else { return }
+            progress.status = status
+            progress.timedOut = false
+            handBack = progress
+            record("continue from iPhone: \(status)")
         case .error(let error):
             record("relay error \(error.code): \(error.message ?? "")")
         case .unknown(let type):
@@ -314,6 +360,10 @@ public final class Companion {
             case .performed:
                 performed = true
                 ack = .accepted(command.id, revision: publisher.latestRevision)
+                if command.kind == .pause, command.reason == .continueOnPhone {
+                    phoneHasMusic = true
+                    record("the iPhone has the music now")
+                }
             }
         }
         remember(ack)
@@ -363,6 +413,11 @@ public final class Companion {
             record("music \(snapshot.state.rawValue)\(snapshot.track.map { ": \($0.title) — \($0.artist)" } ?? "") [\(trigger.rawValue)]")
         }
         self.snapshot = snapshot
+        if snapshot.state == .playing {
+            // Here now, by Continue from iPhone or otherwise.
+            if phoneHasMusic { phoneHasMusic = false }
+            if handBack != nil { handBack = nil }
+        }
         let artworkID = await artworkID(for: snapshot)
         let queue = await remoteQueue(for: snapshot)
         guard let message = publisher.ingest(snapshot, artworkID: artworkID, queue: queue) else { return }
@@ -766,7 +821,42 @@ extension RemoteCommand {
         case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
         case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
         case .selectOutput: "selectOutput \(outputID ?? "-")"
-        case .play, .pause, .next, .previous: kind.rawValue
+        case .play, .pause, .next, .previous: kind.rawValue + (reason.map { " (\($0))" } ?? "")
+        }
+    }
+}
+
+/// A Continue from iPhone request, as the menu shows it.
+public struct HandBackProgress: Equatable, Sendable {
+    public var id: UUID
+    /// The latest word from the relay or the phone; nil until the first.
+    public var status: HandBackStatus?
+    /// Nothing final came within `Companion.handBackTimeout`.
+    public var timedOut = false
+
+    public init(id: UUID, status: HandBackStatus? = nil, timedOut: Bool = false) {
+        self.id = id
+        self.status = status
+        self.timedOut = timedOut
+    }
+
+    /// No more is coming: an answer, or the wait ran out.
+    public var isFinished: Bool { timedOut || (status?.isFinal ?? false) }
+
+    /// One line for the menu and the Shortcuts action. Nil for a status this
+    /// build doesn't know.
+    public var message: String? {
+        if timedOut { return "Your iPhone didn’t answer. Try again." }
+        switch status {
+        case nil, .asked?: return "Asking your iPhone…"
+        case .notified?: return "Tap the notification on your iPhone."
+        case .working?: return "Your iPhone is handing over…"
+        case .done?: return "Continuing here…"
+        case .nothingPlaying?: return "Nothing is playing on your iPhone."
+        case .notInQueue?: return "The song on your iPhone isn’t in this Mac’s queue."
+        case .failed?: return "Couldn’t continue here. Try again."
+        case .unreachable?: return "Couldn’t reach your iPhone."
+        default: return nil
         }
     }
 }
@@ -781,6 +871,7 @@ extension MacFrame {
         case .artwork(let a): "artwork \(a.artworkID.prefix(12))…"
         case .goodbye(let reason): "goodbye \(reason)"
         case .pairDecision(_, let approved): "pair-decision \(approved)"
+        case .handBackRequest(let id): "hand-back-request \(id)"
         case .error(let e): "error \(e.code)"
         case .unknown(let type): "unknown \(type)"
         }

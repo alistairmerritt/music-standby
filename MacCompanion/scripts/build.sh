@@ -51,8 +51,16 @@ echo "› msbctl"
 swiftc "${common[@]}" -module-name msbctl "${link[@]}" "$root"/Sources/msbctl/*.swift -o "$out/msbctl"
 
 echo "› MusicStandBy"
-swiftc "${common[@]}" -parse-as-library -module-name MusicStandBy "${link[@]}" \
-  "$root"/Sources/MusicStandBy/*.swift -o "$out/MusicStandBy"
+# The app's Shortcuts action (App Intents) needs metadata that Xcode makes from
+# the compiler's const values; the same steps run by hand below.
+app_sources=("$root"/Sources/MusicStandBy/*.swift)
+echo '["AppEntity","AppEnum","AppIntent","AppShortcutsProvider","DynamicOptionsProvider","EntityQuery","IntentValueQuery","Resolver","TransientEntity"]' \
+  > "$out/MusicStandBy_const_extract_protocols.json"
+swiftc "${common[@]}" -parse-as-library -module-name MusicStandBy "${link[@]}" -wmo \
+  -emit-const-values-path "$out/MusicStandBy.swiftconstvalues" \
+  -const-gather-protocols-list "$out/MusicStandBy_const_extract_protocols.json" \
+  -Xlinker -dependency_info -Xlinker "$out/MusicStandBy_dependency_info.dat" \
+  "${app_sources[@]}" -o "$out/MusicStandBy"
 
 echo "› CompanionCoreTests"
 swiftc "${common[@]}" "${testflags[@]}" -parse-as-library -module-name CompanionCoreTests "${link[@]}" \
@@ -82,6 +90,28 @@ if xcrun --find actool >/dev/null 2>&1; then
     | grep -E "error|warning" || true
 else
   echo "› no actool (Command Line Tools only): the app has no icon"
+fi
+# App Intents metadata (Contents/Resources/Metadata.appintents), as Xcode's
+# build does it: without it macOS doesn't offer the Shortcuts action. The
+# processor finds AppIntents.framework in the linker's dependency info, written
+# above, and skips the extraction without it.
+if [[ "$toolchain" == xcode ]] && processor=$(xcrun --find appintentsmetadataprocessor 2>/dev/null); then
+  printf '%s\n' "${app_sources[@]}" > "$out/MusicStandBy.SwiftFileList"
+  echo "$out/MusicStandBy.swiftconstvalues" > "$out/MusicStandBy.SwiftConstValuesFileList"
+  : > "$out/MusicStandBy.EmptyMetadataFileList"
+  "$processor" --toolchain-dir "$(cd "$(dirname "$(xcrun --find swiftc)")/../.." && pwd)" \
+    --module-name MusicStandBy --sdk-root "$sdk" --xcode-version "$(xcodebuild -version | awk '/Build version/ { print $3 }')" \
+    --platform-family macOS --deployment-target "${target##*macos}" --bundle-identifier com.alistairmerritt.MusicStandBy.Mac \
+    --output "$app/Contents/Resources" --target-triple "$target" --binary-file "$app/Contents/MacOS/MusicStandBy" \
+    --dependency-file "$out/MusicStandBy_dependency_info.dat" --stringsdata-file "$out/ExtractedAppShortcutsMetadata.stringsdata" \
+    --source-file-list "$out/MusicStandBy.SwiftFileList" --metadata-file-list "$out/MusicStandBy.EmptyMetadataFileList" \
+    --static-metadata-file-list "$out/MusicStandBy.EmptyMetadataFileList" \
+    --swift-const-vals-list "$out/MusicStandBy.SwiftConstValuesFileList" \
+    --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization \
+    > "$out/appintents.log" 2>&1 || { tail -5 "$out/appintents.log"; echo "✗ App Intents metadata failed" >&2; exit 1; }
+  echo "› App Intents metadata (the Continue from iPhone Shortcuts action)"
+else
+  echo "› no appintentsmetadataprocessor (Command Line Tools only): no Shortcuts action"
 fi
 # Signed with the first Apple Development identity when there is one: an ad-hoc
 # signature is a new identity every build, so macOS asks again for the keychain
