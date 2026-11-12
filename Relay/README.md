@@ -195,7 +195,10 @@ the phone after 5 s (`HAND_BACK_NOTIFY_MS`), the alarm sends a Time Sensitive no
 `notified`. The phone's `POST /v1/hand-back/status` reports go to the Mac as
 `hand-back-status`. A request is forgotten after 2 minutes (`HAND_BACK_EXPIRY_MS`). Without a
 device token, the Mac hears `unreachable` at once. The `reason` on Continue on iPhone's pause
-passes through to the Mac. 76 tests pass. **Not deployed yet.**
+passes through to the Mac. 76 tests pass. **Deployed 12 November as version `c979d7d7`**
+(by Alistair from `feature/relay-hand-back`). Two round trips with the real phone and Mac
+worked; the background push only reached the phone together with the notification, 5 s
+later, so the notification does the work in practice (see `docs/ios/STATUS.md`).
 
 To probe APNs from the deployment, turn the dev endpoints on for a minute, then off again:
 
