@@ -19,9 +19,7 @@ struct HomeView: View {
                     TransportControls(isPlaying: attributes.isPlaying) { kind in
                         Task { await model.send(kind) }
                     }
-                    if model.canContinueOnPhone {
-                        ContinueOnPhoneRow()
-                    }
+                    HandoffRow()
                     if let volume = attributes.volume {
                         VolumeRow(level: volume) { level in
                             Task { await model.setVolume(level) }
@@ -223,41 +221,80 @@ private struct SeekBar: View {
     }
 }
 
-/// Starts the Mac's song here, with its Up Next, then pauses the Mac.
-private struct ContinueOnPhoneRow: View {
+/// Moves the music between the Mac and this iPhone: Continue on iPhone
+/// while Apple Music here is quiet, Send back to Mac while it plays.
+private struct HandoffRow: View {
     @Environment(AppModel.self) private var model
+    @State private var player = SystemMusicPhonePlayer()
+    @State private var here: PhoneNowPlaying?
     @State private var working = false
-    @State private var outcome: ContinueOutcome?
+    @State private var problem: String?
 
     var body: some View {
+        Group {
+            if here?.isPlaying == true {
+                sendBack
+            } else if model.canContinueOnPhone {
+                continueHere
+            }
+        }
+        .task {
+            // Apple Music here has no change notice worth the wiring; once a
+            // second is plenty for which button to show.
+            while !Task.isCancelled {
+                here = player.nowPlaying()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private var continueHere: some View {
+        row(title: "Continue on iPhone", symbol: "iphone", enabled: true,
+            note: "Plays the song and what’s next in Apple Music on this iPhone, and pauses your Mac.") {
+            switch await model.continueOnPhone(with: player) {
+            case .unavailable: "Your Mac can’t tell which Apple Music song this is."
+            case .notAllowed: "Allow Second Chair to use Apple Music in Settings › Apps › Second Chair."
+            case .didNotStart: "Apple Music on this iPhone didn’t start the song. Your Mac is still playing."
+            case .continued, .macStillPlaying: nil
+            }
+        }
+    }
+
+    private var sendBack: some View {
+        let inQueue = model.macQueuePosition(of: here?.catalogID) != nil
+        return row(title: "Send back to Mac", symbol: "laptopcomputer", enabled: inQueue,
+                   note: inQueue ? "Plays this song on your Mac from here, and pauses Apple Music on this iPhone."
+                                 : "Only songs from your Mac’s queue can go back to it.") {
+            switch await model.sendBackToMac(with: player) {
+            case .notInMacQueue: "This song isn’t in your Mac’s queue any more."
+            case .macRefused: "Your Mac didn’t take it. Apple Music here is still playing."
+            case .macDidNotStart: "Your Mac didn’t start the song. Apple Music here is still playing."
+            case .sentBack, .nothingPlayingHere: nil
+            }
+        }
+    }
+
+    private func row(title: String, symbol: String, enabled: Bool, note: String,
+                     action: @escaping @MainActor () async -> String?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 Task {
                     working = true
-                    outcome = await model.continueOnPhone(with: SystemMusicPhonePlayer())
+                    problem = await action()
+                    here = player.nowPlaying()
                     working = false
                 }
             } label: {
                 HStack {
-                    Label("Continue on iPhone", systemImage: "iphone")
+                    Label(title, systemImage: symbol)
                     if working {
                         Spacer()
                         ProgressView()
                     }
                 }
             }
-            .disabled(working)
-            Text(note).font(.footnote).foregroundStyle(.secondary)
-        }
-    }
-
-    /// Says up front that the Mac pauses; afterwards, only what went wrong.
-    private var note: String {
-        switch outcome {
-        case .unavailable?: "Your Mac can’t tell which Apple Music song this is."
-        case .notAllowed?: "Allow Second Chair to use Apple Music in Settings › Apps › Second Chair."
-        case .didNotStart?: "Apple Music on this iPhone didn’t start the song. Your Mac is still playing."
-        case nil, .continued?, .macStillPlaying?: "Plays the song and what’s next in Apple Music on this iPhone, and pauses your Mac."
+            .disabled(working || !enabled)
+            Text(problem ?? note).font(.footnote).foregroundStyle(.secondary)
         }
     }
 }

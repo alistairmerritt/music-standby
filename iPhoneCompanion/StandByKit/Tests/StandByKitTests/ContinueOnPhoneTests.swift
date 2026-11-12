@@ -14,6 +14,14 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         asked.append((catalogIDs, position()))
         return starts
     }
+
+    var current: PhoneNowPlaying?
+    private(set) var pauses = 0
+    func nowPlaying() -> PhoneNowPlaying? { current }
+    func pause() {
+        pauses += 1
+        current?.isPlaying = false
+    }
 }
 
 private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) -> PlaybackMessage {
@@ -82,5 +90,64 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         #expect(await h.model.continueOnPhone(with: phone) == .continued)
         #expect(phone.asked.first?.position == 0, "a paused Mac's position doesn't run on")
         #expect(await h.transport.sent.isEmpty)
+    }
+}
+
+@MainActor
+@Suite struct SendBackToMacTests {
+    /// The Mac paused after a Continue on iPhone, on the song it handed over.
+    private func handedOver() async -> (Harness, Task<Void, Never>) {
+        let h = Harness()
+        let task = await h.run()
+        await h.connected()
+        await h.transport.emit(.playback(continuable(state: .paused)))
+        await eventually("Mac state seen") { h.model.macQueuePosition(of: "1102360418") == 0 }
+        return (h, task)
+    }
+
+    @Test func skipsTheMacAheadToThePhonesSongSeeksPlaysThenPausesThePhone() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "1102359746", position: 42, isPlaying: true)   // three songs on
+        #expect(h.model.macQueuePosition(of: "1102359746") == 3, "the uploaded demo has no ID but still holds its place")
+        let sending = Task { await h.model.sendBackToMac(with: phone) }
+        await eventually("play sent") { await h.transport.sent.count == 5 }
+        #expect(phone.pauses == 0, "nothing pauses here before the Mac plays")
+        var playing = continuable(state: .playing, revision: 2)
+        playing.track?.catalogID = "1102359746"
+        await h.transport.emit(.playback(playing))
+        await eventually("Mac playing seen") { h.model.macQueuePosition(of: "1102359746") == 0 }
+        h.sleeper.releaseAll()
+        #expect(await sending.value == .sentBack)
+        let sent = await h.transport.sent
+        #expect(sent.map(\.kind) == [.next, .next, .next, .seek, .play])
+        #expect(sent[3].position == 42.3)
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func sendsNothingForASongTheMacDoesntHave() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "999", position: 10, isPlaying: true)
+        #expect(await h.model.sendBackToMac(with: phone) == .notInMacQueue)
+        phone.current = PhoneNowPlaying(catalogID: "1102360418", position: 10, isPlaying: false)
+        #expect(await h.model.sendBackToMac(with: phone) == .nothingPlayingHere)
+        #expect(await h.transport.sent.isEmpty)
+    }
+
+    @Test func keepsThePhonePlayingWhenTheMacDoesntStart() async {
+        let (h, task) = await handedOver()
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: "1102360418", position: 100, isPlaying: true)   // the Mac's own song
+        let sending = Task { await h.model.sendBackToMac(with: phone, timeout: 5) }
+        await eventually("seek and play sent") { await h.transport.sent.map(\.kind) == [.seek, .play] }
+        await eventually("waiting") { h.sleeper.pending == 1 }
+        h.clock.advance(6)
+        h.sleeper.releaseAll()
+        #expect(await sending.value == .macDidNotStart)
+        #expect(phone.pauses == 0)
     }
 }

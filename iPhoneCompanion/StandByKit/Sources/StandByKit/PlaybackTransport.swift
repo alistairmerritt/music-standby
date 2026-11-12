@@ -105,6 +105,9 @@ public protocol PlaybackTransport: Sendable {
     func unpair() async
     func send(_ command: RemoteCommand) async throws -> CommandAck
     func artwork(id: String) async throws -> Data
+    /// Reads the Mac's state now rather than at the next poll. Send back to
+    /// Mac uses it to see the Mac playing without waiting 5 s.
+    func refreshState() async
 }
 
 extension PlaybackTransport {
@@ -156,4 +159,9 @@ public struct TransportEventHub: Sendable {
         case .disconnected, .connecting, .failed: false
         }
     }
+}
+
+extension PlaybackTransport {
+    /// Transports that are told everything as it happens have nothing to fetch.
+    public func refreshState() async {}
 }

@@ -43,4 +43,13 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
         }
         return false
     }
+
+    func nowPlaying() -> PhoneNowPlaying? {
+        guard MPMediaLibrary.authorizationStatus() == .authorized, let item = player.nowPlayingItem else { return nil }
+        let id = item.playbackStoreID
+        return PhoneNowPlaying(catalogID: id.isEmpty || id == "0" ? nil : id, position: player.currentPlaybackTime,
+                               isPlaying: player.playbackState == .playing)
+    }
+
+    func pause() { player.pause() }
 }

@@ -11,6 +11,36 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// meanwhile counts), and returns true once Music is playing that song,
     /// or false after `timeout` seconds.
     func play(catalogIDs: [String], position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval) async -> Bool
+    /// What Apple Music here is on, or nil when nothing is loaded or it
+    /// can't be read (before Apple Music access is allowed).
+    func nowPlaying() -> PhoneNowPlaying?
+    func pause()
+}
+
+/// Apple Music on this phone at one moment.
+public struct PhoneNowPlaying: Equatable, Sendable {
+    public var catalogID: String?
+    public var position: TimeInterval
+    public var isPlaying: Bool
+
+    public init(catalogID: String?, position: TimeInterval, isPlaying: Bool) {
+        self.catalogID = catalogID
+        self.position = position
+        self.isPlaying = isPlaying
+    }
+}
+
+public enum SendBackOutcome: Equatable, Sendable {
+    /// Playing on the Mac; Apple Music here is paused.
+    case sentBack
+    /// Apple Music here isn't playing a song with a catalogue ID.
+    case nothingPlayingHere
+    /// The song isn't the Mac's current song or in its Up Next.
+    case notInMacQueue
+    /// The Mac refused a step, or couldn't be reached. Apple Music here carries on.
+    case macRefused
+    /// The Mac didn't get to the song in time. Apple Music here carries on.
+    case macDidNotStart
 }
 
 public enum ContinueOutcome: Equatable, Sendable {

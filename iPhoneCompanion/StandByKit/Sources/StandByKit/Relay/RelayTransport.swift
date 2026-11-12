@@ -200,6 +200,11 @@ public actor RelayTransport: PlaybackTransport {
         }
     }
 
+    public func refreshState() async {
+        guard loop != nil, let client = try? makeClient(), let state = try? await client.fetchSession() else { return }
+        applyIfRunning(state)
+    }
+
     private func applyIfRunning(_ state: SessionState) {
         guard loop != nil else { return }
         apply(state)

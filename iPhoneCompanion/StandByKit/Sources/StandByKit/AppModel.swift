@@ -263,6 +263,58 @@ public final class AppModel {
         return .macStillPlaying
     }
 
+    /// How many songs ahead in the Mac's queue this catalogue ID is: 0 for
+    /// the Mac's current song, 1 for the first of its Up Next. Nil when the
+    /// Mac's last state doesn't have it.
+    public func macQueuePosition(of catalogID: String?) -> Int? {
+        guard let catalogID, let message = latestMessage else { return nil }
+        let queue = [message.track?.catalogID] + (message.upNext ?? []).map(\.catalogID)
+        return queue.firstIndex(of: catalogID)
+    }
+
+    /// Send back to Mac: the reverse of Continue on iPhone, for a song in the
+    /// Mac's queue (the round trip). The Mac skips ahead to it, seeks to where
+    /// the phone is and plays; once its state shows that song playing, Apple
+    /// Music here pauses. Only existing commands, so it works for songs
+    /// outside the Mac's library too: it's Music's own queue.
+    public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
+        guard let here = player.nowPlaying(), here.isPlaying, let catalogID = here.catalogID else { return .nothingPlayingHere }
+        guard let ahead = macQueuePosition(of: catalogID) else {
+            record("Send back to Mac: the song isn't in the Mac's queue")
+            return .notInMacQueue
+        }
+        func step(_ command: RemoteCommand) async -> Bool {
+            do {
+                let ack = try await transport.send(command)
+                if !ack.accepted { record("Send back to Mac: \(command.kind.rawValue) refused (\(ack.error?.code.rawValue ?? "no reason"))") }
+                return ack.accepted
+            } catch {
+                record("Send back to Mac: \(command.kind.rawValue) failed (\(error.localizedDescription))")
+                return false
+            }
+        }
+        for _ in 0..<ahead {
+            guard await step(RemoteCommand(kind: .next, issuedAt: now())) else { return .macRefused }
+        }
+        // Where the phone is now, plus about the time the seek takes to land.
+        let position = (player.nowPlaying()?.position ?? here.position) + 0.3
+        guard await step(.seek(to: position, issuedAt: now())), await step(RemoteCommand(kind: .play, issuedAt: now())) else {
+            return .macRefused
+        }
+        let deadline = now().addingTimeInterval(timeout)
+        while now() < deadline {
+            await transport.refreshState()
+            if let latest = latestMessage, latest.state == .playing, latest.track?.catalogID == catalogID {
+                player.pause()
+                record("Send back to Mac: playing on the Mac \(ahead) song\(ahead == 1 ? "" : "s") on; Apple Music here is paused")
+                return .sentBack
+            }
+            try? await sleep(0.5)
+        }
+        record("Send back to Mac: the Mac didn't start the song in \(Int(timeout)) s")
+        return .macDidNotStart
+    }
+
     public func send(_ command: RemoteCommand) async {
         let name = command.kind.rawValue
         do {
