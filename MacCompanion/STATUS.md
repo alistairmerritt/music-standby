@@ -53,6 +53,8 @@ the one Apple's iTunes Remote app uses), in `Sources/CompanionCore/Remote`:
 - `msbctl remote GUID SERVICE-NAME [--no-catalog]` and `msbctl remote pair FILE` exercise
   the same code from the shell.
 
+Released as **0.2.0 (2)**, the GitHub pre-release `mac-v0.2.0` (tagged at `df939b3`): notarised (accepted), stapled, and accepted by Gatekeeper as an internet download. The matching iPhone build is TestFlight 202611121413.
+
 On the devices: the song moved to the phone at once; the phone's pause reached the Mac
 (`accepted`) a second later; with the lookup, the queue came too. Not yet seen: a Mac with
 a Local Network prompt for this (none was reported here), and a queue of many albums.
