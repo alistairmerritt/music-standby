@@ -51,8 +51,12 @@ public struct Handover {
             record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")
             return .didNotStart
         }
+        // The pause goes to a paused Mac too: its reason is how the Mac learns
+        // the phone has its music, to offer Continue from iPhone, and Music
+        // ignores a pause while paused. Only a playing Mac is worth a retry.
         guard latest()?.state == .playing else {
-            record("Continue on iPhone: playing here; the Mac was already paused")
+            let ack = try? await send(RemoteCommand(kind: .pause, issuedAt: now(), reason: .continueOnPhone))
+            record("Continue on iPhone: playing here; the Mac was already paused\(ack?.accepted == true ? " and knows" : "")")
             return .continued
         }
         // Once more after a second if the first try fails: the Mac can be busy

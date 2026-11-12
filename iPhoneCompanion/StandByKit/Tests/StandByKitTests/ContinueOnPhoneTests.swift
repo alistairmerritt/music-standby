@@ -82,14 +82,18 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         #expect(await plain.transport.sent.isEmpty)
     }
 
-    @Test func doesntPauseAMacThatIsAlreadyPaused() async {
+    @Test func tellsAPausedMacTooSoItOffersContinueFromIPhone() async {
         let (h, task) = await ready(continuable(state: .paused))
         defer { task.cancel() }
         h.clock.advance(42)
         let phone = FakePhoneMusic()
         #expect(await h.model.continueOnPhone(with: phone) == .continued)
         #expect(phone.asked.first?.position == 0, "a paused Mac's position doesn't run on")
-        #expect(await h.transport.sent.isEmpty)
+        // Without this, a Mac paused before Continue on iPhone never offered
+        // Continue from iPhone (seen 12 Nov 2026). Music ignores the pause.
+        let sent = await h.transport.sent
+        #expect(sent.map(\.kind) == [.pause])
+        #expect(sent.first?.reason == .continueOnPhone)
     }
 }
 
