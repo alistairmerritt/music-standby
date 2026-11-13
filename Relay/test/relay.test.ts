@@ -877,8 +877,9 @@ describe("continue from iPhone (hand-back)", () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0].collapseID).toBe("hand-back");
     expect(alerts[0].payload.aps).toEqual({
-      alert: { title: "Continue on Studio Mac?", body: "Tap to play this song on your Mac from where you are." },
+      alert: { title: "Continue on Studio Mac?", body: "Play this song on your Mac from where you are." },
       "thread-id": "hand-back",
+      category: "hand-back",
       "interruption-level": "time-sensitive",
       "relevance-score": 1,
     });

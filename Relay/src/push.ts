@@ -40,7 +40,14 @@ export interface AlertPush {
   /** Each reminder replaces the last, so they never pile up. */
   collapseID: string;
   payload: {
-    aps: { alert: { title: string; body: string }; "thread-id": string; "interruption-level": "time-sensitive"; "relevance-score": number };
+    aps: {
+      alert: { title: string; body: string };
+      "thread-id": string;
+      /** The app's notification category: buttons the app registers for it. */
+      category?: string;
+      "interruption-level": "time-sensitive";
+      "relevance-score": number;
+    };
     /** Continue from iPhone's notification (API-v1 §14). */
     handBack?: HandBackRequest;
   };
@@ -66,7 +73,10 @@ export function makeHandBackWake(token: string, request: HandBackRequest): Backg
 /**
  * Continue from iPhone, second try, when the background push got no answer:
  * a notification whose tap hands back. Time Sensitive and silent, like the
- * reminder, and one at a time.
+ * reminder, and one at a time. Its category gives it the app's Continue on
+ * Mac button, which Apple Watch shows too: a phone in StandBy is locked, so
+ * with a watch worn its notifications go to the watch (13 Nov 2026). The body
+ * doesn't say "tap" for that reason.
  */
 export function makeHandBackAlert(token: string, macName: string, request: HandBackRequest): AlertPush {
   return {
@@ -74,8 +84,9 @@ export function makeHandBackAlert(token: string, macName: string, request: HandB
     collapseID: HAND_BACK_ID,
     payload: {
       aps: {
-        alert: { title: `Continue on ${macName}?`, body: "Tap to play this song on your Mac from where you are." },
+        alert: { title: `Continue on ${macName}?`, body: "Play this song on your Mac from where you are." },
         "thread-id": HAND_BACK_ID,
+        category: HAND_BACK_ID,
         "interruption-level": "time-sensitive",
         "relevance-score": 1,
       },

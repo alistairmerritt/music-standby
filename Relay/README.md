@@ -191,8 +191,10 @@ Continue from iPhone, asked for at the Mac (`contract/hand-back`, API-v1 §14, b
 app a background push (`apns-push-type: background`, priority 5, to the device token the app
 registers with `PUT /v1/tokens/device`) and tells the Mac `asked`. If no status has come from
 the phone after 5 s (`HAND_BACK_NOTIFY_MS`), the alarm sends a Time Sensitive notification,
-"Continue on <Mac>?", collapse id `hand-back`, expiring after 2 minutes, and tells the Mac
-`notified`. The phone's `POST /v1/hand-back/status` reports go to the Mac as
+"Continue on <Mac>?", collapse id and category `hand-back`, expiring after 2 minutes, and
+tells the Mac `notified`. The category gives the notification the app's Continue on Mac button,
+which Apple Watch shows too (13 Nov: a phone in StandBy is locked, so with a watch worn its
+notifications go to the watch; needs a deploy). The phone's `POST /v1/hand-back/status` reports go to the Mac as
 `hand-back-status`. A request is forgotten after 2 minutes (`HAND_BACK_EXPIRY_MS`). Without a
 device token, the Mac hears `unreachable` at once. The `reason` on Continue on iPhone's pause
 passes through to the Mac. 76 tests pass. **Deployed 12 November as version `c979d7d7`**
