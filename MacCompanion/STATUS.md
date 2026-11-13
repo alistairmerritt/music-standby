@@ -33,7 +33,7 @@ own Continue on Mac (docs/relay/API-v1.md §14).
   playing, not any playing read: a read taken just before the pause took effect still said
   playing and landed 8 ms after it, clearing the marker at once (executed, fixed in 8ba6c67).
 - **The button** sends `hand-back-request` and shows each `hand-back-status` from the relay
-  and the phone: "Asking your iPhone…", "Tap the notification on your iPhone.", "Your iPhone is
+  and the phone: "Asking your iPhone…", "Answer the notification on your iPhone or Apple Watch.", "Your iPhone is
   handing over…", then the music starting here, or why not. No final answer in 45 s:
   "Your iPhone didn't answer. Try again." Not connected to the relay: "Couldn't reach your
   iPhone" at once.

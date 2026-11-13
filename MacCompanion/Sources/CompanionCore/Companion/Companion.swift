@@ -863,7 +863,7 @@ public struct HandBackProgress: Equatable, Sendable {
         if timedOut { return "Your iPhone didn’t answer. Try again." }
         switch status {
         case nil, .asked?: return "Asking your iPhone…"
-        case .notified?: return "Tap the notification on your iPhone."
+        case .notified?: return "Answer the notification on your iPhone or Apple Watch."
         case .working?: return "Your iPhone is handing over…"
         case .done?: return "Continuing here…"
         case .nothingPlaying?: return "Nothing is playing on your iPhone."
