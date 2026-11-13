@@ -24,6 +24,16 @@ or pause the phone, so the relay wakes this app, which runs Continue on Mac
 - **The notification**, "Continue on <Mac>?", comes from the relay when the background push
   gets no answer in 5 s; its tap does the same, however late. Shown even with the app open.
   It needs notification permission, which the reminder setting asks for.
+- **A Continue on Mac button on that notification (13 November).** In StandBy the
+  notification didn't appear on the phone: StandBy is a locked phone, so with Apple Watch worn
+  and unlocked, iOS sends notifications to the watch and leaves the phone dark (Apple's
+  forwarding rule; no payload can change it, and Time Sensitive is already the highest level
+  open to this app). The relay now sends `category: hand-back`, and the app registers that
+  category with a background Continue on Mac button (`AppDelegate.handBackCategory`). It runs
+  the hand-back without opening the app or unlocking the phone; the relay credentials are
+  readable after first unlock. The watch shows the button. The body no longer says "Tap".
+  Built and the unit tests pass. **Not yet seen on the watch**, and it needs the relay
+  deployed.
 - **Once per request**: the newest 20 request ids are kept in the App Group defaults, so a late
   wake and a tap don't hand back twice.
 - **Continue on iPhone's pause** now carries `reason: continue_on_phone`, so the Mac knows to
