@@ -336,11 +336,13 @@ phone → relay  POST /v1/hand-back/status done       relay → Mac  hand-back-s
   the person swipes the app away, or after several in an hour. The app ignores one that wakes
   it after `expiresAt`.
 - **The notification.** If no phone status has arrived 5 s after the background push, the relay
-  sends an alert to the same token: "Continue on <Mac>?", Time Sensitive, `thread-id` and
-  `apns-collapse-id` `hand-back`, with the same `handBack` key
+  sends an alert to the same token: "Continue on <Mac>?", Time Sensitive, `thread-id`,
+  `category` and `apns-collapse-id` `hand-back`, with the same `handBack` key
   ([example](../../Shared/StandByProtocol/Examples/apns-hand-back-alert.json)). A tap hands
-  back however late it comes: the tap is the request. It needs the app's notification
-  permission.
+  back however late it comes: the tap is the request. So does the category's Continue on Mac
+  button, without opening the app. Apple Watch shows that button, which matters in StandBy: a
+  phone there is locked, so with a watch worn and unlocked, iOS sends the notification to the
+  watch, not the phone. It needs the app's notification permission.
 - **Statuses.** `POST /v1/hand-back/status` with `HandBackStatusReport`; the relay forwards each
   to the Mac as `hand-back-status`, and any phone status stops the notification. The phone sends
   `working` as it starts, then one of `done`, `nothing_playing`, `not_in_queue`, `failed`. The

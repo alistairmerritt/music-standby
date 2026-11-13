@@ -2,9 +2,10 @@
   "aps": {
     "alert": {
       "title": "Continue on Studio Mac?",
-      "body": "Tap to play this song on your Mac from where you are."
+      "body": "Play this song on your Mac from where you are."
     },
     "thread-id": "hand-back",
+    "category": "hand-back",
     "interruption-level": "time-sensitive",
     "relevance-score": 1
   },

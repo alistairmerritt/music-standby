@@ -38,6 +38,7 @@ import Testing
         }
         let alert = try #require(try JSONSerialization.jsonObject(with: Fixture.data("apns-hand-back-alert")) as? [String: Any])
         #expect((alert["aps"] as? [String: Any])?["thread-id"] as? String == HandBackRequest.threadID)
+        #expect((alert["aps"] as? [String: Any])?["category"] as? String == HandBackRequest.categoryID)
     }
 
     @Test func unknownStatusesSurviveAndOnlyAnswersAreFinal() throws {

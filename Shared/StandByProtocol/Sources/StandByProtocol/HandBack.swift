@@ -80,6 +80,11 @@ public struct HandBackRequest: Codable, Equatable, Sendable {
     public static let payloadKey = "handBack"
     /// The notification's thread and collapse id.
     public static let threadID = "hand-back"
+    /// The notification's category. The app gives it a Continue on Mac
+    /// button that hands back without opening the app. Apple Watch shows the
+    /// button too, which matters in StandBy: a phone there is locked, so its
+    /// notifications go to a watch on the wrist (added 13 November 2026).
+    public static let categoryID = "hand-back"
 }
 
 /// `PUT /v1/tokens/device`: the app's own APNs device token, for hand-back
