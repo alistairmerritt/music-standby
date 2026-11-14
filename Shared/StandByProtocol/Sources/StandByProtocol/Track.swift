@@ -60,13 +60,19 @@ public struct QueuedTrack: Codable, Equatable, Sendable {
 /// restart, and a streamed track can't be reached after one anyway. When it is
 /// missing, the id falls back to a hash of the descriptive fields.
 public enum TrackID {
-    /// `pid:<persistent ID>` when Music supplies one, otherwise `key:<32 hex>`.
+    /// `pid:<persistent ID>-<12 hex>` when Music supplies a persistent ID,
+    /// otherwise `key:<32 hex>`. The hex is a hash of `fallbackKey`.
+    ///
+    /// The persistent ID alone doesn't tell songs apart: in an autoplay or
+    /// radio queue Music gave six different songs the same one (11 Nov 2026),
+    /// and anything keyed on it then mixed up their artwork.
     public static func make(persistentID: String?, title: String, artist: String, album: String, duration: TimeInterval) -> String {
-        if let pid = persistentID?.trimmingCharacters(in: .whitespacesAndNewlines), !pid.isEmpty {
-            return "pid:" + pid.uppercased()
-        }
         let digest = SHA256.hash(data: Data(fallbackKey(title: title, artist: artist, album: album, duration: duration).utf8))
-        return "key:" + digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+        let hex = digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+        if let pid = persistentID?.trimmingCharacters(in: .whitespacesAndNewlines), !pid.isEmpty {
+            return "pid:" + pid.uppercased() + "-" + hex.prefix(12)
+        }
+        return "key:" + hex
     }
 
     /// `title|artist|album|whole seconds`. The identity that would survive a

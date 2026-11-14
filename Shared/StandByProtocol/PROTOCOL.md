@@ -44,9 +44,10 @@ Four identities, kept apart on purpose.
 | **Artwork** | `track.artworkID` | Mac, `ArtworkID.make` | Forever (content hash) |
 | **Device** | `DeviceIdentity.id` | Each device, first launch | Until reinstalled |
 
-- **Song.** `pid:<Music persistent ID>`, or `key:<32 hex>` (a hash of
-  `title|artist|album|seconds`) when Music has no persistent ID. Opaque: compare for
-  equality only. The persistent ID was verified stable when revisiting a track within one
+- **Song.** `pid:<Music persistent ID>-<12 hex>`, or `key:<32 hex>` when Music has no
+  persistent ID; the hex is a hash of `title|artist|album|seconds`. The hash is there
+  because Music gave every song of an autoplay queue the same persistent ID (11 November
+  2026). Opaque: compare for equality only. The persistent ID was verified stable when revisiting a track within one
   Music run. Whether it survives a Music restart is unknown, and moot for streamed tracks,
   which Music can't reach again after one.
 - **Listening session.** Opens when playback starts with none open. Survives track

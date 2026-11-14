@@ -220,7 +220,17 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
 
 @Suite struct IdentityTests {
     @Test func trackIDPrefersPersistentID() {
-        #expect(TrackID.make(persistentID: "542ceb17c137b39e", title: "T", artist: "A", album: "B", duration: 1) == "pid:542CEB17C137B39E")
+        let id = TrackID.make(persistentID: "542ceb17c137b39e", title: "T", artist: "A", album: "B", duration: 1)
+        #expect(id.hasPrefix("pid:542CEB17C137B39E-"))
+        #expect(id.count == "pid:542CEB17C137B39E-".count + 12)
+        #expect(id == TrackID.make(persistentID: "542CEB17C137B39E", title: "T", artist: "A", album: "B", duration: 1.2))
+    }
+
+    /// Music reuses one persistent ID across an autoplay queue.
+    @Test func songsSharingAPersistentIDStayApart() {
+        let a = TrackID.make(persistentID: "3C97D19625454E5C", title: "Elsewhere", artist: "Hazlett", album: "The Happiest Times I Ever Ruined", duration: 201)
+        let b = TrackID.make(persistentID: "3C97D19625454E5C", title: "Come Back To You", artist: "Vera", album: "Vera", duration: 188)
+        #expect(a != b)
     }
 
     @Test func trackIDFallsBackToAStableHash() {

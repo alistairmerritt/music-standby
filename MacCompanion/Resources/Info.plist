@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Second Chair</string>
+	<key>CFBundleExecutable</key>
+	<string>MusicStandBy</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.alistairmerritt.MusicStandBy.Mac</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Second Chair</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Lets a development relay on 127.0.0.1 or a .local host use plain ws://. Internet hosts still need TLS. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<!-- Pairing with Music as a remote, and finding Music's remote-control server. -->
+		<string>_touch-remote._tcp</string>
+		<string>_touch-able._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Second Chair connects to Music on this Mac to let you continue listening on your iPhone, including your Up Next queue.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Second Chair reads what is playing in Music and passes your iPhone's play, pause and skip controls back to it.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Alistair Merritt</string>
+</dict>
+</plist>
