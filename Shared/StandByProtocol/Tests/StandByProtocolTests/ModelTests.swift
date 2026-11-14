@@ -165,6 +165,35 @@ private func message(revision: UInt64 = 1, state: PlaybackState = .playing, elap
         #expect(AudioOutput.makeID(networkAddress: nil, name: "Study HomePod") == "name:Study HomePod")
     }
 
+    @Test func catalogueIDAndUpNextRoundTripAndAreOmittedWhenUnknown() throws {
+        var track = Fixture.losingMyEdge
+        track.catalogID = "1102360418"
+        var m = message(track: track)
+        m.upNext = [QueuedTrack(catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312.3),
+                    QueuedTrack(catalogID: nil, title: "Uploaded demo", artist: "Me", duration: 0)]
+        let decoded = try StandByWire.makeDecoder().decode(PlaybackMessage.self, from: StandByWire.makeEncoder().encode(m))
+        #expect(decoded.track?.catalogID == "1102360418")
+        #expect(decoded.upNext == m.upNext)
+        let plain = try #require(try JSONSerialization.jsonObject(with: StandByWire.makeEncoder().encode(message())) as? [String: Any])
+        let plainTrack = try #require(plain["track"] as? [String: Any])
+        #expect(plain["upNext"] == nil && plainTrack["catalogID"] == nil, "a Mac that can't read them sends nothing")
+        // A message from before 12 November decodes with neither.
+        let older = #"{"revision":1,"state":"playing","isPlaying":true,"elapsedTime":3,"capturedAt":"2026-11-09T07:00:00.250Z","track":{"id":"pid:1","title":"T","artist":"A","album":"B","duration":1},"canGoNext":true,"canGoPrevious":true}"#
+        let old = try StandByWire.makeDecoder().decode(PlaybackMessage.self, from: Data(older.utf8))
+        #expect(old.track?.catalogID == nil && old.upNext == nil)
+    }
+
+    @Test func upNextAloneIsNotAVisibleChangeButACatalogueIDIs() {
+        var first = message()
+        first.upNext = [QueuedTrack(catalogID: "1", title: "A", artist: "B", duration: 1)]
+        var reordered = message(revision: 2)
+        reordered.upNext = [QueuedTrack(catalogID: "2", title: "C", artist: "D", duration: 2)] + (first.upNext ?? [])
+        #expect(!reordered.hasVisibleChange(from: first), "a queue edit alone would cost the phone a push")
+        var identified = message(revision: 2)
+        identified.track?.catalogID = "1102360418"
+        #expect(identified.hasVisibleChange(from: first))
+    }
+
     @Test func volumeAndOutputChangesAreVisible() {
         var first = message()
         first.volume = 0.5

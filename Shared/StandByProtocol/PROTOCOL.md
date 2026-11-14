@@ -80,6 +80,18 @@ something visible changes (`hasVisibleChange(from:)`), never for ordinary progre
 | `canGoNext`, `canGoPrevious` | bool | |
 | `listeningSessionID` | UUID? | New. Absent outside a session |
 | `detail` | string? | New. Diagnostic text for `automation_denied` and `error`. Not for display |
+| `volume`, `outputs` | number?, `[AudioOutput]`? | 11 November 2026. See §5 |
+| `upNext` | `[QueuedTrack]`? | 12 November 2026. What Music plays after `track`, in order, at most 25 (`upNextLimit`). Absent when the Mac can't read it. Not part of a visible change |
+
+`TrackMetadata.catalogID` (string?, 12 November 2026) is the song's Apple Music catalogue
+ID, the number `MPMusicPlayerController.setQueue(with:)` takes, and `QueuedTrack` carries
+the same for each song in `upNext`, with `title`, `artist`, `album` (optional) and `duration`. Music's
+AppleScript has no such ID. The Mac reads both through Music's remote-control protocol
+(DACP, the one Apple's iTunes Remote app uses), which needs the companion paired with Music
+once, from Music's sidebar, and the song in the Mac's library; otherwise they're absent.
+They let the phone take over: "Continue on iPhone" starts the same song and Up Next in the
+phone's Apple Music at the Mac's position, then pauses the Mac with an ordinary `pause`.
+Relays pass both through untouched, and leave them out of pushes.
 
 `PlaybackState` values, matching the prototype's JSON:
 
@@ -92,9 +104,11 @@ something visible changes (`hasVisibleChange(from:)`), never for ordinary progre
 | `automation_denied` | AppleScript −1743. Lasts until the user changes System Settings | Yes |
 | `error` | Music running but unreadable. Usually transient | No |
 
-**Visible change** = a different `state`, `track`, `canGoNext`, `canGoPrevious` or
-`listeningSessionID`, or a position more than 2 s from where the previous message
-predicts (a seek). The relay can coalesce pushes on the same rule.
+**Visible change** = a different `state`, `track` (its `catalogID` included), `canGoNext`,
+`canGoPrevious`, `listeningSessionID`, `volume` or `outputs`, or a position more than 2 s
+from where the previous message predicts (a seek). `upNext` alone isn't one: a reordered
+queue would otherwise cost a push, so it travels with the next visible change. The relay can
+coalesce pushes on the same rule.
 
 ---
 
@@ -128,6 +142,7 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 | `position` | Seconds into the track, for `seek`. Clamped to the track by the Mac |
 | `level` | Music's own output volume, 0 to 1, for `setVolume`. Clamped by the Mac. Not the Mac's system volume |
 | `outputID` | An `AudioOutput.id` from the last state, for `selectOutput`. Music then plays to that device alone |
+| `reason` | New on 12 November 2026, optional, an open set. `continue_on_phone` marks the `pause` Continue on iPhone sends once the song plays on the phone, so the Mac knows the phone has its music ([example](Examples/relay-command-continue-on-phone.json)). A Mac that doesn't know it runs the command as usual |
 
 The three value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,
 or with a non-finite number, the Mac answers `invalid_request`. The result reaches the phone as
@@ -172,6 +187,7 @@ for them; small frame-specific fields sit beside `type`.
 | `artwork` | `artwork`: `ArtworkDescriptor` | [mac-artwork](Examples/mac-artwork.json) |
 | `goodbye` | `reason` | [mac-goodbye](Examples/mac-goodbye.json) |
 | `pair-decision` | `claimID`, `approved` | [mac-pair-decision](Examples/mac-pair-decision.json) |
+| `hand-back-request` | `requestID` (UUID). Continue from iPhone: ask the phone to hand its music back (relay API §14) | [mac-hand-back-request](Examples/mac-hand-back-request.json) |
 | `error` | `error`: `ProtocolError` | |
 
 **Relay → Mac** (`RelayFrame`)
@@ -184,6 +200,7 @@ for them; small frame-specific fields sit beside `type`.
 | `pair-request` | `request`: `PairRequest` | [relay-pair-request](Examples/relay-pair-request.json) |
 | `paired` | `phone`: `DeviceIdentity` | [relay-paired](Examples/relay-paired.json) |
 | `revoked` | `reason` | [relay-revoked](Examples/relay-revoked.json) |
+| `hand-back-status` | `requestID`, `status`: `HandBackStatus`. Progress on a `hand-back-request` | [relay-hand-back-status](Examples/relay-hand-back-status.json) |
 | `error` | `error`: `ProtocolError` | [relay-error](Examples/relay-error.json) |
 
 **Phone → relay HTTP bodies:** `CommandRequest` / `CommandResponse` for

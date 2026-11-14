@@ -30,6 +30,8 @@ public enum MacFrame: Equatable, Sendable {
     case goodbye(reason: String)
     /// The person at the Mac allowed or refused a `pair-request`.
     case pairDecision(claimID: String, approved: Bool)
+    /// Continue from iPhone: ask the phone to hand its music back (HandBack.swift).
+    case handBackRequest(id: UUID)
     case error(ProtocolError)
     case unknown(type: String)
 }
@@ -47,6 +49,8 @@ public enum RelayFrame: Equatable, Sendable {
     case pairRequest(PairRequest)
     case paired(phone: DeviceIdentity)
     case revoked(reason: String)
+    /// Progress on a `hand-back-request`, from the relay or the phone.
+    case handBackStatus(id: UUID, status: HandBackStatus)
     case error(ProtocolError)
     case unknown(type: String)
 }
@@ -55,6 +59,7 @@ public enum RelayFrame: Equatable, Sendable {
 
 private enum FrameKeys: String, CodingKey {
     case type, protocolVersion, device, message, ack, artwork, reason, error, command, artworkID, phone, claimID, approved, request
+    case requestID, status
 }
 
 private struct RawCommand: Decodable {
@@ -76,6 +81,7 @@ extension MacFrame: Codable {
         case "goodbye": self = .goodbye(reason: try c.decode(String.self, forKey: .reason))
         case "pair-decision":
             self = .pairDecision(claimID: try c.decode(String.self, forKey: .claimID), approved: try c.decode(Bool.self, forKey: .approved))
+        case "hand-back-request": self = .handBackRequest(id: try c.decode(UUID.self, forKey: .requestID))
         case "error": self = .error(try c.decode(ProtocolError.self, forKey: .error))
         default: self = .unknown(type: type)
         }
@@ -104,6 +110,9 @@ extension MacFrame: Codable {
             try c.encode("pair-decision", forKey: .type)
             try c.encode(claimID, forKey: .claimID)
             try c.encode(approved, forKey: .approved)
+        case .handBackRequest(let id):
+            try c.encode("hand-back-request", forKey: .type)
+            try c.encode(id, forKey: .requestID)
         case .error(let error):
             try c.encode("error", forKey: .type)
             try c.encode(error, forKey: .error)
@@ -131,6 +140,8 @@ extension RelayFrame: Codable {
         case "pair-request": self = .pairRequest(try c.decode(PairRequest.self, forKey: .request))
         case "paired": self = .paired(phone: try c.decode(DeviceIdentity.self, forKey: .phone))
         case "revoked": self = .revoked(reason: try c.decode(String.self, forKey: .reason))
+        case "hand-back-status":
+            self = .handBackStatus(id: try c.decode(UUID.self, forKey: .requestID), status: try c.decode(HandBackStatus.self, forKey: .status))
         case "error": self = .error(try c.decode(ProtocolError.self, forKey: .error))
         default: self = .unknown(type: type)
         }
@@ -162,6 +173,10 @@ extension RelayFrame: Codable {
         case .revoked(let reason):
             try c.encode("revoked", forKey: .type)
             try c.encode(reason, forKey: .reason)
+        case .handBackStatus(let id, let status):
+            try c.encode("hand-back-status", forKey: .type)
+            try c.encode(id, forKey: .requestID)
+            try c.encode(status, forKey: .status)
         case .error(let error):
             try c.encode("error", forKey: .type)
             try c.encode(error, forKey: .error)

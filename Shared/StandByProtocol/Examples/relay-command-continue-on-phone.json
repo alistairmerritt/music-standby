@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "command": {
+    "id": "8B2D4F6A-1C3E-4B5D-9F7A-2C4E6A8B0D1F",
+    "kind": "pause",
+    "issuedAt": "2026-11-12T10:00:01.125Z",
+    "reason": "continue_on_phone"
+  }
+}
