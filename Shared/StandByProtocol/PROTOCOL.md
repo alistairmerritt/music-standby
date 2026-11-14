@@ -24,7 +24,7 @@ deployed. The relay is still a proposal (`docs/ios/RELAY-DESIGN-8-NOV-2026.md` o
 | Unknown keys | Ignored |
 | Unknown frame `type` | Decodes as `.unknown` and is ignored |
 | Open string sets | `ErrorCode` and `DeviceKind` keep values they don't recognise |
-| Closed enums | `PlaybackState` and `CommandKind`. A new case needs a version bump |
+| Closed enums | `PlaybackState`. A new case needs a version bump. `CommandKind` grows without one: the Mac has rejected an unknown kind by id since version 1 (§5), and the relay passes `kind` through |
 
 **Versioning.** `StandByWire.version` is `1`. A new optional field, frame type, error
 code or device kind does not change it. Anything an older peer would misread does. The
@@ -110,8 +110,9 @@ Receivers apply a message unless its revision is lower than the one they hold
 reconnect, and is harmless. No restart heuristic is needed: the iOS app's "accept a lower
 revision if it is 5 s newer" rule becomes unnecessary, though it does no harm.
 
-`CommandAck.revision` is the Mac's revision after handling the command. The `state`
-frame that shows the result carries that revision or a later one.
+`CommandAck.revision` is the Mac's latest revision when it acknowledges. The Mac
+acknowledges as soon as Music takes the command, then re-reads Music, so the `state` frame
+that shows the result carries a later revision.
 
 ---
 
@@ -122,11 +123,22 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 | Field | Notes |
 | --- | --- |
 | `id` | UUID. Also the idempotency key: a repeated id must not act twice |
-| `kind` | `play`, `pause`, `next`, `previous` — unchanged |
+| `kind` | `play`, `pause`, `next`, `previous`, and since 11 November 2026 `seek`, `setVolume`, `selectOutput` |
 | `issuedAt` | New, optional. The Mac rejects commands older than 10 s with `command_expired` |
+| `position` | Seconds into the track, for `seek`. Clamped to the track by the Mac |
+| `level` | Music's own output volume, 0 to 1, for `setVolume`. Clamped by the Mac. Not the Mac's system volume |
+| `outputID` | An `AudioOutput.id` from the last state, for `selectOutput`. Music then plays to that device alone |
+
+The three value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,
+or with a non-finite number, the Mac answers `invalid_request`. The result reaches the phone as
+the next state: `volume`, `outputs` and `elapsedTime` on `PlaybackMessage`, which carries them
+from the same date. A Mac that doesn't report `volume` or `outputs` leaves them out, and the
+phone then offers no volume slider and no output list.
 
 `CommandAck` keeps `commandID`, `accepted`, `revision` and adds an optional `error`.
 `accepted: true` means Music took the command. The resulting state follows separately.
+Over the relay, a command also names its Now Playing session (`CommandRequest.sessionID`);
+see [docs/relay/API-v1.md](../../docs/relay/API-v1.md) §7.
 
 Mac-side rejections:
 
@@ -134,7 +146,8 @@ Mac-side rejections:
 | --- | --- |
 | `music_not_running` | Music is closed. The Mac does not launch it |
 | `automation_denied` | Permission refused |
-| `no_current_track` | `next`/`previous` with nothing loaded |
+| `no_current_track` | `next`/`previous`/`seek` with nothing loaded |
+| `invalid_request` | A value command without its value, or `selectOutput` naming an output that isn't in Music's list |
 | `command_expired` | `issuedAt` older than 10 s |
 | `unsupported_command` | A `kind` this build doesn't know. `RelayFrame.unsupportedCommand` keeps the id so it can still be rejected |
 | `command_failed` | AppleScript ran and failed |
@@ -158,6 +171,7 @@ for them; small frame-specific fields sit beside `type`.
 | `ack` | `ack`: `CommandAck` | [accepted](Examples/mac-ack-accepted.json), [rejected](Examples/mac-ack-rejected.json) |
 | `artwork` | `artwork`: `ArtworkDescriptor` | [mac-artwork](Examples/mac-artwork.json) |
 | `goodbye` | `reason` | [mac-goodbye](Examples/mac-goodbye.json) |
+| `pair-decision` | `claimID`, `approved` | [mac-pair-decision](Examples/mac-pair-decision.json) |
 | `error` | `error`: `ProtocolError` | |
 
 **Relay → Mac** (`RelayFrame`)
@@ -167,6 +181,7 @@ for them; small frame-specific fields sit beside `type`.
 | `welcome` | `protocolVersion` | [relay-welcome](Examples/relay-welcome.json) |
 | `command` | `command`: `RemoteCommand` | [relay-command](Examples/relay-command.json) |
 | `artwork-request` | `artworkID` | [relay-artwork-request](Examples/relay-artwork-request.json) |
+| `pair-request` | `request`: `PairRequest` | [relay-pair-request](Examples/relay-pair-request.json) |
 | `paired` | `phone`: `DeviceIdentity` | [relay-paired](Examples/relay-paired.json) |
 | `revoked` | `reason` | [relay-revoked](Examples/relay-revoked.json) |
 | `error` | `error`: `ProtocolError` | [relay-error](Examples/relay-error.json) |
@@ -212,6 +227,7 @@ Codable so either app can persist or log it.
 | `hello` carries `device` instead of `macName` | The relay needs a stable id as well as a name |
 | `artwork` frame nests an `ArtworkDescriptor` | The proposal's flat `sha256` duplicated `artworkID` and lacked content type and size |
 | `welcome` and `goodbye` frames added | Version negotiation; telling an app quit from a dropped socket |
+| `pair-request` and `pair-decision` frames added (relay API v1) | A code alone grants nothing; the person at the Mac allows the phone |
 | Error bodies are `{"error":{"code":…}}` | The proposal's `{"error":"mac_unreachable"}` had nowhere to put a message or retry time |
 
 Every other temporary type — `CommandKind`, `RemoteCommand`, `CommandAck`, `PairedMac` —
@@ -246,9 +262,14 @@ on purpose, so both can be imported together.
 
 ---
 
-## 9. Not in version 1
+## 9. The relay API
 
-- Pairing and token endpoints (relay §4–5). They remain the relay proposal's, and get
-  Swift types once the relay design is agreed.
-- Volume, seek, shuffle and repeat.
+Endpoints, pairing, push tokens, sessions and artwork URLs are specified in
+[docs/relay/API-v1.md](../../docs/relay/API-v1.md). Their bodies are the types in
+`Relay.swift`, plus the `pair-request` and `pair-decision` frames above, all additive to
+version 1.
+
+## 10. Not in version 1
+
+- Shuffle and repeat. (Volume, seek and output selection were added on 11 November 2026, §5.)
 - The artwork upload itself (`PUT /v1/artwork/{id}`), which is HTTP, not a frame.

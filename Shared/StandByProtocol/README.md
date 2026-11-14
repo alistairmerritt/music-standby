@@ -19,6 +19,7 @@ iPhone app. Foundation and CryptoKit only; iOS 17+ and macOS 14+.
 | `Errors.swift` | `ErrorCode`, `ProtocolError`, `ConnectionStatus` |
 | `Frames.swift` | `MacFrame`, `RelayFrame` |
 | `Sequencing.swift` | `RevisionCounter`, `ListeningSessionTracker` |
+| `Relay.swift` | Relay API bodies: pairing, push tokens, `SessionState`, `NowPlayingAttributes` |
 
 ## Tests
 

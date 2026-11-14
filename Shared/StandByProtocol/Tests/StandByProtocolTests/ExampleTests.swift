@@ -43,6 +43,11 @@ enum Fixture {
         "mac-ack-accepted", "mac-ack-rejected", "mac-artwork", "mac-goodbye",
         "relay-welcome", "relay-command", "relay-artwork-request", "relay-paired", "relay-revoked", "relay-error",
         "http-command-request", "http-command-response", "http-error-response", "legacy-playback-message",
+        // Relay API (RelayContractTests)
+        "http-pairing-create-request", "http-pairing-create-response", "http-pairing-code-response",
+        "http-pairing-claim-request", "http-pairing-claim-response", "http-pairing-claim-pending",
+        "http-pairing-claim-approved", "relay-pair-request", "mac-pair-decision", "http-session-state",
+        "http-token-start", "http-token-session", "http-session-end", "apns-update-payload",
     ]
 
     @Test(arguments: ["mac-hello", "mac-state-playing", "mac-state-not-running", "mac-state-automation-denied",
