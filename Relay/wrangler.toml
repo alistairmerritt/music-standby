@@ -1,0 +1,29 @@
+# Second Chair relay. `npm run dev` runs it locally; `npm run deploy` deploys it as
+# configured here (real pushes, dev endpoints off).
+name = "music-standby-relay"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[[durable_objects.bindings]]
+name = "PAIRING"
+class_name = "Pairing"
+
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Pairing", "Directory"]
+
+[vars]
+# "apns" sends real pushes and needs the secrets APNS_KEY_P8, APNS_KEY_ID and
+# APNS_TEAM_ID (wrangler secret put …); without them it records pushes, as
+# "mock" does. `npm run dev` and the tests have no secrets, so they record.
+PUSH_MODE = "apns"
+APNS_ENVIRONMENT = "development"
+APNS_TOPIC = "com.alistairmerritt.MusicStandBy.push-type.nowplaying"
+# Dev-only endpoints under /v1/dev/ (recorded pushes, the APNs probe). Off by
+# default so a deployment can't expose them by accident; `npm run dev` and the
+# tests turn them on.
+DEV_ENDPOINTS = "0"

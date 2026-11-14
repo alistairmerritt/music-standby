@@ -65,6 +65,8 @@ Three kinds, all opaque bearer strings. Clients never parse them.
 | `PUT /v1/tokens/start` | phone | `PushToStartTokenRegistration` → `204` | §9 |
 | `PUT /v1/tokens/session` | phone | `SessionPushTokenRegistration` → `204` | §9 |
 | `DELETE /v1/tokens/session/{sessionID}` | phone | — → `204` | §9 |
+| `PUT /v1/tokens/alert` | phone | `{ "token": "<hex>" }` → `204` | §9, reminders on |
+| `DELETE /v1/tokens/alert` | phone | — → `204` | §9, reminders off |
 | `POST /v1/session/end` | phone | `SessionEndRequest` → `204` | Ends the session now |
 | `PUT /v1/tokens/device` | phone | `DeviceTokenRegistration` → `204` | §14. The app's APNs device token |
 | `POST /v1/hand-back/status` | phone | `HandBackStatusReport` → `204` | §14 |
@@ -137,17 +139,22 @@ Frames are `MacFrame` / `RelayFrame` (PROTOCOL.md §6), one JSON object per text
 
 The relay owns the Now Playing **session**, and its id is what the phone sees as
 `MacPlaybackAttributes.id`. It is a fresh lowercase UUID each time, never reused. It is not
-the Mac's `listeningSessionID`, although that drives it.
+the Mac's `listeningSessionID`.
+
+**One session lasts as long as the pairing.** iOS 27.2 shows a session only once the app has
+asked for it while open; a session started by a `start` push exists, takes updates, and stays
+hidden (seen on an iPhone, 11 November 2026). So the Mac stopping, quitting or going away
+updates the session, showing the last track paused, instead of ending it.
 
 | Event | Relay action |
 | --- | --- |
 | State `playing`, no session | Start a session: new `sessionID`, `start` push to the push-to-start token |
 | Visible change during a session | `update` push to the session token |
-| `listeningSessionID` changes | End the session; start a new one if playing |
-| State `stopped`, `not_running` or `automation_denied` | End the session at once |
-| `paused` for 15 minutes | End the session |
-| Mac sends `goodbye` | End the session at once |
-| Mac socket drops without `goodbye` | Wait 60 s for a reconnect, then end the session |
+| `listeningSessionID` changes | Keep the session |
+| State `stopped`, `not_running` or `automation_denied` | Keep the session: `update` push, not playing, with the last track |
+| `paused` for any time | Keep the session. `PAUSED_TIMEOUT_MS` above 0 ends it after that long |
+| Mac sends `goodbye` | Keep the session: if playing, `update` push as paused at its extrapolated position |
+| Mac socket drops without `goodbye` | Wait 60 s for a reconnect, then as `goodbye`. The Mac's next state is pushed even at the same revision |
 | `POST /v1/session/end` from the phone | End the session, and start no new one for the same `listeningSessionID`. The next listening session, after a stop or quit, starts as usual |
 | `DELETE /v1/pairing` | End the session, revoke both tokens |
 | APNs answers `410` or `BadDeviceToken` | Forget that token; if it was the session's, end the session |
@@ -213,6 +220,17 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   without a header. The same path also accepts `Authorization: Bearer <phoneToken>` with no
   `sig`. Responses are `Cache-Control: private, max-age=31536000, immutable`. The `sig`
   changes when the pairing does, so old URLs die with it.
+- **Artwork not uploaded yet:** the phone learns an id from the same state that makes the
+  relay ask the Mac for it, so it can ask first. If the relay sent `artwork-request` for the
+  id in the last 10 s and the Mac is connected, the GET waits up to 3 s for the upload,
+  answering as soon as it lands, or `404` as soon as the Mac answers `artwork_unavailable`.
+  Otherwise an unknown id is `404 not_found` at once. The Mac uploads a new song's artwork
+  before sending the state that names it, so this wait is the fallback.
+- **Follow-up update:** iOS suspends the extension about a second after each update. After an
+  `update` push naming artwork it hasn't pushed for this session before, the relay sends the
+  same attributes again after `ARTWORK_FOLLOW_UP_MS` (700 ms), unless a newer revision, another
+  session or a new token arrived meanwhile. The extension should start fetching on `update`,
+  not wait for the system to ask, and include the artwork id in the content's id.
 - **Tracks without artwork:** `attributes.track.artworkID` is `""` and there is no
   `artworkURL`. The iOS type declares `artworkID` non-optional, and a push the system can't
   decode is silently lost.
@@ -227,11 +245,23 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   for each session's update token (from inside the extension, keyed by `attributes.id`).
   Tokens are hex, as Apple's examples encode them. Last write wins. A token for a session that
   isn't current is refused with `409 session_mismatch`.
+- **Reminders (opt-in).** `PUT /v1/tokens/alert` stores the app's ordinary APNs device token,
+  and `DELETE` removes it. While it's stored, the relay sends an alert push when the Mac starts
+  playing after at least `REMIND_AFTER_MS` (default 30 minutes) not playing, or when it starts a
+  new session. iOS shows a session only once the app has asked while open, so a dismissed player
+  stays hidden until the app is opened; nothing tells the relay whether it is showing, so the
+  reminder goes out blind. Headers: `apns-push-type: alert`, `apns-topic:
+  com.alistairmerritt.MusicStandBy`, `apns-collapse-id: mac-playing` (each replaces the last),
+  `apns-expiration: <now + 10 min>`. Body, with no sound:
+  `{"aps": {"alert": {"title": "Music playing on <Mac name>", "body": "Tap to show on your Lock Screen."}, "thread-id": "mac-playing", "interruption-level": "time-sensitive", "relevance-score": 1}}`.
+  Time Sensitive (since 12 November 2026) so a Focus or a scheduled Summary doesn't hold it
+  back, which in StandBy it otherwise did; the app carries the matching entitlement, and the
+  person can still turn it off per app or per Focus. A dead token is forgotten.
 - **Pushes**, as specified in Apple's *Publishing remote media sessions*:
 
   | | |
   | --- | --- |
-  | Host | `api.sandbox.push.apple.com` (development) or `api.push.apple.com` |
+  | Host | `api.sandbox.push.apple.com` (development) or `api.push.apple.com` (production): `APNS_ENVIRONMENT` first; a `400 BadDeviceToken` is tried once in the other, and the one that delivers is kept for the pairing |
   | Headers | `apns-push-type: nowplaying`, `apns-topic: com.alistairmerritt.MusicStandBy.push-type.nowplaying`, `apns-priority: 10`, `apns-expiration: <now + 30 s>` |
   | Auth | ES256 JWT, `kid` = key id, `iss` = team id, refreshed every 20–60 minutes |
   | `start` | To the push-to-start token. `{"aps":{"event":"start","timestamp":<epoch s>,"attributes":<NowPlayingAttributes>}}` |
@@ -241,10 +271,12 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   Example: `Examples/apns-update-payload.json`. `aps.timestamp` is integer seconds;
   dates inside `attributes` are ISO-8601 strings, as in Apple's examples.
 - **The APNs key lives only in the relay's secrets.** Neither app ever sees it.
-- **Version 1 ships with pushes mocked.** The relay records what it would send. Live APNs needs
-  the paid developer programme for a key. Cloudflare `fetch()` does speak HTTP/2 to APNs (relay
-  design §8): a probe from the deployed relay on 10 November 2026 got APNs' own
-  `403 InvalidProviderToken` with an `apns-id`, so the relay can send pushes itself.
+- **Live APNs since 11 November 2026.** Cloudflare `fetch()` speaks HTTP/2 to APNs (relay
+  design §8), so the relay sends pushes itself. Without the APNs secrets (`npm run dev`, the
+  tests) it records what it would send instead.
+- **The phone decodes `attributes` itself.** iOS 27.2's decoder couldn't read the ISO-8601
+  `timestamp` with milliseconds, so the iOS client reads it, and `artworkURL`, as strings. Keep
+  them strings.
 
 ---
 
@@ -273,8 +305,9 @@ Every value is a judgement call, and the relay can change them without a version
 | --- | --- |
 | Pairing code and claim expiry | 5 minutes |
 | Command ack deadline (relay) / client timeout (extension) | 1.2 s / 1.5 s |
-| Mac disconnect grace before ending the session | 60 s |
-| Paused before ending the session | 15 minutes |
+| Mac disconnect grace before the phone is told it paused | 60 s |
+| Paused before ending the session | Never (`PAUSED_TIMEOUT_MS`, default 0) |
+| Update sent again after new artwork | 700 ms (`ARTWORK_FOLLOW_UP_MS`) |
 | Mac ping / pong deadline | 30 s / 10 s |
 | Mac reconnect backoff | 1 s → 30 s, ±20 % jitter |
 

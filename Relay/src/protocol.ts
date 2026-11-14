@@ -1,0 +1,218 @@
+// Wire types: the JSON shapes of Shared/StandByProtocol, which is the source
+// of truth. docs/relay/API-v1.md is the contract this relay implements.
+
+export const PROTOCOL_VERSION = 1;
+
+export type PlaybackState = "playing" | "paused" | "stopped" | "not_running" | "automation_denied" | "error";
+
+export interface DeviceIdentity {
+  id: string;
+  name: string;
+  kind: string;
+  appVersion?: string;
+  osVersion?: string;
+}
+
+export interface PairedMac {
+  id: string;
+  name: string;
+}
+
+export interface TrackMetadata {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  artworkID?: string;
+  /** Apple Music catalogue ID, when the Mac can read it. Added 12 November 2026. Not pushed. */
+  catalogID?: string;
+}
+
+/** A song in Up Next (Shared/StandByProtocol/Track.swift). */
+export interface QueuedTrack {
+  catalogID?: string;
+  title: string;
+  artist: string;
+  album?: string;
+  duration: number;
+}
+
+/** One place Music can play to (Shared/StandByProtocol/Output.swift). */
+export interface AudioOutput {
+  id: string;
+  name: string;
+  kind: string;
+  isSelected: boolean;
+  isAvailable: boolean;
+}
+
+export interface PlaybackMessage {
+  revision: number;
+  state?: PlaybackState;
+  isPlaying: boolean;
+  elapsedTime: number;
+  capturedAt: string;
+  track?: TrackMetadata;
+  canGoNext: boolean;
+  canGoPrevious: boolean;
+  listeningSessionID?: string;
+  detail?: string;
+  /** Music's own output volume, 0 to 1. Added 11 November 2026. */
+  volume?: number;
+  outputs?: AudioOutput[];
+  /** Up Next, at most 25. Added 12 November 2026. Reaches the phone in GET /v1/session; never pushed. */
+  upNext?: QueuedTrack[];
+}
+
+export interface ProtocolError {
+  code: string;
+  message?: string;
+  retryAfter?: number;
+}
+
+export interface RemoteCommand {
+  id: string;
+  kind: string;
+  issuedAt?: string;
+  /** Seconds, for `seek`. */
+  position?: number;
+  /** 0 to 1, for `setVolume`. */
+  level?: number;
+  /** An `AudioOutput.id`, for `selectOutput`. */
+  outputID?: string;
+  /** Why the phone sent it; `continue_on_phone` on Continue on iPhone's pause. Passed through. */
+  reason?: string;
+}
+
+export interface CommandAck {
+  commandID: string;
+  accepted: boolean;
+  revision: number;
+  error?: ProtocolError;
+}
+
+export interface ArtworkDescriptor {
+  artworkID: string;
+  contentType: string;
+  byteCount: number;
+  width?: number;
+  height?: number;
+}
+
+export interface PairRequest {
+  claimID: string;
+  phone: DeviceIdentity;
+  expiresAt: string;
+}
+
+export interface NowPlayingTrack {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  artworkID: string;
+  artworkURL?: string;
+}
+
+export interface NowPlayingAttributes {
+  id: string;
+  macName: string;
+  revision: number;
+  isPlaying: boolean;
+  elapsedTime: number;
+  timestamp: string;
+  track?: NowPlayingTrack;
+  canGoNext: boolean;
+  canGoPrevious: boolean;
+  /** `PlaybackMessage.volume`, for the Lock Screen's slider. */
+  volume?: number;
+}
+
+export type MacFrame =
+  | { type: "hello"; protocolVersion: number; device: DeviceIdentity }
+  | { type: "state"; message: PlaybackMessage }
+  | { type: "ack"; ack: CommandAck }
+  | { type: "artwork"; artwork: ArtworkDescriptor }
+  | { type: "goodbye"; reason: string }
+  | { type: "pair-decision"; claimID: string; approved: boolean }
+  | { type: "hand-back-request"; requestID: string }
+  | { type: "error"; error: ProtocolError };
+
+export type RelayFrame =
+  | { type: "welcome"; protocolVersion: number }
+  | { type: "command"; command: RemoteCommand }
+  | { type: "artwork-request"; artworkID: string }
+  | { type: "pair-request"; request: PairRequest }
+  | { type: "paired"; phone: DeviceIdentity }
+  | { type: "revoked"; reason: string }
+  | { type: "hand-back-status"; requestID: string; status: string }
+  | { type: "error"; error: ProtocolError };
+
+
+/** `state` wins; without it this is the temporary contract (PROTOCOL.md §3). */
+export function stateOf(message: PlaybackMessage): PlaybackState {
+  if (message.state) return message.state;
+  return message.isPlaying ? "playing" : message.track ? "paused" : "stopped";
+}
+
+// ---- Validation ---------------------------------------------------------
+
+const text = (v: unknown, max = 512): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
+
+export function isDevice(v: unknown): v is DeviceIdentity {
+  const d = v as DeviceIdentity;
+  return !!d && text(d.id, 128) && text(d.name, 200) && text(d.kind, 32);
+}
+
+export function isPlaybackMessage(v: unknown): v is PlaybackMessage {
+  const m = v as PlaybackMessage;
+  return (
+    !!m &&
+    Number.isSafeInteger(m.revision) &&
+    typeof m.isPlaying === "boolean" &&
+    typeof m.elapsedTime === "number" &&
+    text(m.capturedAt, 40) &&
+    typeof m.canGoNext === "boolean" &&
+    typeof m.canGoPrevious === "boolean"
+  );
+}
+
+export function isCommand(v: unknown): v is RemoteCommand {
+  const c = v as RemoteCommand;
+  return (
+    !!c &&
+    UUID.test(c.id ?? "") &&
+    text(c.kind, 32) &&
+    (c.position === undefined || Number.isFinite(c.position)) &&
+    (c.level === undefined || Number.isFinite(c.level)) &&
+    (c.outputID === undefined || text(c.outputID, 256)) &&
+    (c.reason === undefined || text(c.reason, 64))
+  );
+}
+
+/** What a hand-back push carries for the app (API-v1 §14). */
+export interface HandBackRequest {
+  requestID: string;
+  /** ISO-8601. A background push that wakes the app later than this is ignored. */
+  expiresAt: string;
+}
+
+/** A `HandBackStatus` from the phone: an open set of short snake_case words. */
+export function isHandBackStatus(v: unknown): v is string {
+  return typeof v === "string" && /^[a-z_]{1,32}$/.test(v);
+}
+
+export function isUUID(v: unknown): v is string {
+  return typeof v === "string" && UUID.test(v);
+}
+
+export function isAck(v: unknown): v is CommandAck {
+  const a = v as CommandAck;
+  return !!a && UUID.test(a.commandID ?? "") && typeof a.accepted === "boolean" && Number.isSafeInteger(a.revision);
+}
+
+export const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+export const ARTWORK_ID = /^[0-9a-f]{64}$/;
+export const HEX_TOKEN = /^[0-9a-fA-F]{16,512}$/;
