@@ -45,6 +45,10 @@ struct ContinueOnIPhoneIntent: AppIntent {
         switch outcome {
         case .continued: dialog = "Continuing on your iPhone."
         case .macStillPlaying: dialog = "Playing on your iPhone, but your Mac didn’t pause."
+        // Nothing new on the Mac since the last time, as on the next drive
+        // with a CarPlay automation: carry on with what the phone has.
+        case .resumedHere: dialog = "Continuing where your iPhone left off."
+        case .alreadyPlayingHere: dialog = "Already playing on your iPhone."
         case .unavailable: throw ShortcutError("Nothing on your Mac can be continued here. The song has to be in Apple Music.")
         case .notAllowed: throw ShortcutError("Allow access to Apple Music in Settings to continue listening on your iPhone.")
         case .didNotStart: throw ShortcutError("Couldn’t start playback on your iPhone. Music is still playing on your Mac.")

@@ -12,17 +12,20 @@ public final class MacRemote {
     private let client: any Client
     private let now: @Sendable () -> Date
     private let sleep: @Sendable (TimeInterval) async throws -> Void
+    private let memory: HandoverMemory
     /// The relay's state as last read. Nil until the first read.
     public private(set) var state: SessionState?
 
     public init(
         client: any Client,
         now: @escaping @Sendable () -> Date = { Date() },
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+        memory: HandoverMemory = .none
     ) {
         self.client = client
         self.now = now
         self.sleep = sleep
+        self.memory = memory
     }
 
     /// From the pairing on this device: the credential the extension also
@@ -30,7 +33,7 @@ public final class MacRemote {
     /// iOS can suspend the app between requests.
     public static func paired(credentials: any CredentialStore, http: any HTTPSending = URLSessionHTTP(reuseConnections: false)) throws -> MacRemote {
         guard let credential = try credentials.load() else { throw TransportError.notPaired }
-        return MacRemote(client: RelayClient(credential: credential, http: http))
+        return MacRemote(client: RelayClient(credential: credential, http: http), memory: .appGroup)
     }
 
     /// Reads what the relay holds now.
@@ -100,7 +103,8 @@ public final class MacRemote {
             send: { [self] in try await send($0) },
             record: record,
             now: now,
-            sleep: sleep
+            sleep: sleep,
+            memory: memory
         )
     }
 

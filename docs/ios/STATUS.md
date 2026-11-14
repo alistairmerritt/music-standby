@@ -6,6 +6,19 @@ Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at 
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Continue on iPhone a second time (15 November 2026)
+
+A CarPlay automation that runs Continue on iPhone worked on the first drive, then started the
+Mac's old song again on the next: after a handover the Mac stays paused on that song while the
+phone plays on through it and the queue. Continue on iPhone (the action and the app's button)
+now remembers where the Mac stopped for the phone (`HandoverMark`, App Group defaults, key
+`continueOnPhoneMark`). When the Mac is still paused on that song within 10 s of that point,
+it has nothing new, so Apple Music here resumes where it is (`.resumedHere`), or is left
+playing (`.alreadyPlayingHere`), and nothing goes to the Mac. A Mac that is playing, has
+played on, or is on another song is continued as before, and so is a phone with nothing
+loaded. Continue on Mac forgets the mark. Unit tests pass (`ContinueOnPhoneAgainTests`).
+**Not yet seen in the car.**
+
 ## Continue from iPhone, asked for at the Mac (12 November 2026, night)
 
 A button (and a Shortcuts action) on the Mac brings the phone's music back. The Mac can't see

@@ -15,6 +15,8 @@ public struct Handover {
     var record: @MainActor (String) -> Void
     var now: @Sendable () -> Date
     var sleep: @Sendable (TimeInterval) async throws -> Void
+    /// Where the Mac stopped when Continue on iPhone last took its song.
+    var memory: HandoverMemory
 
     public init(
         latest: @escaping @MainActor () -> PlaybackMessage?,
@@ -22,7 +24,8 @@ public struct Handover {
         send: @escaping @MainActor (RemoteCommand) async throws -> CommandAck,
         record: @escaping @MainActor (String) -> Void,
         now: @escaping @Sendable () -> Date,
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void,
+        memory: HandoverMemory
     ) {
         self.latest = latest
         self.refresh = refresh
@@ -30,14 +33,28 @@ public struct Handover {
         self.record = record
         self.now = now
         self.sleep = sleep
+        self.memory = memory
     }
 
     /// Continue on iPhone: starts the Mac's song in this phone's Apple Music
     /// at the Mac's position, with the Mac's Up Next after it, and once it's
     /// playing here, pauses the Mac. Until then the Mac keeps playing, so a
     /// failure costs nothing.
+    ///
+    /// When the Mac hasn't moved since the last time (still paused on the
+    /// song this phone took, where it stopped), it has nothing new, and
+    /// Apple Music here, which has played on since, carries on instead.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
         guard let message = latest(), let catalogID = message.track?.catalogID else { return .unavailable }
+        if let mark = memory.load(), mark.isUntouched(by: message, at: now()), let here = player.nowPlaying() {
+            if here.isPlaying {
+                record("Continue on iPhone: already playing here; nothing new on the Mac since it was continued")
+                return .alreadyPlayingHere
+            }
+            player.resume()
+            record("Continue on iPhone: resumed Apple Music here; nothing new on the Mac since it was continued")
+            return .resumedHere
+        }
         guard await player.requestAccess() else {
             record("Continue on iPhone: no access to Apple Music")
             return .notAllowed
@@ -56,6 +73,7 @@ public struct Handover {
         // ignores a pause while paused. Only a playing Mac is worth a retry.
         guard latest()?.state == .playing else {
             let ack = try? await send(RemoteCommand(kind: .pause, issuedAt: now(), reason: .continueOnPhone))
+            remember(catalogID)
             record("Continue on iPhone: playing here; the Mac was already paused\(ack?.accepted == true ? " and knows" : "")")
             return .continued
         }
@@ -67,6 +85,7 @@ public struct Handover {
                 // offers Continue from iPhone.
                 let ack = try await send(RemoteCommand(kind: .pause, issuedAt: now(), reason: .continueOnPhone))
                 if ack.accepted {
+                    remember(catalogID)
                     record("Continue on iPhone: playing here with \(queue.count - 1) songs after it; the Mac is paused")
                     return .continued
                 }
@@ -77,6 +96,13 @@ public struct Handover {
             if attempt == 1 { try? await sleep(1) }
         }
         return .macStillPlaying
+    }
+
+    /// Where the Mac stopped for this phone: its position run on to now, as
+    /// the pause has only just landed.
+    private func remember(_ catalogID: String) {
+        guard let current = latest(), current.track?.catalogID == catalogID else { return memory.save(nil) }
+        memory.save(HandoverMark(catalogID: catalogID, position: current.elapsed(at: now()), takenAt: now()))
     }
 
     /// How many songs ahead in the Mac's queue this catalogue ID is: 0 for
@@ -131,6 +157,8 @@ public struct Handover {
             if let current = latest(), current.state == .playing, current.track?.catalogID == catalogID {
                 // Headphones following the music to the Mac may have paused it already.
                 if player.nowPlaying()?.isPlaying == true { player.pause() }
+                // The Mac has the music again: the next Continue on iPhone takes it.
+                memory.save(nil)
                 record("Send back to Mac: playing on the Mac \(ahead) song\(ahead == 1 ? "" : "s") on; Apple Music here is paused")
                 return .sentBack
             }

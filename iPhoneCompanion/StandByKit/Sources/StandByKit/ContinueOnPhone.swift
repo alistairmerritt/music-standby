@@ -15,6 +15,8 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// can't be read (before Apple Music access is allowed).
     func nowPlaying() -> PhoneNowPlaying?
     func pause()
+    /// Plays Apple Music's queue here on from where it is.
+    func resume()
 }
 
 /// Apple Music on this phone at one moment.
@@ -55,4 +57,10 @@ public enum ContinueOutcome: Equatable, Sendable {
     case didNotStart
     /// Playing here, but the Mac didn't pause.
     case macStillPlaying
+    /// Nothing new on the Mac since the last Continue on iPhone (it's still
+    /// paused where it stopped for this phone), so Apple Music here played on
+    /// from where it is.
+    case resumedHere
+    /// As `resumedHere`, but Apple Music here was already playing.
+    case alreadyPlayingHere
 }

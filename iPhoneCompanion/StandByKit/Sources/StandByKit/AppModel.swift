@@ -250,7 +250,8 @@ public final class AppModel {
             send: { [transport] in try await transport.send($0) },
             record: { [weak self] in self?.record($0) },
             now: now,
-            sleep: sleep
+            sleep: sleep,
+            memory: .defaults(defaults)
         )
     }
 

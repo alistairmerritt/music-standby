@@ -22,6 +22,11 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         pauses += 1
         current?.isPlaying = false
     }
+    private(set) var resumes = 0
+    func resume() {
+        resumes += 1
+        current?.isPlaying = true
+    }
 }
 
 private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) -> PlaybackMessage {

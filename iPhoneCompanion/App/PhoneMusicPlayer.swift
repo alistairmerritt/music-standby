@@ -55,4 +55,6 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     }
 
     func pause() { player.pause() }
+
+    func resume() { player.play() }
 }

@@ -276,7 +276,7 @@ private struct HandoffSection: View {
         case .unavailable: return "This song couldn’t be found in Apple Music."
         case .notAllowed: return "Allow access to Apple Music in Settings to continue listening on your iPhone."
         case .didNotStart: return "Couldn’t start playback on your iPhone. Music is still playing on your Mac."
-        case .continued, .macStillPlaying:
+        case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere:
             // The song is Apple Music's now: show it there.
             openURL(SystemMusicPhonePlayer.appURL)
             return nil
