@@ -37,6 +37,21 @@ public final class Companion {
     /// Music plays here, or before the first.
     public private(set) var handBack: HandBackProgress?
 
+    /// Whether the menu offers Continue from iPhone: after Continue on iPhone
+    /// until Music plays here, and also whenever Music here is paused or
+    /// stopped, since this Mac can't see what the phone plays. Music started
+    /// on the phone some other way left no button (16 November 2026). Not
+    /// while Music plays here, nor when it isn't running, which the phone's
+    /// commands couldn't start.
+    public var offersContinueFromPhone: Bool {
+        guard pairedPhone != nil else { return false }
+        if phoneHasMusic || handBack != nil { return true }
+        switch snapshot?.state {
+        case .paused?, .stopped?: return true
+        default: return false
+        }
+    }
+
     // MARK: Parts
 
     @ObservationIgnored public let controller: MusicController

@@ -100,6 +100,21 @@ import StandByProtocol
         await eventually { !r.companion.phoneHasMusic }
     }
 
+    @Test func continueFromIPhoneIsOfferedWheneverMusicHereIsntPlaying() async throws {
+        let r = await rig(state: "playing")
+        let phone = DeviceIdentity(id: "p1", name: "iPhone", kind: .iPhone, appVersion: nil, osVersion: nil)
+        await r.relay.simulate(.paired(phone: phone))
+        await eventually { r.companion.pairedPhone == phone }
+        #expect(!r.companion.offersContinueFromPhone, "not while Music plays here")
+        r.music.state = "paused"
+        r.companion.refresh()
+        #expect(await eventually { r.companion.offersContinueFromPhone }, "paused here, though the phone got its music some other way")
+        r.music.state = "stopped"
+        r.companion.refresh()
+        #expect(await eventually { r.companion.snapshot?.state == .stopped })
+        #expect(r.companion.offersContinueFromPhone)
+    }
+
     @Test func continueFromIPhoneIsStillOfferedAfterARestart() async throws {
         let defaults = UserDefaults(suiteName: "CompanionTests-\(UUID().uuidString)")!
         let first = await rig(state: "playing", defaults: defaults)
