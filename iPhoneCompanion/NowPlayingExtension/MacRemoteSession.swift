@@ -49,11 +49,11 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
               fetchedArtwork != artworkID, fetchingArtwork != artworkID else { return }
         fetchingArtwork = artworkID
         let store = services.artwork, url = track.artworkURL, logger = logger, started = Date()
-        logger.log("Fetching artwork \(artworkID.prefix(12), privacy: .public)")
+        logger.log("Fetching artwork \(artworkID.prefix(12), privacy: .public); memory \(Self.footprint(), privacy: .public)")
         let fetch = Task { [weak self] in
             do {
                 _ = try await store.resolve(id: artworkID, remoteURL: url)
-                logger.log("Artwork \(artworkID.prefix(12), privacy: .public) cached in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+                logger.log("Artwork \(artworkID.prefix(12), privacy: .public) cached in \(Int(Date().timeIntervalSince(started) * 1000)) ms; memory \(Self.footprint(), privacy: .public)")
                 self?.artworkCached(artworkID)
             } catch {
                 logger.error("Artwork fetch failed: \(error.localizedDescription, privacy: .public)")
@@ -69,6 +69,18 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             }
             _ = done.wait(timeout: .now() + 8)
         }
+    }
+
+    /// This process's memory as iOS counts it against the extension's limit
+    /// (about 6 MB), for the log: where the artwork's memory goes.
+    nonisolated static func footprint() -> String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return "unknown" }
+        return String(format: "%.2f MB", Double(info.phys_footprint) / 1_048_576)
     }
 
     private func artworkCached(_ artworkID: String?) {
@@ -100,11 +112,13 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
                     if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {
                         return try ArtworkRepresentation(cgImage: image)
                     }
-                    let cached = store.load(id: artworkID) != nil
-                    logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached)")
+                    // Asked whether it's cached without reading it: the read
+                    // below is the only copy (16 November 2026).
+                    let cached = store.isCached(id: artworkID)
+                    logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached); memory \(Self.footprint(), privacy: .public)")
                     do {
                         let representation = try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
-                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over")
+                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over; memory \(Self.footprint(), privacy: .public)")
                         return representation
                     } catch {
                         logger.error("Artwork \(artworkID.prefix(12), privacy: .public) not handed over: \(error.localizedDescription, privacy: .public)")
