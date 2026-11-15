@@ -6,6 +6,21 @@ Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at 
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## A station after a short queue (15 November 2026)
+
+From a Mac playing an Apple Music station, Continue on iPhone brought one song and then
+stopped: a station lists only its next song in Music's queue (the Mac's new `queue` log showed
+"Up Next 1" while a station played). Neither AppleScript (no current playlist) nor Music's
+remote protocol (`playqueue-contents`, `playstatusupdate`: no station name or ID) says which
+station it is. So when fewer than 3 songs with a catalogue ID are to come
+(`Handover.stationBelow`), Apple Music's station for the song (MusicKit `Song.station`, its
+Create Station) is queued after them: MusicKit's `SystemMusicPlayer.shared.queue.insert(_:position: .tail)`,
+failing that MediaPlayer's `append` by store ID. A failure only adds a log line. The catalogue
+needs the **MusicKit app service on the App ID** (Certificates, Identifiers & Profiles), which
+has to be switched on by hand. The Continue on iPhone action now logs its steps to the device
+log (`Shortcuts` category). Unit tests pass (`ContinueWithAStationTests`). **Not yet tried on
+the phone.**
+
 ## Continue on iPhone a second time (15 November 2026)
 
 A CarPlay automation that runs Continue on iPhone worked on the first drive, then started the

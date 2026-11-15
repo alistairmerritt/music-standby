@@ -27,6 +27,12 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         resumes += 1
         current?.isPlaying = true
     }
+    var station: StationAppend = .added
+    private(set) var stationSeeds: [String] = []
+    func appendStation(seededBy catalogID: String) async -> StationAppend {
+        stationSeeds.append(catalogID)
+        return station
+    }
 }
 
 private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) -> PlaybackMessage {

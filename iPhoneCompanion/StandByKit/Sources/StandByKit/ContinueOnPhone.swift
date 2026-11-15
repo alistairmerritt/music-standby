@@ -17,6 +17,22 @@ public protocol PhoneMusicPlaying: AnyObject {
     func pause()
     /// Plays Apple Music's queue here on from where it is.
     func resume()
+    /// Adds an Apple Music station made from this song (Music's own Create
+    /// Station) after everything queued here, so the music doesn't stop
+    /// when the queue does.
+    func appendStation(seededBy catalogID: String) async -> StationAppend
+}
+
+/// What `appendStation(seededBy:)` managed (added 15 November 2026).
+public enum StationAppend: Equatable, Sendable {
+    /// Queued after the songs, and the player said so.
+    case added
+    /// Handed to the player by its store ID, which doesn't say whether it took it.
+    case addedUnconfirmed
+    /// Apple Music has no station for this song.
+    case noStation
+    /// The catalogue couldn't be asked, or the player refused it.
+    case failed(String)
 }
 
 /// Apple Music on this phone at one moment.

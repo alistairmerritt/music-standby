@@ -68,6 +68,34 @@ public struct Handover {
             record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")
             return .didNotStart
         }
+        let outcome = await pauseMac(for: catalogID, songsAfter: queue.count - 1)
+        if queue.count - 1 < Self.stationBelow {
+            await followWithStation(seededBy: catalogID, songsAfter: queue.count - 1, with: player)
+        }
+        return outcome
+    }
+
+    /// With fewer songs than this to come on the Mac, a station made from
+    /// the song follows them here. A station on the Mac lists only its next
+    /// song, so the phone stopped after it (seen 15 November 2026, from a
+    /// CarPlay automation); an album can be ending too. The Mac can't say
+    /// which station it plays (neither AppleScript nor Music's remote
+    /// protocol names it), so this is Apple Music's station for the song.
+    static let stationBelow = 3
+
+    private func followWithStation(seededBy catalogID: String, songsAfter: Int, with player: any PhoneMusicPlaying) async {
+        let result = await player.appendStation(seededBy: catalogID)
+        switch result {
+        case .added: record("Continue on iPhone: \(songsAfter) song\(songsAfter == 1 ? "" : "s") from the Mac, then a station from the song")
+        case .addedUnconfirmed: record("Continue on iPhone: a station from the song handed to Apple Music after \(songsAfter) song\(songsAfter == 1 ? "" : "s"); not confirmed")
+        case .noStation: record("Continue on iPhone: Apple Music has no station for the song")
+        case .failed(let reason): record("Continue on iPhone: couldn't add a station (\(reason))")
+        }
+    }
+
+    /// Once the song plays here: the Mac pauses, and learns from the
+    /// command's reason that the phone has its music.
+    private func pauseMac(for catalogID: String, songsAfter: Int) async -> ContinueOutcome {
         // The pause goes to a paused Mac too: its reason is how the Mac learns
         // the phone has its music, to offer Continue from iPhone, and Music
         // ignores a pause while paused. Only a playing Mac is worth a retry.
@@ -86,7 +114,7 @@ public struct Handover {
                 let ack = try await send(RemoteCommand(kind: .pause, issuedAt: now(), reason: .continueOnPhone))
                 if ack.accepted {
                     remember(catalogID)
-                    record("Continue on iPhone: playing here with \(queue.count - 1) songs after it; the Mac is paused")
+                    record("Continue on iPhone: playing here with \(songsAfter) songs after it; the Mac is paused")
                     return .continued
                 }
                 record("Continue on iPhone: the Mac refused to pause (\(ack.error?.code.rawValue ?? "no reason")), try \(attempt)")

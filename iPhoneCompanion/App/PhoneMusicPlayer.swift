@@ -1,4 +1,5 @@
 import MediaPlayer
+import MusicKit
 import StandByKit
 
 /// Apple Music on this phone for Continue on iPhone, through MediaPlayer's
@@ -57,4 +58,28 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     func pause() { player.pause() }
 
     func resume() { player.play() }
+
+    /// Apple Music's station for the song (MusicKit's `Song.station`, the
+    /// catalogue's Create Station), after the queue. MusicKit's queue first,
+    /// which says whether it worked; failing that, MediaPlayer's append by
+    /// store ID, which doesn't. The catalogue needs the MusicKit app service
+    /// on the App ID (Certificates, Identifiers & Profiles).
+    func appendStation(seededBy catalogID: String) async -> StationAppend {
+        let station: Station
+        do {
+            var request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: MusicItemID(catalogID))
+            request.properties = [.station]
+            guard let found = try await request.response().items.first?.station else { return .noStation }
+            station = found
+        } catch {
+            return .failed("catalogue: \(error.localizedDescription)")
+        }
+        do {
+            try await SystemMusicPlayer.shared.queue.insert(station, position: .tail)
+            return .added
+        } catch {
+            player.append(MPMusicPlayerStoreQueueDescriptor(storeIDs: [station.id.rawValue]))
+            return .addedUnconfirmed
+        }
+    }
 }
