@@ -55,6 +55,7 @@ import Testing
         let frame = try RelayFrame.decode(Fixture.data("relay-command-play-station"))
         guard case .command(let command) = frame else { Issue.record("not a command"); return }
         #expect(command.kind == .playStation && command.catalogID == "1730817069")
+        #expect(command.position == 61.5 && command.title == "Is It Any Wonder?", "where the phone is, and the song to seek in")
         #expect(command.hasRequiredValue)
         #expect(CommandKind.playStation.requiredValue == "catalogID")
         #expect(try Fixture.sameJSON(frame.encoded(), Fixture.data("relay-command-play-station")))

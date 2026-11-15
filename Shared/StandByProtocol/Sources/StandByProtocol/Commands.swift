@@ -50,6 +50,11 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     public var outputID: String?
     /// An Apple Music catalogue song ID, all digits, for `playStation`.
     public var catalogID: String?
+    /// The song's title, for `playStation`: the Mac seeks to `position`
+    /// only when the station starts with a song of this title (16 November
+    /// 2026). For `playStation`, `position` is where the phone was at
+    /// `issuedAt`; the Mac adds the time since, as the phone plays on.
+    public var title: String?
     /// Why the phone sent it, when that matters to the Mac. Added 12 November
     /// 2026; an older Mac ignores it.
     public var reason: CommandReason?
@@ -58,7 +63,7 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
 
     public init(id: UUID = UUID(), kind: CommandKind, issuedAt: Date? = nil,
                 position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil,
-                catalogID: String? = nil, reason: CommandReason? = nil) {
+                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil) {
         self.id = id
         self.kind = kind
         self.issuedAt = issuedAt
@@ -66,6 +71,7 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
         self.level = level
         self.outputID = outputID
         self.catalogID = catalogID
+        self.title = title
         self.reason = reason
     }
 
@@ -81,8 +87,12 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
         RemoteCommand(id: id, kind: .selectOutput, issuedAt: issuedAt, outputID: outputID)
     }
 
-    public static func playStation(seededBy catalogID: String, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
-        RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, catalogID: catalogID)
+    /// With `position` and `title`, the Mac seeks there itself once the
+    /// station starts with that song, rather than after the phone sees it
+    /// play (16 November 2026).
+    public static func playStation(seededBy catalogID: String, position: TimeInterval? = nil, title: String? = nil,
+                                   id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
+        RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, position: position, catalogID: catalogID, title: title)
     }
 
     /// False when `issuedAt` is missing: the temporary contract never sent it.

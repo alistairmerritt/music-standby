@@ -302,6 +302,22 @@ import StandByProtocol
         #expect(opened.hasPrefix("music://music.apple.com/") && opened.hasSuffix("/station/ra.1730817069"))
     }
 
+    @Test func theMacSeeksItselfWhenTheStationStartsWithTheSong() async throws {
+        let r = await rig(state: "paused")   // on "Losing My Edge"; the station starts with "Idontknow"
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "IDONTKNOW", issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(await eventually { r.music.position > 60 }, "seeked to where the phone is, without waiting for the phone")
+        #expect(r.music.position < 75)
+    }
+
+    @Test func aStationStartingWithAnotherSongIsLeftWhereItIs() async throws {
+        let r = await rig(state: "paused")
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Some Other Song", issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        await eventually { r.companion.events.contains { $0.text.contains("another song") } }
+        #expect(r.music.position < 5)
+    }
+
     @Test func aValueCommandWithoutItsValueIsInvalidAndNeverReachesMusic() async throws {
         let r = await rig()
         let before = r.music.scripts.count

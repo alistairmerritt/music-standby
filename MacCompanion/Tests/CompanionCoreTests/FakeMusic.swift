@@ -132,9 +132,14 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
                 for i in _outputs.indices { _outputs[i].selected = i == index }
                 return .value(.text("ok"))
             case .openLocation(let url):
-                // A station's link plays, as Music does; anything else only shows.
+                // A station's link plays, as Music does, from the start of
+                // its first song: here the next track. Anything else only shows.
                 _openedLocations.append(url)
-                if url.contains("/station/") { _state = "playing" }
+                if url.contains("/station/") {
+                    _index = (_index + 1) % tracks.count
+                    _position = 0
+                    _state = "playing"
+                }
                 return .value(.text("ok"))
             }
         }
