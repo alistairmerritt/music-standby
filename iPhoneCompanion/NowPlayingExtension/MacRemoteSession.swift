@@ -117,13 +117,8 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
                     let cached = store.isCached(id: artworkID)
                     logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached); memory \(Self.footprint(), privacy: .public)")
                     do {
-                        // One small decoded image per song, shared by every
-                        // size the system asks for (ExtensionArtwork).
-                        let image = try await ExtensionArtwork.shared.image(id: artworkID) {
-                            try await store.resolve(id: artworkID, remoteURL: artworkURL)
-                        }
-                        let representation = try ArtworkRepresentation(cgImage: image)
-                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over at \(image.width) px; memory \(Self.footprint(), privacy: .public)")
+                        let representation = try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
+                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over; memory \(Self.footprint(), privacy: .public)")
                         return representation
                     } catch {
                         logger.error("Artwork \(artworkID.prefix(12), privacy: .public) not handed over: \(error.localizedDescription, privacy: .public)")
