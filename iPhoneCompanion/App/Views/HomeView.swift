@@ -38,7 +38,7 @@ struct HomeView: View {
                 }
             }
 
-            HandoffSection(player: phoneMusic, here: $phoneNowPlaying)
+            HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic)
             nowPlayingSection
             remindersSection
             macSection
@@ -116,36 +116,29 @@ struct HomeView: View {
         ContinueListeningStatus.assess(mac: model.macMusicConnection, appleMusicAccess: appleMusicAccess, canPlayCatalog: canPlayCatalog)
     }
 
+    /// Asks for Apple Music access, or, once refused, opens Settings.
+    private func allowAppleMusic(canAsk: Bool) async {
+        if canAsk {
+            _ = await phoneMusic.requestAccess()
+            appleMusicAccess = phoneMusic.access
+            canPlayCatalog = await phoneMusic.canPlayCatalog()
+        } else if let url = URL(string: UIApplication.openSettingsURLString) {
+            openURL(url)
+        }
+    }
+
+    /// The Mac alone: its buttons say what they act on, now that Continue
+    /// Listening has a status of its own (16 November 2026).
     private var macSection: some View {
-        Section {
+        Section("Mac") {
             LabeledContent("Name", value: model.pairedMac?.name ?? "")
             LabeledContent("Status", value: statusText)
-            if let status = continueListening {
-                LabeledContent("Continue Listening", value: status.title)
-                if case .allowAppleMusic(let canAsk) = status {
-                    Button(canAsk ? "Allow Apple Music Access" : "Open Settings") {
-                        Task {
-                            if canAsk {
-                                _ = await phoneMusic.requestAccess()
-                                appleMusicAccess = phoneMusic.access
-                                canPlayCatalog = await phoneMusic.canPlayCatalog()
-                            } else if let url = URL(string: UIApplication.openSettingsURLString) {
-                                openURL(url)
-                            }
-                        }
-                    }
-                }
-            }
-            Button("Reconnect") {
+            Button("Reconnect to Mac") {
                 Task { await model.reconnect() }
             }
-            Button("Unpair", role: .destructive) {
+            Button("Unpair Mac", role: .destructive) {
                 isConfirmingUnpair = true
             }
-        } header: {
-            Text("Mac")
-        } footer: {
-            if let detail = continueListening?.detail { Text(detail) }
         }
     }
 
@@ -269,6 +262,10 @@ private struct HandoffSection: View {
     @Environment(\.openURL) private var openURL
     let player: SystemMusicPhonePlayer
     @Binding var here: PhoneNowPlaying?
+    /// Whether Continue Listening can work, and what to do if not. Nil when
+    /// there's nothing to say yet.
+    let status: ContinueListeningStatus?
+    let allowAppleMusic: (_ canAsk: Bool) async -> Void
     @State private var working = false
     @State private var problem: String?
 
@@ -284,9 +281,19 @@ private struct HandoffSection: View {
     /// for whatever Apple Music here last played long ago.
     private var showsContinueOnMac: Bool { phonePlaying || phoneSongInMacQueue }
 
+    /// Always shown once there's a status, so Continue Listening has a place
+    /// on the phone even with nothing to continue (16 November 2026).
     var body: some View {
-        if showsContinueOnPhone || showsContinueOnMac {
+        if status != nil || showsContinueOnPhone || showsContinueOnMac {
             Section {
+                if let status {
+                    LabeledContent("Status", value: status.title)
+                    if case .allowAppleMusic(let canAsk) = status {
+                        Button(canAsk ? "Allow Apple Music Access" : "Open Settings") {
+                            Task { await allowAppleMusic(canAsk) }
+                        }
+                    }
+                }
                 if showsContinueOnPhone {
                     row("Continue on iPhone", symbol: "iphone",
                         detail: "Continue listening on your iPhone, including your Up Next queue. Playback on your Mac will pause.",
@@ -302,7 +309,7 @@ private struct HandoffSection: View {
             } header: {
                 Text("Continue Listening")
             } footer: {
-                if let problem { Text(problem) }
+                if let problem { Text(problem) } else if let detail = status?.detail { Text(detail) }
             }
             .onChange(of: [macPlaying, phonePlaying]) { problem = nil }
         }
