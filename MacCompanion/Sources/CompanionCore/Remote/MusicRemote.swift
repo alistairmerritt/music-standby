@@ -32,6 +32,9 @@ public protocol MusicRemoteReading: Sendable {
     /// The current song's catalogue ID (by its persistent ID), and Up Next.
     /// Nil when Music can't be reached or has forgotten the pairing.
     func queue(current track: MusicTrack?) async -> RemoteQueue?
+    /// True once Music has answered that it no longer knows this pairing
+    /// (Forget All Remotes, or a changed library): connect again.
+    var isForgottenByMusic: Bool { get async }
     /// Music's own now-playing artwork, when Music is still playing this
     /// track. Nil when it isn't, has none, or can't be reached.
     func artwork(for track: MusicTrack) async -> Data?
@@ -39,6 +42,7 @@ public protocol MusicRemoteReading: Sendable {
 
 extension MusicRemoteReading {
     public func artwork(for track: MusicTrack) async -> Data? { nil }
+    public var isForgottenByMusic: Bool { get async { false } }
 }
 
 public enum MusicRemoteStatus: Equatable, Sendable {
@@ -88,6 +92,7 @@ public actor MusicRemoteClient: MusicRemoteReading {
     private var catalogByItemID: [UInt64: String] = [:]
     private var libraryReadAt: Date?
     public private(set) var status: MusicRemoteStatus = .unknown
+    public var isForgottenByMusic: Bool { status == .unpaired }
 
     public init(pairing: MusicRemotePairing, http: any LocalHTTP = URLSessionLocalHTTP(),
                 locate: @escaping @Sendable (String) async -> Int? = { await MusicRemoteLocator.port(serviceName: $0) },

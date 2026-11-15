@@ -104,6 +104,7 @@ public struct CatalogFillingRemote: MusicRemoteReading {
     }
 
     public func artwork(for track: MusicTrack) async -> Data? { await remote.artwork(for: track) }
+    public var isForgottenByMusic: Bool { get async { await remote.isForgottenByMusic } }
 
     public func queue(current track: MusicTrack?) async -> RemoteQueue? {
         guard var queue = await remote.queue(current: track) else { return nil }

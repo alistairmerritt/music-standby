@@ -20,6 +20,11 @@ public final class AppModel {
     /// True when the Mac's last state names the song's Apple Music catalogue ID,
     /// so Continue on iPhone can start it here.
     public private(set) var canContinueOnPhone = false
+    /// Whether the Mac is connected to Music as a remote, from its newest
+    /// state, with or without a session. Nil until a Mac that says has sent
+    /// a state (16 November 2026).
+    public private(set) var macMusicConnection: MusicConnection?
+    @ObservationIgnored private var musicConnectionRevision: UInt64?
     public private(set) var artwork: CGImage?
     public private(set) var pushTokens = PushTokens()
     public private(set) var commandsFromSystem: [CommandRecord] = []
@@ -182,6 +187,8 @@ public final class AppModel {
         artwork = nil
         latestMessage = nil
         assignedSessionID = nil
+        macMusicConnection = nil
+        musicConnectionRevision = nil
         setNowPlayingEnabled(false)
     }
 
@@ -318,6 +325,12 @@ public final class AppModel {
 
     private func apply(playback message: PlaybackMessage) async {
         guard let mac = pairedMac else { return }
+        // Before the session check below: the Mac section shows it even
+        // while nothing shows in Now Playing.
+        if musicConnectionRevision.map({ message.revision >= $0 }) ?? true {
+            macMusicConnection = message.musicConnection
+            musicConnectionRevision = message.revision
+        }
         // A relay names every session. Showing one under a made-up name would
         // leave the Lock Screen with controls the relay refuses.
         if transport.issuesSessionIDs, assignedSessionID == nil { return }

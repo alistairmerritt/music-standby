@@ -64,7 +64,7 @@ private struct NowPlayingSection: View {
                        detail: companion.snapshot?.detail, action: nil)
             }
             TransportControls(companion: companion)
-            if companion.pairedPhone != nil, companion.phoneHasMusic || companion.handBack != nil {
+            if companion.offersContinueFromPhone {
                 ContinueFromPhoneRow(companion: companion)
             }
         }

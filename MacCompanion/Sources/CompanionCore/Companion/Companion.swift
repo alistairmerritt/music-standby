@@ -37,6 +37,21 @@ public final class Companion {
     /// Music plays here, or before the first.
     public private(set) var handBack: HandBackProgress?
 
+    /// Whether the menu offers Continue from iPhone: after Continue on iPhone
+    /// until Music plays here, and also whenever Music here is paused or
+    /// stopped, since this Mac can't see what the phone plays. Music started
+    /// on the phone some other way left no button (16 November 2026). Not
+    /// while Music plays here, nor when it isn't running, which the phone's
+    /// commands couldn't start.
+    public var offersContinueFromPhone: Bool {
+        guard pairedPhone != nil else { return false }
+        if phoneHasMusic || handBack != nil { return true }
+        switch snapshot?.state {
+        case .paused?, .stopped?: return true
+        default: return false
+        }
+    }
+
     // MARK: Parts
 
     @ObservationIgnored public let controller: MusicController
@@ -106,7 +121,11 @@ public final class Companion {
     /// Music's remote protocol, once the companion is paired with Music: the
     /// catalogue ID and Up Next. Nil leaves both out of the state.
     @ObservationIgnored public var remote: (any MusicRemoteReading)? {
-        didSet { remoteRead = nil }
+        didSet {
+            remoteRead = nil
+            // Connecting to Music, or forgetting it, reaches the phone at once.
+            if started { refresh() }
+        }
     }
     /// One read of `remote` per song and playback state, shared by the
     /// snapshots in between (Up Next lags an edit until the next of those).
@@ -429,7 +448,7 @@ public final class Companion {
         }
         let artworkID = await artworkID(for: snapshot)
         let queue = await remoteQueue(for: snapshot)
-        guard let message = publisher.ingest(snapshot, artworkID: artworkID, queue: queue) else { return }
+        guard let message = publisher.ingest(snapshot, artworkID: artworkID, queue: queue, musicConnection: await musicConnection()) else { return }
         store.lastRevision = message.revision
         store.saveListeningSession(message.listeningSessionID, now: now())
         self.message = message
@@ -461,6 +480,13 @@ public final class Companion {
             self.refresh()
         }
         return nil
+    }
+
+    /// For the phone's Continue Listening status: whether this Mac is
+    /// connected to Music as a remote (added 16 November 2026).
+    private func musicConnection() async -> MusicConnection {
+        guard let remote else { return .notConnected }
+        return await remote.isForgottenByMusic ? .forgotten : .connected
     }
 
     private func sendCurrentState() async {

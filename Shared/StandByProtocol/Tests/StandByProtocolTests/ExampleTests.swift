@@ -77,8 +77,20 @@ enum Fixture {
         let expected = PlaybackMessage(
             revision: 1_794_207_600_001, state: .playing, elapsedTime: 251.5,
             capturedAt: Fixture.date("2026-11-09T07:00:00.250Z"), track: Fixture.losingMyEdge,
-            canGoNext: true, canGoPrevious: true, listeningSessionID: Fixture.sessionID)
+            canGoNext: true, canGoPrevious: true, listeningSessionID: Fixture.sessionID, musicConnection: .connected)
         #expect(frame == .state(expected))
+    }
+
+    @Test func musicConnectionIsAnOpenSetAndAVisibleChange() throws {
+        let frame = try MacFrame.decode(Data(#"{"type":"state","message":{"revision":1,"state":"paused","isPlaying":false,"elapsedTime":0,"capturedAt":"2026-11-16T00:00:00.000Z","canGoNext":false,"canGoPrevious":false,"musicConnection":"teleported"}}"#.utf8))
+        guard case .state(let message) = frame else { Issue.record("not a state"); return }
+        #expect(message.musicConnection == "teleported")
+        var connected = message
+        connected.musicConnection = .connected
+        var forgotten = connected
+        forgotten.musicConnection = .forgotten
+        #expect(forgotten.hasVisibleChange(from: connected), "connecting or forgetting Music reaches the phone")
+        #expect(!connected.hasVisibleChange(from: connected))
     }
 
     @Test func helloDecodesToExpectedValues() throws {

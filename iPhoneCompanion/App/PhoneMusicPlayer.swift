@@ -59,6 +59,23 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
 
     func resume() { player.play() }
 
+    /// For the Continue Listening row (16 November 2026).
+    var access: AppleMusicAccess {
+        switch MPMediaLibrary.authorizationStatus() {
+        case .authorized: .allowed
+        case .notDetermined: .notDetermined
+        default: .denied
+        }
+    }
+
+    /// True when this phone can play from the Apple Music catalogue, as
+    /// Continue on iPhone does; false without a subscription. Nil when it
+    /// can't be told, as before Apple Music access is allowed or offline.
+    func canPlayCatalog() async -> Bool? {
+        guard access == .allowed else { return nil }
+        return try? await MusicSubscription.current.canPlayCatalogContent
+    }
+
     /// Apple Music's station for the song (MusicKit's `Song.station`, the
     /// catalogue's Create Station), after the queue, through MusicKit's
     /// queue. Seen on the iPhone on 15 November 2026 (`StationProbe`): while

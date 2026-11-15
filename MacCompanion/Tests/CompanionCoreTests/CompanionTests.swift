@@ -100,6 +100,21 @@ import StandByProtocol
         await eventually { !r.companion.phoneHasMusic }
     }
 
+    @Test func continueFromIPhoneIsOfferedWheneverMusicHereIsntPlaying() async throws {
+        let r = await rig(state: "playing")
+        let phone = DeviceIdentity(id: "p1", name: "iPhone", kind: .iPhone, appVersion: nil, osVersion: nil)
+        await r.relay.simulate(.paired(phone: phone))
+        await eventually { r.companion.pairedPhone == phone }
+        #expect(!r.companion.offersContinueFromPhone, "not while Music plays here")
+        r.music.state = "paused"
+        r.companion.refresh()
+        #expect(await eventually { r.companion.offersContinueFromPhone }, "paused here, though the phone got its music some other way")
+        r.music.state = "stopped"
+        r.companion.refresh()
+        #expect(await eventually { r.companion.snapshot?.state == .stopped })
+        #expect(r.companion.offersContinueFromPhone)
+    }
+
     @Test func continueFromIPhoneIsStillOfferedAfterARestart() async throws {
         let defaults = UserDefaults(suiteName: "CompanionTests-\(UUID().uuidString)")!
         let first = await rig(state: "playing", defaults: defaults)
@@ -330,6 +345,24 @@ import StandByProtocol
         #expect(await catalogue.queries == [CatalogQuery(title: "Idontknow", artist: "Jamie xx", album: "Idontknow", duration: 240.5)])
         await eventually { await r.relay.uploads[expectedID] != nil }
         #expect(await r.relay.uploads[expectedID]?.width == 400)
+    }
+
+    /// For the phone's Continue Listening status (16 November 2026).
+    @Test func eachStateSaysWhetherTheMacIsConnectedToMusic() async throws {
+        let r = await rig()
+        #expect(await states(r.relay).last?.musicConnection == .notConnected)
+        r.companion.remote = ConnectionRemote(forgotten: false)
+        #expect(await eventually { await states(r.relay).last?.musicConnection == .connected })
+        r.companion.remote = ConnectionRemote(forgotten: true)
+        #expect(await eventually { await states(r.relay).last?.musicConnection == .forgotten })
+        r.companion.remote = nil
+        #expect(await eventually { await states(r.relay).last?.musicConnection == .notConnected })
+    }
+
+    private struct ConnectionRemote: MusicRemoteReading {
+        let forgotten: Bool
+        func queue(current track: MusicTrack?) async -> RemoteQueue? { nil }
+        var isForgottenByMusic: Bool { get async { forgotten } }
     }
 
     /// Music's remote protocol, giving artwork (or none) after a delay.

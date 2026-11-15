@@ -6,6 +6,21 @@ Last updated 15 November 2026, on `main`. The newest work is at the top; older s
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Continue Listening status (16 November 2026)
+
+Continue Listening had no presence on the phone when it couldn't work: its box only appeared
+when there was something to continue. The Continue Listening section now always shows once
+there's a status, with a **Status** row first, then the Continue buttons when they apply. (It
+was first a row in the Mac section, but there "Reconnect" and "Unpair" read as if they belonged
+to it; the Mac section now has only the Mac, with **Reconnect to Mac** and **Unpair Mac**.)
+The status says:
+Ready, Set Up on Your Mac (not connected to Music), Reconnect on Your Mac (Music forgot the
+pairing), Allow Apple Music (with a button to ask, or to open Settings) or Needs Apple Music
+(no subscription: MusicKit `MusicSubscription.canPlayCatalogContent`), with a footer saying
+what to do (`ContinueListeningStatus.assess`, the Mac first). The Mac reports its connection in
+every state (`PlaybackMessage.musicConnection`), and the model keeps it even without a session
+(`AppModel.macMusicConnection`), since the app ignores states without one. Unit tests pass.
+
 ## Hand-back after a night away, and a crash on the notification (16 November 2026)
 
 - **No session, no hand-back.** The morning after a Continue on iPhone, Continue from iPhone
