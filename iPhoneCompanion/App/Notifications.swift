@@ -50,25 +50,40 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     /// With the app open, the player is already being brought back. Continue
     /// from iPhone's notification still shows, since only its tap acts.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        notification.request.content.threadIdentifier == HandBackRequest.threadID ? [.banner, .list] : []
+    /// Answered at once, on the thread UIKit asked on.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler(notification.request.content.threadIdentifier == HandBackRequest.threadID ? [.banner, .list] : [])
     }
 
     /// "Tap to show on your Lock Screen": showing goes back on, even after
     /// Stop Showing, and the open app asks iOS to show the player.
     /// "Continue on <Mac>?": the tap, which opens the app, or the Continue on
     /// Mac button, which doesn't, is the request.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    ///
+    /// The completion handler is called on the main thread, once the work is
+    /// done. The async form finished on a background thread, and UIKit then
+    /// aborted the app as it updated its snapshot (seen 16 November 2026, a
+    /// tap on "Continue on <Mac>?").
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
         let content = response.notification.request.content
-        switch content.threadIdentifier {
-        case Self.reminderThread:
-            await model.activateNowPlaying()
-        case HandBackRequest.threadID:
-            guard [UNNotificationDefaultActionIdentifier, Self.continueOnMacAction].contains(response.actionIdentifier),
-                  let request = HandBackResponder.request(from: content.userInfo) else { return }
-            await handBack.respond(to: request, via: .tap, player: SystemMusicPhonePlayer())
-        default:
-            break
+        let thread = content.threadIdentifier
+        let acts = [UNNotificationDefaultActionIdentifier, Self.continueOnMacAction].contains(response.actionIdentifier)
+        let request = HandBackResponder.request(from: content.userInfo)
+        let done = MainThreadCompletion(completionHandler)
+        Task { @MainActor in
+            switch thread {
+            case Self.reminderThread:
+                await self.model.activateNowPlaying()
+            case HandBackRequest.threadID:
+                if acts, let request {
+                    await self.handBack.respond(to: request, via: .tap, player: SystemMusicPhonePlayer())
+                }
+            default:
+                break
+            }
+            done.call()
         }
     }
 
@@ -101,6 +116,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             intentIdentifiers: []
         )
     }
+}
+
+/// A UIKit completion handler, carried to the main actor and called there.
+/// UIKit's blocks aren't marked Sendable, though calling one on the main
+/// thread is exactly what it wants.
+private struct MainThreadCompletion: @unchecked Sendable {
+    private let handler: () -> Void
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+    @MainActor func call() { handler() }
 }
 
 /// Alerts only: the reminder is meant to be seen, not heard. It arrives as

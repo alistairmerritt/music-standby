@@ -133,11 +133,11 @@ public actor RelayTransport: PlaybackTransport {
         hub.reset()
     }
 
-    /// Sends under the session the relay named. Without one there is nothing
-    /// for a command to act on.
+    /// Sends under the session the relay named, or none when it has none: the
+    /// app's buttons act on the Mac's live state, and the relay forwards a
+    /// command that names no session (16 November 2026).
     public func send(_ command: RemoteCommand) async throws -> CommandAck {
-        guard let sessionID = hub.assignedSession else { throw TransportError.commandRejected(.noSession) }
-        let ack = try await makeClient().send(command, sessionID: sessionID)
+        let ack = try await makeClient().send(command, sessionID: hub.assignedSession)
         if ack.accepted { scheduleRefresh() }
         return ack
     }

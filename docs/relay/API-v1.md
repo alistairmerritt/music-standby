@@ -195,7 +195,13 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   answers `invalid_request` when one is missing. `playback.volume` and `playback.outputs` in
   `GET /v1/session`, and `attributes.volume` in pushes, carry the results. All optional, so an
   older Mac or relay leaves them out.
-- **`sessionID` is required.** A command from an old session can't act on a new one.
+- **`sessionID` names the session the command came from.** One that names a session must name
+  the current one (`409 no_session` or `session_mismatch` otherwise), so a stale Lock Screen
+  can't act on a newer session; the extension always sends it. Since 16 November 2026 it may be
+  left out: the app and its Shortcuts actions, which read `GET /v1/session` just before, send
+  none when there is no session, and the command goes to the Mac anyway. Before, Continue from
+  iPhone and Continue on Mac failed once the session had ended, as it does overnight while the
+  phone has the music.
 - **Idempotent.** The relay remembers the last 50 command ids per pairing. A repeat gets the
   first answer and is never forwarded twice, and the Mac also ignores repeats. A retried "next"
   skips one track, not two.
@@ -319,7 +325,7 @@ Every value is a judgement call, and the relay can change them without a version
 | --- | --- | --- |
 | `pair/begin` gives a code and a provisional token | `POST /v1/pairings` once, then `POST /v1/pairing/code` per pairing | The Mac keeps one identity across phones and re-pairs |
 | A correct code grants a phone token | The Mac must approve with `pair-decision` | A guessed or overheard code alone grants nothing |
-| `POST /v1/commands` body `{command}` | Adds the required `sessionID` | Stops a stale Lock Screen acting on a newer session |
+| `POST /v1/commands` body `{command}` | Adds `sessionID` (optional since 16 November 2026) | Stops a stale Lock Screen acting on a newer session |
 | Artwork `GET /v1/artwork/{sha256}` with a bearer token | Capability URL, or the bearer | The system-facing extension fetches `artworkURL` without headers |
 | Mac acks after re-reading Music (about 0.6 s) | Mac acks when Music takes the command | Leaves the extension's budget for the network |
 | `{"error":"mac_unreachable"}` | `{"error":{"code":"mac_unreachable"}}` | Room for a message and `retryAfter` |

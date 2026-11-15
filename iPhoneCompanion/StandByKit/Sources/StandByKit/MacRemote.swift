@@ -108,12 +108,13 @@ public final class MacRemote {
         )
     }
 
-    /// A command needs the current session. Without a connected Mac or a
-    /// session, sending would only fail at the relay.
-    private func sessionID(in state: SessionState) throws -> String {
+    /// The session to name: the relay's current one, or none when it has
+    /// none, as once a session has ended overnight while the phone had the
+    /// music (16 November 2026). Without a connected Mac, sending would only
+    /// fail at the relay.
+    private func sessionID(in state: SessionState) throws -> String? {
         guard state.macConnected else { throw TransportError.notConnected }
-        guard let id = state.sessionID else { throw TransportError.commandRejected(.noSession) }
-        return id
+        return state.sessionID
     }
 }
 
