@@ -14,12 +14,17 @@ stopped: a station lists only its next song in Music's queue (the Mac's new `que
 remote protocol (`playqueue-contents`, `playstatusupdate`: no station name or ID) says which
 station it is. So when fewer than 3 songs with a catalogue ID are to come
 (`Handover.stationBelow`), Apple Music's station for the song (MusicKit `Song.station`, its
-Create Station) is queued after them: MusicKit's `SystemMusicPlayer.shared.queue.insert(_:position: .tail)`,
-failing that MediaPlayer's `append` by store ID. A failure only adds a log line. The catalogue
+Create Station) is queued after them with MusicKit's
+`SystemMusicPlayer.shared.queue.insert(_:position: .tail)`. A failure only adds a log line.
+**Seen working on the iPhone on 15 November** with `StationProbe` (development builds only:
+`xcrun devicectl device process launch … com.alistairmerritt.MusicStandBy -- -stationProbePlaying`):
+while playing, the station's songs kept coming after the Mac's (nine and counting). Playing Next
+shows only its next two, and skipping while paused stops there, which misleads. MediaPlayer's
+`append` by store ID looped the Mac's songs instead, so it isn't used. Once, the station's first
+song was the Mac's song again. The catalogue
 needs the **MusicKit app service on the App ID** (Certificates, Identifiers & Profiles), which
 has to be switched on by hand. The Continue on iPhone action now logs its steps to the device
-log (`Shortcuts` category). Unit tests pass (`ContinueWithAStationTests`). **Not yet tried on
-the phone.**
+log (`Shortcuts` category). Unit tests pass (`ContinueWithAStationTests`).
 
 ## Continue on iPhone a second time (15 November 2026)
 

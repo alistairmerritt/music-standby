@@ -25,10 +25,8 @@ public protocol PhoneMusicPlaying: AnyObject {
 
 /// What `appendStation(seededBy:)` managed (added 15 November 2026).
 public enum StationAppend: Equatable, Sendable {
-    /// Queued after the songs, and the player said so.
+    /// Queued after the songs.
     case added
-    /// Handed to the player by its store ID, which doesn't say whether it took it.
-    case addedUnconfirmed
     /// Apple Music has no station for this song.
     case noStation
     /// The catalogue couldn't be asked, or the player refused it.

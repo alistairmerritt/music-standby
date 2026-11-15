@@ -60,10 +60,12 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     func resume() { player.play() }
 
     /// Apple Music's station for the song (MusicKit's `Song.station`, the
-    /// catalogue's Create Station), after the queue. MusicKit's queue first,
-    /// which says whether it worked; failing that, MediaPlayer's append by
-    /// store ID, which doesn't. The catalogue needs the MusicKit app service
-    /// on the App ID (Certificates, Identifiers & Profiles).
+    /// catalogue's Create Station), after the queue, through MusicKit's
+    /// queue. Seen on the iPhone on 15 November 2026 (`StationProbe`): while
+    /// playing, the station's songs kept coming after the Mac's (nine and
+    /// counting); Playing Next shows only its next two. MediaPlayer's append
+    /// by store ID instead looped the Mac's songs, so it isn't used. The
+    /// catalogue needs the MusicKit app service on the App ID.
     func appendStation(seededBy catalogID: String) async -> StationAppend {
         let station: Station
         do {
@@ -78,8 +80,7 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
             try await SystemMusicPlayer.shared.queue.insert(station, position: .tail)
             return .added
         } catch {
-            player.append(MPMusicPlayerStoreQueueDescriptor(storeIDs: [station.id.rawValue]))
-            return .addedUnconfirmed
+            return .failed("queue: \(error.localizedDescription)")
         }
     }
 }

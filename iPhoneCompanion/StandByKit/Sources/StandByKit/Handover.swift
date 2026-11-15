@@ -87,7 +87,6 @@ public struct Handover {
         let result = await player.appendStation(seededBy: catalogID)
         switch result {
         case .added: record("Continue on iPhone: \(songsAfter) song\(songsAfter == 1 ? "" : "s") from the Mac, then a station from the song")
-        case .addedUnconfirmed: record("Continue on iPhone: a station from the song handed to Apple Music after \(songsAfter) song\(songsAfter == 1 ? "" : "s"); not confirmed")
         case .noStation: record("Continue on iPhone: Apple Music has no station for the song")
         case .failed(let reason): record("Continue on iPhone: couldn't add a station (\(reason))")
         }

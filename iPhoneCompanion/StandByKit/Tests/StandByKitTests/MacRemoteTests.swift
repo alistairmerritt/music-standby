@@ -303,7 +303,7 @@ private let handoverStart = Date(timeIntervalSince1970: 1_000_000)
     }
 
     @Test func aStationThatCantBeAddedChangesNothingElse() async throws {
-        for result in [StationAppend.failed("catalogue: no developer token"), .noStation, .addedUnconfirmed] {
+        for result in [StationAppend.failed("catalogue: no developer token"), .noStation] {
             let relay = mac(upNext: [])
             let phone = FakePhoneMusic()
             phone.station = result

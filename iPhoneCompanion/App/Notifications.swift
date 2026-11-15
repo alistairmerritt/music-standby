@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // iPhone whatever the reminder setting, and it can change.
         application.registerForRemoteNotifications()
         reminders.refresh()
+        #if DEBUG
+        StationProbe.runIfAsked()
+        #endif
         return true
     }
 
