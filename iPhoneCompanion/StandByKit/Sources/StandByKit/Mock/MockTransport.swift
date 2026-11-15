@@ -87,6 +87,12 @@ public actor MockTransport: PlaybackTransport {
             guard let id = command.outputID, let chosen = outputs.firstIndex(where: { $0.id == id }) else { return rejected(command) }
             elapsed = position(at: date)
             for i in outputs.indices { outputs[i].isSelected = i == chosen }
+        case .playStation:
+            // The mock has no stations: the next song plays.
+            guard command.hasRequiredValue else { return rejected(command) }
+            index = library.index(after: index)
+            elapsed = 0
+            isPlaying = true
         }
         anchor = date
         emitPlayback()

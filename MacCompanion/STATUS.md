@@ -21,6 +21,17 @@ unit-tested at most.
 | Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
 
+## Play a song's station (15 November 2026)
+
+`playStation` (`catalogID`) opens `music://music.apple.com/<region>/station/ra.<id>` in Music
+with `open location` (one raw `GURL/GURL` event, `MusicScript.openLocation`), which plays the
+song's station. It's how Continue on Mac hands over a song the Mac's queue doesn't have:
+Music can't be told to play a catalogue song outside the library (a song's link only shows
+it). Measured with Music's own volume at 0: four stations played; two started with their own
+song, two with another (`For Now` started with `Don't Leave Me This Way`, then `Superpowers`).
+The ID must be all digits before it goes into the link (`MusicController.stationURL`). `msbctl
+control station <id>` runs it. 146 tests pass.
+
 ## Continue from iPhone (12 November 2026, night)
 
 The reverse of Continue on iPhone, asked for at the Mac. The Mac can't see what Apple Music on

@@ -138,14 +138,15 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 | Field | Notes |
 | --- | --- |
 | `id` | UUID. Also the idempotency key: a repeated id must not act twice |
-| `kind` | `play`, `pause`, `next`, `previous`, and since 11 November 2026 `seek`, `setVolume`, `selectOutput` |
+| `kind` | `play`, `pause`, `next`, `previous`, since 11 November 2026 `seek`, `setVolume`, `selectOutput`, and since 15 November 2026 `playStation` |
 | `issuedAt` | New, optional. The Mac rejects commands older than 10 s with `command_expired` |
 | `position` | Seconds into the track, for `seek`. Clamped to the track by the Mac |
 | `level` | Music's own output volume, 0 to 1, for `setVolume`. Clamped by the Mac. Not the Mac's system volume |
 | `outputID` | An `AudioOutput.id` from the last state, for `selectOutput`. Music then plays to that device alone |
+| `catalogID` | New on 15 November 2026. An Apple Music catalogue song ID, digits only, for `playStation`: Music plays that song's station (Create Station), usually starting with the song. It's how Continue on Mac hands over a song the Mac's queue doesn't have, which Music on the Mac can't be told to play by ID ([example](Examples/relay-command-play-station.json)). An older Mac answers `unsupported_command` |
 | `reason` | New on 12 November 2026, optional, an open set. `continue_on_phone` marks the `pause` Continue on iPhone sends once the song plays on the phone, so the Mac knows the phone has its music ([example](Examples/relay-command-continue-on-phone.json)). A Mac that doesn't know it runs the command as usual |
 
-The three value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,
+The four value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,
 or with a non-finite number, the Mac answers `invalid_request`. The result reaches the phone as
 the next state: `volume`, `outputs` and `elapsedTime` on `PlaybackMessage`, which carries them
 from the same date. A Mac that doesn't report `volume` or `outputs` leaves them out, and the

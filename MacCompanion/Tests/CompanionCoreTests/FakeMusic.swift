@@ -30,6 +30,8 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
     private var _staleReadsLeft = 0
     private var _previousIndex: Int?
     private var _scripts: [MusicScript] = []
+    private var _openedLocations: [String] = []
+    var openedLocations: [String] { lock.withLock { _openedLocations } }
     private var _volume = 100
     /// Music's AirPlay devices: name, kind text, selected, available, network address.
     private var _outputs: [(name: String, kind: String, selected: Bool, available: Bool, address: String?)] = [
@@ -128,6 +130,11 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
                     return .value(.text("NOT_FOUND"))
                 }
                 for i in _outputs.indices { _outputs[i].selected = i == index }
+                return .value(.text("ok"))
+            case .openLocation(let url):
+                // A station's link plays, as Music does; anything else only shows.
+                _openedLocations.append(url)
+                if url.contains("/station/") { _state = "playing" }
                 return .value(.text("ok"))
             }
         }

@@ -345,6 +345,8 @@ public final class Companion {
                 outcome = await controller.setVolume(Int((min(1, max(0, command.level ?? 0)) * 100).rounded()))
             case .selectOutput:
                 outcome = await controller.selectOutput(command.outputID ?? "")
+            case .playStation:
+                outcome = await controller.playStation(seededBy: command.catalogID ?? "")
             case .play, .pause, .next, .previous:
                 outcome = await controller.perform(MusicCommand(command.kind)!)
             }
@@ -843,7 +845,7 @@ extension MusicCommand {
         case .pause: self = .pause
         case .next: self = .next
         case .previous: self = .previous
-        case .seek, .setVolume, .selectOutput: return nil
+        case .seek, .setVolume, .selectOutput, .playStation: return nil
         }
     }
 }
@@ -855,6 +857,7 @@ extension RemoteCommand {
         case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
         case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
         case .selectOutput: "selectOutput \(outputID ?? "-")"
+        case .playStation: "playStation \(catalogID ?? "-")"
         case .play, .pause, .next, .previous: kind.rawValue + (reason.map { " (\($0))" } ?? "")
         }
     }

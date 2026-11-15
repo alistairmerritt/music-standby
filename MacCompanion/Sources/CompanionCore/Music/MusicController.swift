@@ -144,6 +144,23 @@ public actor MusicController {
         perform(script: .selectOutput(id))
     }
 
+    /// Plays Apple Music's station for this catalogue song: Continue on Mac
+    /// for a song the Mac's queue doesn't have. Music can't be told to play
+    /// a catalogue song outside the library, but opening a station's link
+    /// plays it, and it usually starts with its song (2 of 3 on 15 Nov 2026).
+    public func playStation(seededBy catalogID: String) -> CommandOutcome {
+        guard let url = Self.stationURL(seededBy: catalogID) else { return .failed("not a catalogue ID: \(catalogID)") }
+        return perform(script: .openLocation(url))
+    }
+
+    /// `music://music.apple.com/<storefront>/station/ra.<id>`, with this
+    /// Mac's region as the storefront. Nil unless the ID is all digits.
+    static func stationURL(seededBy catalogID: String, region: String? = Locale.current.region?.identifier) -> String? {
+        guard !catalogID.isEmpty, catalogID.count <= 20, catalogID.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        let storefront = (region ?? "us").lowercased().filter { $0.isASCII && $0.isLetter }
+        return "music://music.apple.com/\(storefront.count == 2 ? storefront : "us")/station/ra.\(catalogID)"
+    }
+
     private func perform(script: MusicScript) -> CommandOutcome {
         guard isRunning() else {
             skippedWhileClosed += 1

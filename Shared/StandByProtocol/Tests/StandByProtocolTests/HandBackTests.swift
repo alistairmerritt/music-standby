@@ -51,6 +51,18 @@ import Testing
         #expect(!anyInterimFinal)
     }
 
+    @Test func playStationCarriesADigitsOnlyCatalogueID() throws {
+        let frame = try RelayFrame.decode(Fixture.data("relay-command-play-station"))
+        guard case .command(let command) = frame else { Issue.record("not a command"); return }
+        #expect(command.kind == .playStation && command.catalogID == "1730817069")
+        #expect(command.hasRequiredValue)
+        #expect(CommandKind.playStation.requiredValue == "catalogID")
+        #expect(try Fixture.sameJSON(frame.encoded(), Fixture.data("relay-command-play-station")))
+        for bad in [nil, "", "12a4", "1/../2", "123456789012345678901"] {
+            #expect(!RemoteCommand(kind: .playStation, catalogID: bad).hasRequiredValue, "\(bad ?? "nil")")
+        }
+    }
+
     @Test func theContinuePauseSaysWhyAndOlderCommandsStillDecode() throws {
         let frame = try RelayFrame.decode(Fixture.data("relay-command-continue-on-phone"))
         guard case .command(let command) = frame else { Issue.record("not a command"); return }

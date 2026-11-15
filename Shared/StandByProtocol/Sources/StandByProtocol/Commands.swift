@@ -15,6 +15,12 @@ public enum CommandKind: String, Codable, Sendable, CaseIterable {
     case setVolume
     /// Play to the `AudioOutput` whose id is `RemoteCommand.outputID`, and only to it.
     case selectOutput
+    /// Play Apple Music's station for the song whose catalogue ID is
+    /// `RemoteCommand.catalogID` (the catalogue's Create Station): Continue
+    /// on Mac for a song the Mac's queue doesn't have, which Music on the Mac
+    /// can't be told to play. Music usually starts the station with that
+    /// song. Added 15 November 2026; an older Mac answers `unsupported_command`.
+    case playStation
 
     /// The field a command of this kind must carry, if any.
     public var requiredValue: String? {
@@ -23,6 +29,7 @@ public enum CommandKind: String, Codable, Sendable, CaseIterable {
         case .seek: "position"
         case .setVolume: "level"
         case .selectOutput: "outputID"
+        case .playStation: "catalogID"
         }
     }
 }
@@ -41,6 +48,8 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     public var level: Double?
     /// `AudioOutput.id`, for `selectOutput`.
     public var outputID: String?
+    /// An Apple Music catalogue song ID, all digits, for `playStation`.
+    public var catalogID: String?
     /// Why the phone sent it, when that matters to the Mac. Added 12 November
     /// 2026; an older Mac ignores it.
     public var reason: CommandReason?
@@ -49,13 +58,14 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
 
     public init(id: UUID = UUID(), kind: CommandKind, issuedAt: Date? = nil,
                 position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil,
-                reason: CommandReason? = nil) {
+                catalogID: String? = nil, reason: CommandReason? = nil) {
         self.id = id
         self.kind = kind
         self.issuedAt = issuedAt
         self.position = position
         self.level = level
         self.outputID = outputID
+        self.catalogID = catalogID
         self.reason = reason
     }
 
@@ -69,6 +79,10 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
 
     public static func selectOutput(_ outputID: String, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
         RemoteCommand(id: id, kind: .selectOutput, issuedAt: issuedAt, outputID: outputID)
+    }
+
+    public static func playStation(seededBy catalogID: String, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
+        RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, catalogID: catalogID)
     }
 
     /// False when `issuedAt` is missing: the temporary contract never sent it.
@@ -86,6 +100,8 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
         case .seek: position.map(\.isFinite) ?? false
         case .setVolume: level.map(\.isFinite) ?? false
         case .selectOutput: !(outputID ?? "").isEmpty
+        // Digits only: it becomes part of a URL on the Mac.
+        case .playStation: catalogID.map { !$0.isEmpty && $0.count <= 20 && $0.allSatisfy { $0.isASCII && $0.isNumber } } ?? false
         }
     }
 }

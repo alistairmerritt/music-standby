@@ -57,7 +57,7 @@ public struct MockLibrary: Sendable {
         case .setVolume:
             guard let level = command.level else { return attributes }
             result.volume = min(1, max(0, level))
-        case .selectOutput:
+        case .selectOutput, .playStation:
             break
         }
         return result

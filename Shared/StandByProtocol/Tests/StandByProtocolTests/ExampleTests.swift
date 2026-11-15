@@ -51,6 +51,8 @@ enum Fixture {
         // Continue from iPhone (HandBackTests)
         "mac-hand-back-request", "relay-hand-back-status", "http-hand-back-status", "http-token-device",
         "apns-hand-back-background", "apns-hand-back-alert", "relay-command-continue-on-phone",
+        // Continue on Mac with a station (HandBackTests)
+        "relay-command-play-station",
     ]
 
     @Test(arguments: ["mac-hello", "mac-state-playing", "mac-state-not-running", "mac-state-automation-denied",

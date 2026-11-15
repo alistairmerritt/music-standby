@@ -304,6 +304,17 @@ import Testing
         #expect(Events.path(events.sent[3].data?.atIndex(1)) == "cAPD[1] of app")
     }
 
+    @Test func openLocationIsOneGURLEventWithTheLink() {
+        let events = Events()
+        events.replies["GURL/GURL"] = .result(nil)
+        let url = "music://music.apple.com/au/station/ra.1730817069"
+        #expect(events.runner().run(.openLocation(url)) == .value(.text("ok")))
+        #expect(events.sent.map(\.event) == ["GURL/GURL"])
+        #expect(events.sent.first?.waited == true, "an error from Music should reach the ack")
+        events.replies["GURL/GURL"] = .musicError(code: -1708, message: "no")
+        #expect(events.runner().run(.openLocation(url)) == .failure(code: -1708, message: "no"))
+    }
+
     @Test func anUnknownOutputIsNotFoundAndNothingIsSet() {
         let events = Events()
         events.replies["pALL of cAPD[all ] of app"] = .result(Self.airPlayDevices())

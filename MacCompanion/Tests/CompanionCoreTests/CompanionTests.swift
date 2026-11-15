@@ -262,10 +262,20 @@ import StandByProtocol
         #expect(r.music.selectedOutputs == ["Study HomePod"])
     }
 
+    @Test func playStationOpensTheSongsStationInMusic() async throws {
+        let r = await rig()
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069"))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        let opened = try #require(r.music.openedLocations.first)
+        #expect(opened.hasPrefix("music://music.apple.com/") && opened.hasSuffix("/station/ra.1730817069"))
+    }
+
     @Test func aValueCommandWithoutItsValueIsInvalidAndNeverReachesMusic() async throws {
         let r = await rig()
         let before = r.music.scripts.count
-        for command in [RemoteCommand(kind: .seek), RemoteCommand(kind: .setVolume), RemoteCommand(kind: .selectOutput, outputID: "")] {
+        for command in [RemoteCommand(kind: .seek), RemoteCommand(kind: .setVolume), RemoteCommand(kind: .selectOutput, outputID: ""),
+                        RemoteCommand(kind: .playStation), RemoteCommand(kind: .playStation, catalogID: "1/../2")] {
             let id = await r.relay.simulate(command)
             await eventually { await r.relay.ack(for: id) != nil }
             #expect(await r.relay.ack(for: id)?.error?.code == .invalidRequest)

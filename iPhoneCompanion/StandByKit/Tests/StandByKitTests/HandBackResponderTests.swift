@@ -12,10 +12,10 @@ import Testing
         SessionState(sessionID: "s1", mac: PairedMac(id: "a", name: "Studio Mac"), macConnected: true, playback: playback, attributes: nil)
     }
 
-    private func song(_ catalogID: String, state: PlaybackState) -> PlaybackMessage {
+    private func song(_ catalogID: String, state: PlaybackState, revision: UInt64 = 1) -> PlaybackMessage {
         var track = track()
         track.catalogID = catalogID
-        return message(state: state, track: track)
+        return message(revision: revision, state: state, track: track)
     }
 
     private func setup(phone: PhoneNowPlaying?, clock: MutableClock? = nil)
@@ -67,8 +67,11 @@ import Testing
         #expect(await nothing.respond(to: HandBackRequest(requestID: UUID(), expiresAt: base.addingTimeInterval(60)), via: .tap, player: idle) == .nothingPlaying)
         #expect(await nothingReports.all.map(\.status) == [.working, .nothingPlaying])
 
-        let (elsewhere, _, _, other) = setup(phone: PhoneNowPlaying(catalogID: "999", position: 5, isPlaying: true))
-        #expect(await elsewhere.respond(to: HandBackRequest(requestID: UUID(), expiresAt: base.addingTimeInterval(60)), via: .tap, player: other) == .notInQueue)
+        // A song the Mac's queue doesn't have goes as its station (15 November 2026).
+        let (elsewhere, relay, _, other) = setup(phone: PhoneNowPlaying(catalogID: "999", position: 5, isPlaying: true))
+        await relay.setNext(state(song("999", state: .playing, revision: 2)))
+        #expect(await elsewhere.respond(to: HandBackRequest(requestID: UUID(), expiresAt: base.addingTimeInterval(60)), via: .tap, player: other) == .done)
+        #expect(await relay.sent.map(\.command.kind) == [.playStation, .seek])
 
         let reports = Reports()
         let unpaired = HandBackResponder(defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!,
