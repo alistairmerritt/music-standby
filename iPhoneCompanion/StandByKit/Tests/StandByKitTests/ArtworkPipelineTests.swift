@@ -191,3 +191,51 @@ private actor SlowFetcher: ArtworkFetching {
         #expect(await fetcher.fetches == 1, "then from the cache")
     }
 }
+
+/// The extension's artwork as one small decoded image per song (16 November 2026).
+@Suite struct ExtensionArtworkTests {
+    private func jpeg(side: Int) -> Data {
+        let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        context.setFillColor(red: 0.9, green: 0.3, blue: 0.2, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        let output = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return output as Data
+    }
+
+    @Test func decodesOnceAtMostTheExtensionsSize() async throws {
+        let artwork = ExtensionArtwork()
+        let data = jpeg(side: 600)
+        let loads = Counter()
+        let load: @Sendable () async throws -> Data = { await loads.add(); try await Task.sleep(for: .milliseconds(50)); return data }
+        async let first = artwork.image(id: "a", load: load)
+        async let second = artwork.image(id: "a", load: load)
+        let (a, b) = try await (first, second)
+        #expect(a === b, "every size the system asks for gets the same image")
+        #expect(a.width == ExtensionArtwork.maximumPixelSize && a.height == ExtensionArtwork.maximumPixelSize)
+        #expect(await loads.count == 1)
+        _ = try await artwork.image(id: "a", load: load)
+        #expect(await loads.count == 1, "then held")
+        _ = try await artwork.image(id: "b", load: load)
+        #expect(await loads.count == 2, "another song's is decoded afresh")
+    }
+
+    @Test func smallArtIsNotEnlarged() throws {
+        let image = try #require(ExtensionArtwork.downsample(jpeg(side: 300), to: ExtensionArtwork.maximumPixelSize))
+        #expect(image.width == 300)
+    }
+
+    @Test func bytesThatArentAnImageFail() async {
+        await #expect(throws: TransportError.artworkUnavailable) {
+            _ = try await ExtensionArtwork().image(id: "x") { Data([1, 2, 3]) }
+        }
+    }
+}
+
+private actor Counter {
+    private(set) var count = 0
+    func add() { count += 1 }
+}
