@@ -69,8 +69,10 @@ public struct URLSessionHTTP: HTTPSending {
 /// Sends a command and waits for the Mac's answer.
 public protocol CommandSender: Sendable {
     /// `sessionID` is the Now Playing session the command came from. The relay
-    /// refuses a command for any other session.
-    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck
+    /// refuses a command naming any other session. Nil when the relay has no
+    /// session: the app's own actions, which read the Mac's state just
+    /// before, and which the relay forwards anyway (16 November 2026).
+    func send(_ command: RemoteCommand, sessionID: String?) async throws -> CommandAck
 }
 
 /// Authenticated HTTPS calls to the relay. Plain data and no process state, so
@@ -125,7 +127,7 @@ public struct RelayClient: CommandSender, SessionReading, Sendable {
 
     // MARK: Session
 
-    public func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
+    public func send(_ command: RemoteCommand, sessionID: String?) async throws -> CommandAck {
         var request = try makeRequest(RelayPath.commands, method: "POST", timeout: Self.commandTimeout)
         request.setValue(command.id.uuidString, forHTTPHeaderField: "Idempotency-Key")
         try attach(CommandRequest(command: command, sessionID: sessionID), to: &request)

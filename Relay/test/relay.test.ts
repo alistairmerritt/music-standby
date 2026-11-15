@@ -386,14 +386,37 @@ describe("commands", () => {
     expect((await response.json<any>()).error.code).toBe("session_mismatch");
   });
 
-  it("refuses a command with no session, or without a session id", async () => {
+  it("refuses a command naming a session when there is none", async () => {
     const { phoneToken } = await pairedSetup();
     const a = commandBody(crypto.randomUUID());
     const noSession = await call("POST", "/v1/commands", { token: phoneToken, body: a.body, headers: { "Idempotency-Key": a.id } });
     expect((await noSession.json<any>()).error.code).toBe("no_session");
+  });
+
+  it("forwards a command naming no session, with or without one (the app's own actions)", async () => {
+    // No session, as once one has ended overnight while the phone had the music.
+    const { mac, phoneToken } = await pairedSetup();
+    const a = commandBody(undefined, "playStation");
+    const pending = call("POST", "/v1/commands", { token: phoneToken, body: a.body, headers: { "Idempotency-Key": a.id } });
+    expect((await mac.next("command")).command).toMatchObject({ id: a.id, kind: "playStation" });
+    mac.send({ type: "ack", ack: { commandID: a.id, accepted: true, revision: 7 } });
+    expect((await pending).status).toBe(200);
+    // With a session, too.
+    const { mac: mac2, phoneToken: phone2 } = await playingSetup();
     const b = commandBody(undefined);
-    const missing = await call("POST", "/v1/commands", { token: phoneToken, body: b.body, headers: { "Idempotency-Key": b.id } });
-    expect(missing.status).toBe(400);
+    const second = call("POST", "/v1/commands", { token: phone2, body: b.body, headers: { "Idempotency-Key": b.id } });
+    expect((await mac2.next("command")).command).toMatchObject({ id: b.id, kind: "next" });
+    mac2.send({ type: "ack", ack: { commandID: b.id, accepted: true, revision: 8 } });
+    expect((await second).status).toBe(200);
+  });
+
+  it("refuses a session id that isn't text", async () => {
+    const { phoneToken } = await pairedSetup();
+    const id = newCommandID();
+    const response = await call("POST", "/v1/commands", {
+      token: phoneToken, body: { command: { id, kind: "next" }, sessionID: 42 }, headers: { "Idempotency-Key": id },
+    });
+    expect(response.status).toBe(400);
   });
 
   it("requires Idempotency-Key to match the command id", async () => {

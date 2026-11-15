@@ -6,6 +6,21 @@ Last updated 15 November 2026, on `main`. The newest work is at the top; older s
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Hand-back after a night away, and a crash on the notification (16 November 2026)
+
+- **No session, no hand-back.** The morning after a Continue on iPhone, Continue from iPhone
+  failed in half a second ("Couldn't continue here"). The relay's session had ended
+  overnight while the phone had the music, and every command named a session, so the phone
+  refused to send (`noSession`) and nothing reached the Mac. Commands from the app and its
+  actions now name no session when the relay has none (`MacRemote`, `RelayTransport`), and
+  the relay forwards a command that names no session (API-v1 §7). The Lock Screen's commands
+  still name theirs. Needs the relay deployed.
+- **Crash on "Continue on <Mac>?".** Tapping it crashed the app: the async
+  `didReceive` finished on a background thread, and UIKit aborted when its completion came
+  from there (`_updateSnapshotAndStateRestorationWithAction`, the crash report of 08:31). Both
+  notification callbacks are now the completion-handler forms; `didReceive` does its work on
+  the main actor and calls the completion there.
+
 ## Continue on Mac for any song (15 November 2026)
 
 After ten songs on the phone, Continue on Mac was greyed out: "the song on your iPhone isn't in

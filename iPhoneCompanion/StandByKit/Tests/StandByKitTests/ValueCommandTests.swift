@@ -90,8 +90,8 @@ import Testing
 }
 
 private actor RecordingSender: CommandSender {
-    private(set) var sent: [(command: RemoteCommand, sessionID: String)] = []
-    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
+    private(set) var sent: [(command: RemoteCommand, sessionID: String?)] = []
+    func send(_ command: RemoteCommand, sessionID: String?) async throws -> CommandAck {
         sent.append((command, sessionID))
         return .accepted(command.id, revision: 10)
     }

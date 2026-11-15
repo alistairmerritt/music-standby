@@ -651,10 +651,20 @@ export class Pairing extends DurableObject<Env> {
     const inflight = this.waiters.get(id);
     if (inflight) return this.awaitAck(inflight.promise);
 
-    if (!body.sessionID) throw new HttpError(400, "invalid_request", "sessionID is required");
+    // A command that names a session (the Lock Screen's always do) must name
+    // the current one, so a stale Lock Screen can't act on a newer session. One
+    // that names none comes from the app or a Shortcuts action, which read the
+    // Mac's state just before: it goes to the Mac with or without a session.
+    // Continue from iPhone failed once the session had ended overnight while
+    // the phone had the music (16 Nov 2026).
+    if (body.sessionID !== undefined && typeof body.sessionID !== "string") {
+      throw new HttpError(400, "invalid_request", "sessionID must be a string");
+    }
     const session = await this.ctx.storage.get<Session>("session");
-    if (!session) throw new HttpError(409, "no_session", "there is no current session");
-    if (body.sessionID !== session.sessionID) throw new HttpError(409, "session_mismatch", "the command names an earlier session");
+    if (body.sessionID !== undefined) {
+      if (!session) throw new HttpError(409, "no_session", "there is no current session");
+      if (body.sessionID !== session.sessionID) throw new HttpError(409, "session_mismatch", "the command names an earlier session");
+    }
 
     const mac = this.macSocket();
     if (!mac) throw new HttpError(504, "mac_unreachable", "the Mac is not connected");
@@ -664,7 +674,7 @@ export class Pairing extends DurableObject<Env> {
     this.waiters.set(id, { promise, resolve });
     setTimeout(() => this.waiters.delete(id), 30_000);
     this.send(mac, { type: "command", command });
-    console.log(`session ${short(session.sessionID)}: command ${command.kind} sent to the Mac`);
+    console.log(`${session ? `session ${short(session.sessionID)}` : "no session"}: command ${command.kind} sent to the Mac${body.sessionID === undefined ? " (no session named)" : ""}`);
     return this.awaitAck(promise);
   }
 

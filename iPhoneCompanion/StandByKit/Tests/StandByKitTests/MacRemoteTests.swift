@@ -33,13 +33,20 @@ import Testing
         #expect(await relay.reads == 2)
     }
 
-    @Test func sendsNothingWithoutAConnectedMacOrASession() async throws {
+    @Test func sendsNothingWithoutAConnectedMac() async throws {
         let offline = FakeRelay(state(connected: false))
         await #expect(throws: TransportError.notConnected) { try await MacRemote(client: offline).run(.play) }
+        #expect(await offline.sent.isEmpty)
+    }
+
+    /// The session had ended overnight while the phone had the music, so
+    /// Continue from iPhone failed in half a second (16 November 2026).
+    @Test func withoutASessionItSendsNamingNone() async throws {
         let noSession = FakeRelay(state(session: nil))
-        await #expect(throws: TransportError.commandRejected(.noSession)) { try await MacRemote(client: noSession).run(.play) }
-        let offlineSent = await offline.sent, noSessionSent = await noSession.sent
-        #expect(offlineSent.isEmpty && noSessionSent.isEmpty)
+        try await MacRemote(client: noSession).run(.play)
+        let sent = await noSession.sent
+        #expect(sent.map(\.command.kind) == [.play])
+        #expect(sent.first?.sessionID == nil)
     }
 
     @Test func aRefusalFromTheMacIsAnError() async throws {
@@ -138,7 +145,7 @@ actor FakeRelay: MacRemote.Client {
     private var next: SessionState?
     private var currentSession: String?
     private var refusal: ErrorCode?
-    private(set) var sent: [(command: RemoteCommand, sessionID: String)] = []
+    private(set) var sent: [(command: RemoteCommand, sessionID: String?)] = []
     private(set) var reads = 0
 
     init(_ state: SessionState) {
@@ -165,9 +172,14 @@ actor FakeRelay: MacRemote.Client {
         return state
     }
 
-    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
+    func send(_ command: RemoteCommand, sessionID: String?) async throws -> CommandAck {
         sent.append((command, sessionID))
-        guard sessionID == currentSession else { throw TransportError.commandRejected(.sessionMismatch) }
+        // As the relay since 16 November 2026: a command naming a session must
+        // name the current one; one naming none goes through.
+        if let sessionID {
+            guard currentSession != nil else { throw TransportError.commandRejected(.noSession) }
+            guard sessionID == currentSession else { throw TransportError.commandRejected(.sessionMismatch) }
+        }
         if let refusal { return .rejected(command.id, revision: 1, ProtocolError(refusal)) }
         return .accepted(command.id, revision: 1)
     }

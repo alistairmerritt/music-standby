@@ -367,7 +367,7 @@ func unwritableContainer() -> SharedContainer {
 private struct AckingSender: CommandSender {
     var refusing: ErrorCode?
     var failing: TransportError?
-    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
+    func send(_ command: RemoteCommand, sessionID: String?) async throws -> CommandAck {
         if let failing { throw failing }
         if let refusing { return .rejected(command.id, revision: 1, ProtocolError(refusing)) }
         return .accepted(command.id, revision: 1)
@@ -792,13 +792,18 @@ private final class ClientBox: @unchecked Sendable {
         #expect(after == ["connecting", "connected:Studio Mac", "disconnected"], "the suspension itself reports nothing; only the deliberate disconnect does")
     }
 
-    @Test func noSessionMeansNoCommand() async throws {
-        let http = FakeHTTP([.json(sessionState(nil))])
+    /// Without a session the command still goes, naming none, which the
+    /// relay forwards since 16 November 2026: the app's buttons act on the
+    /// Mac's live state.
+    @Test func withoutASessionTheCommandNamesNone() async throws {
+        let command = RemoteCommand(kind: .play)
+        let http = FakeHTTP([.json(CommandResponse(ack: .accepted(command.id, revision: 3)))])
         let transport = make(http, sleeper: RecordingSleeper(stopAfter: 1))
-        await #expect(throws: TransportError.commandRejected(.noSession)) {
-            _ = try await transport.send(RemoteCommand(kind: .play))
-        }
-        #expect(await http.requests.isEmpty)
+        #expect(try await transport.send(command).accepted)
+        let body = try #require(await http.requests.first?.httpBody)
+        let sent = try StandByWire.makeDecoder().decode(CommandRequest.self, from: body)
+        #expect(sent.command.id == command.id)
+        #expect(sent.sessionID == nil)
     }
 
 
@@ -962,7 +967,7 @@ private actor ScriptedReader: SessionReading {
 private struct FixedAck: CommandSender {
     var revision: UInt64 = 10
     var accepted = true
-    func send(_ command: RemoteCommand, sessionID: String) async throws -> CommandAck {
+    func send(_ command: RemoteCommand, sessionID: String?) async throws -> CommandAck {
         accepted ? .accepted(command.id, revision: revision) : .rejected(command.id, revision: revision, ProtocolError(.musicNotRunning))
     }
 }

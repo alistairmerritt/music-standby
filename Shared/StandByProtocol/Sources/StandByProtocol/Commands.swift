@@ -140,9 +140,10 @@ public struct CommandAck: Codable, Equatable, Sendable {
 public struct CommandRequest: Codable, Equatable, Sendable {
     public var command: RemoteCommand
     /// The Now Playing session the command was issued from: the extension's
-    /// `MacPlaybackAttributes.id`. Required by the relay, which refuses a
-    /// command for any session but the current one, so a stale Lock Screen
-    /// can't skip a track in a newer session.
+    /// `MacPlaybackAttributes.id`. The relay refuses a command naming any
+    /// session but the current one, so a stale Lock Screen can't skip a track
+    /// in a newer session. Nil from the app and its actions when the relay has
+    /// no session: the relay forwards those anyway (16 November 2026).
     public var sessionID: String?
     public init(command: RemoteCommand, sessionID: String? = nil) {
         self.command = command
