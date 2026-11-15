@@ -29,8 +29,10 @@ public final class Companion {
     public private(set) var events: [CompanionEvent] = []
     /// True once Continue on iPhone has paused this Mac: the phone has its
     /// music, so the menu offers Continue from iPhone. False again as soon as
-    /// Music plays here.
-    public private(set) var phoneHasMusic = false
+    /// Music plays here. Kept in the store across restarts.
+    public private(set) var phoneHasMusic = false {
+        didSet { if phoneHasMusic != oldValue { store.phoneHasMusic = phoneHasMusic } }
+    }
     /// The last Continue from iPhone request and how far it got. Nil once
     /// Music plays here, or before the first.
     public private(set) var handBack: HandBackProgress?
@@ -139,6 +141,7 @@ public final class Companion {
         self.monitor = MusicMonitor(controller: controller, isLaunching: isMusicLaunching)
         self.transport = transport
         self.store = store
+        phoneHasMusic = store.phoneHasMusic
         self.device = device
         self.artworkLookup = artworkLookup
         self.now = now
@@ -345,6 +348,8 @@ public final class Companion {
                 outcome = await controller.setVolume(Int((min(1, max(0, command.level ?? 0)) * 100).rounded()))
             case .selectOutput:
                 outcome = await controller.selectOutput(command.outputID ?? "")
+            case .playStation:
+                outcome = await controller.playStation(seededBy: command.catalogID ?? "")
             case .play, .pause, .next, .previous:
                 outcome = await controller.perform(MusicCommand(command.kind)!)
             }
@@ -843,7 +848,7 @@ extension MusicCommand {
         case .pause: self = .pause
         case .next: self = .next
         case .previous: self = .previous
-        case .seek, .setVolume, .selectOutput: return nil
+        case .seek, .setVolume, .selectOutput, .playStation: return nil
         }
     }
 }
@@ -855,6 +860,7 @@ extension RemoteCommand {
         case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
         case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
         case .selectOutput: "selectOutput \(outputID ?? "-")"
+        case .playStation: "playStation \(catalogID ?? "-")"
         case .play, .pause, .next, .previous: kind.rawValue + (reason.map { " (\($0))" } ?? "")
         }
     }

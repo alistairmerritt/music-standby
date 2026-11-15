@@ -319,3 +319,82 @@ private let handoverStart = Date(timeIntervalSince1970: 1_000_000)
         #expect(phone.stationSeeds.isEmpty)
     }
 }
+
+/// Continue on Mac for a song the Mac's queue doesn't have, as after the
+/// phone has played into a station: the Mac plays the song's station.
+/// Added 15 November 2026.
+@MainActor
+@Suite struct ContinueOnMacWithAStationTests {
+    private func mac(_ playback: PlaybackMessage) -> SessionState {
+        SessionState(sessionID: "s1", mac: PairedMac(id: "a", name: "Studio Mac"), macConnected: true, playback: playback, attributes: nil)
+    }
+
+    /// The Mac paused on the song it handed over, revision 1.
+    private func pausedMac() -> FakeRelay {
+        var song = track("t1")
+        song.catalogID = "1102360418"
+        return FakeRelay(mac(message(revision: 1, state: .paused, track: song)))
+    }
+
+    private func macPlays(_ catalogID: String?, id: String = "t2", title: String = "Song") -> SessionState {
+        var song = TrackMetadata(id: id, title: title, artist: "Artist", album: "Album", duration: 200, artworkID: nil)
+        song.catalogID = catalogID
+        return mac(message(revision: 2, state: .playing, track: song))
+    }
+
+    private func phone(_ catalogID: String = "999", title: String? = "Song") -> FakePhoneMusic {
+        let phone = FakePhoneMusic()
+        phone.current = PhoneNowPlaying(catalogID: catalogID, position: 61, isPlaying: true, title: title)
+        return phone
+    }
+
+    private func handBack(_ relay: FakeRelay, _ phone: FakePhoneMusic) async throws -> SendBackOutcome {
+        let clock = MutableClock()
+        let remote = MacRemote(client: relay, now: { clock.now }, sleep: { clock.advance($0) })
+        try await remote.read()
+        return await remote.handover().sendBackToMac(with: phone)
+    }
+
+    @Test func theStationStartingWithTheSongPicksUpFromTheSamePoint() async throws {
+        let relay = pausedMac()
+        await relay.setNext(macPlays("999"))
+        let phone = phone()
+        #expect(try await handBack(relay, phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.map(\.kind) == [.playStation, .seek])
+        #expect(sent.first?.catalogID == "999")
+        #expect(abs((sent.last?.position ?? 0) - 61.3) < 0.01)
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func beforeItsCatalogueIDIsInTheSongIsKnownByTitle() async throws {
+        let relay = pausedMac()
+        await relay.setNext(macPlays(nil, title: "SONG"))
+        #expect(try await handBack(relay, phone(title: "song")) == .sentBack)
+        #expect(await relay.sent.map(\.command.kind) == [.playStation, .seek])
+    }
+
+    @Test func aStationStartingWithAnotherSongStillTakesOverWithoutASeek() async throws {
+        let relay = pausedMac()
+        await relay.setNext(macPlays("777", title: "Another Song"))
+        let phone = phone()
+        #expect(try await handBack(relay, phone) == .sentAsStation)
+        #expect(await relay.sent.map(\.command.kind) == [.playStation])
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func anOlderMacSaysNoAndThePhoneCarriesOn() async throws {
+        let relay = pausedMac()
+        await relay.refuse(with: .unsupportedCommand)
+        let phone = phone()
+        #expect(try await handBack(relay, phone) == .macRefused)
+        #expect(phone.pauses == 0)
+    }
+
+    @Test func aMacThatNeverStartsGivesUpAndThePhoneCarriesOn() async throws {
+        let relay = pausedMac()   // every read shows the Mac still paused
+        let phone = phone()
+        #expect(try await handBack(relay, phone) == .macDidNotStart)
+        #expect(phone.pauses == 0)
+    }
+}

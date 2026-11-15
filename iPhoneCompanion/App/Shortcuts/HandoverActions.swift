@@ -65,7 +65,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
 /// the Mac from the same point, when it's in the Mac's queue.
 struct ContinueOnMacIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on Mac"
-    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. The song has to be in your computer’s queue, as it is after continuing on this phone.")
+    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it.")
     static let supportedModes: IntentModes = .background
 
     @MainActor
@@ -78,8 +78,8 @@ struct ContinueOnMacIntent: AppIntent {
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
         switch outcome {
         case .sentBack: return .result(dialog: "Continuing on your Mac.")
+        case .sentAsStation: return .result(dialog: "Continuing on your Mac with a station from this song.")
         case .nothingPlayingHere: throw ShortcutError("Nothing is playing in Apple Music on your iPhone.")
-        case .notInMacQueue: throw ShortcutError("This song isn’t in your Mac’s queue.")
         case .macRefused: throw ShortcutError("Couldn’t start playback on your Mac." + stillHere)
         case .macDidNotStart: throw ShortcutError("Your Mac didn’t respond. Try again." + stillHere)
         }

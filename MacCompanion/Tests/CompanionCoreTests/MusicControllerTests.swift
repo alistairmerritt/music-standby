@@ -148,4 +148,13 @@ import StandByProtocol
         #expect(SnapshotParser.number("205.307006835938") == 205.307)
         #expect(SnapshotParser.number("nan") == nil)
     }
+
+    @Test func aStationLinkIsBuiltOnlyFromADigitsOnlyID() {
+        #expect(MusicController.stationURL(seededBy: "1730817069", region: "AU") == "music://music.apple.com/au/station/ra.1730817069")
+        #expect(MusicController.stationURL(seededBy: "1730817069", region: nil) == "music://music.apple.com/us/station/ra.1730817069")
+        #expect(MusicController.stationURL(seededBy: "1730817069", region: "419") == "music://music.apple.com/us/station/ra.1730817069")
+        for bad in ["", "12a4", "1/../2", "ra.123", "123456789012345678901"] {
+            #expect(MusicController.stationURL(seededBy: bad, region: "AU") == nil, "\(bad)")
+        }
+    }
 }

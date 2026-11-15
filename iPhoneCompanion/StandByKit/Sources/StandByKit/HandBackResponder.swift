@@ -70,9 +70,8 @@ public final class HandBackResponder {
 
     static func status(for outcome: SendBackOutcome) -> HandBackStatus {
         switch outcome {
-        case .sentBack: .done
+        case .sentBack, .sentAsStation: .done
         case .nothingPlayingHere: .nothingPlaying
-        case .notInMacQueue: .notInQueue
         case .macRefused, .macDidNotStart: .failed
         }
     }

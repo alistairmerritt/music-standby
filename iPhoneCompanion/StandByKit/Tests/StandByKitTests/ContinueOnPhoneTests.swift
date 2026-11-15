@@ -184,12 +184,10 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         #expect(phone.pauses == 0)
     }
 
-    @Test func sendsNothingForASongTheMacDoesntHave() async {
+    @Test func sendsNothingForASongWithoutACatalogueID() async {
         let (h, task) = await handedOver()
         defer { task.cancel() }
         let phone = FakePhoneMusic()
-        phone.current = PhoneNowPlaying(catalogID: "999", position: 10, isPlaying: true)
-        #expect(await h.model.sendBackToMac(with: phone) == .notInMacQueue)
         phone.current = PhoneNowPlaying(catalogID: nil, position: 10, isPlaying: false)
         #expect(await h.model.sendBackToMac(with: phone) == .nothingPlayingHere)
         #expect(await h.transport.sent.isEmpty)

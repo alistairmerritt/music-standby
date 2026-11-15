@@ -81,6 +81,7 @@ public struct RawEventRunner: MusicScriptRunning {
         case .seek(let seconds): music.set(.property(Code.playerPosition), to: NSAppleEventDescriptor(double: seconds))
         case .setVolume(let level): music.set(.property(Code.soundVolume), to: NSAppleEventDescriptor(int32: Int32(level)))
         case .selectOutput(let id): selectOutput(music, id: id)
+        case .openLocation(let url): music.openLocation(url)
         }
         // Measured while Music quit: the event in flight failed with -609 once
         // the process had gone, then each one after with -600 in under 1 ms.
@@ -343,6 +344,18 @@ public struct RawEventRunner: MusicScriptRunning {
             }
         }
 
+        /// `open location <url>`: a `GURL/GURL` event with the link as its
+        /// direct object. Music answers once it has the link, before a
+        /// station starts playing; the next reads show it playing.
+        func openLocation(_ url: String) -> ScriptOutput {
+            let event = make(Code.internetSuite, Code.openLocation)
+            event.setParam(NSAppleEventDescriptor(string: url), forKeyword: keyDirectObject)
+            switch send(event, 5, true) {
+            case .result: return .value(.text("ok"))
+            case .musicError(let code, let message), .sendError(let code, let message): return .failure(code: code, message: message)
+            }
+        }
+
         private func make(_ eventClass: FourCharCode, _ eventID: FourCharCode) -> NSAppleEventDescriptor {
             NSAppleEventDescriptor.appleEvent(withEventClass: eventClass, eventID: eventID,
                                               targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
@@ -412,6 +425,9 @@ enum Code {
     static let data = fcc("data")
     static let countElements = fcc("cnte")
     static let musicSuite = fcc("hook")
+    /// Music's Internet suite: `open location` is `GURL/GURL`.
+    static let internetSuite = fcc("GURL")
+    static let openLocation = fcc("GURL")
     static let objectClass = fcc("kocl")
 
     // Object specifiers

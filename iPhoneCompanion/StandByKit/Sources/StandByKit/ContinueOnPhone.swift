@@ -38,11 +38,14 @@ public struct PhoneNowPlaying: Equatable, Sendable {
     public var catalogID: String?
     public var position: TimeInterval
     public var isPlaying: Bool
+    /// For telling the song apart on the Mac before its catalogue ID is in.
+    public var title: String?
 
-    public init(catalogID: String?, position: TimeInterval, isPlaying: Bool) {
+    public init(catalogID: String?, position: TimeInterval, isPlaying: Bool, title: String? = nil) {
         self.catalogID = catalogID
         self.position = position
         self.isPlaying = isPlaying
+        self.title = title
     }
 }
 
@@ -51,8 +54,9 @@ public enum SendBackOutcome: Equatable, Sendable {
     case sentBack
     /// Apple Music here has no song with a catalogue ID loaded.
     case nothingPlayingHere
-    /// The song isn't the Mac's current song or in its Up Next.
-    case notInMacQueue
+    /// The song wasn't in the Mac's queue, so the Mac plays its station,
+    /// which started with another song. Apple Music here is paused.
+    case sentAsStation
     /// The Mac refused a step, or couldn't be reached. Apple Music here carries on.
     case macRefused
     /// The Mac didn't get to the song in time. Apple Music here carries on.

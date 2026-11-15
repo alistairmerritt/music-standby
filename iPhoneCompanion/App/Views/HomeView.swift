@@ -240,6 +240,8 @@ private struct HandoffSection: View {
     private var macPlaying: Bool { model.attributes?.isPlaying == true }
     private var phonePlaying: Bool { here?.isPlaying == true }
     private var phoneSongInMacQueue: Bool { model.macQueuePosition(of: here?.catalogID) != nil }
+    /// Any Apple Music song can go to the Mac: one its queue doesn't have goes as its station.
+    private var phoneHasAppleMusicSong: Bool { here?.catalogID != nil }
 
     /// Whenever the Mac's song can move.
     private var showsContinueOnPhone: Bool { model.canContinueOnPhone }
@@ -259,8 +261,8 @@ private struct HandoffSection: View {
                     row("Continue on Mac", symbol: "laptopcomputer",
                         detail: phoneSongInMacQueue
                             ? "Continue listening on your Mac from the same point. Playback on your iPhone will pause."
-                            : "This song is no longer available in your Mac’s queue.",
-                        enabled: phoneSongInMacQueue && !(macPlaying && !phonePlaying)) { await sendBack() }
+                            : "Play this song’s station on your Mac, from the same point when the station starts with it. Playback on your iPhone will pause.",
+                        enabled: phoneHasAppleMusicSong && !(macPlaying && !phonePlaying)) { await sendBack() }
                 }
             } header: {
                 Text("Continue Listening")
@@ -288,7 +290,7 @@ private struct HandoffSection: View {
         // Say only what's true now: headphones moving over can pause Apple Music here by themselves.
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
         switch outcome {
-        case .notInMacQueue: return "This song is no longer in your Mac’s queue."
+        case .sentAsStation: return "Your Mac is playing this song’s station, which started with another song."
         case .macRefused: return "Couldn’t start playback on your Mac." + stillHere
         case .macDidNotStart: return "Your Mac didn’t respond. Try again." + stillHere
         case .sentBack, .nothingPlayingHere: return nil

@@ -100,6 +100,22 @@ import StandByProtocol
         await eventually { !r.companion.phoneHasMusic }
     }
 
+    @Test func continueFromIPhoneIsStillOfferedAfterARestart() async throws {
+        let defaults = UserDefaults(suiteName: "CompanionTests-\(UUID().uuidString)")!
+        let first = await rig(state: "playing", defaults: defaults)
+        let marked = await first.relay.simulate(RemoteCommand(kind: .pause, reason: .continueOnPhone))
+        await eventually { await first.relay.ack(for: marked)?.accepted == true }
+        #expect(first.companion.phoneHasMusic)
+        // The app restarts with Music still paused.
+        let again = await rig(state: "paused", defaults: defaults)
+        #expect(again.companion.phoneHasMusic)
+        // Music playing here ends it, and that's kept too.
+        let play = await again.relay.simulateCommand(.play)
+        await eventually { await again.relay.ack(for: play) != nil }
+        await eventually { !again.companion.phoneHasMusic }
+        #expect(await rig(state: "paused", defaults: defaults).companion.phoneHasMusic == false)
+    }
+
     @Test func aReadFromBeforeThePauseDoesntTakeContinueFromIPhoneAway() async throws {
         let r = await rig()
         r.companion.settleDelay = .milliseconds(300)
@@ -262,10 +278,20 @@ import StandByProtocol
         #expect(r.music.selectedOutputs == ["Study HomePod"])
     }
 
+    @Test func playStationOpensTheSongsStationInMusic() async throws {
+        let r = await rig()
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069"))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        let opened = try #require(r.music.openedLocations.first)
+        #expect(opened.hasPrefix("music://music.apple.com/") && opened.hasSuffix("/station/ra.1730817069"))
+    }
+
     @Test func aValueCommandWithoutItsValueIsInvalidAndNeverReachesMusic() async throws {
         let r = await rig()
         let before = r.music.scripts.count
-        for command in [RemoteCommand(kind: .seek), RemoteCommand(kind: .setVolume), RemoteCommand(kind: .selectOutput, outputID: "")] {
+        for command in [RemoteCommand(kind: .seek), RemoteCommand(kind: .setVolume), RemoteCommand(kind: .selectOutput, outputID: ""),
+                        RemoteCommand(kind: .playStation), RemoteCommand(kind: .playStation, catalogID: "1/../2")] {
             let id = await r.relay.simulate(command)
             await eventually { await r.relay.ack(for: id) != nil }
             #expect(await r.relay.ack(for: id)?.error?.code == .invalidRequest)

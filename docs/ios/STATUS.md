@@ -6,6 +6,23 @@ Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at 
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Continue on Mac for any song (15 November 2026)
+
+After ten songs on the phone, Continue on Mac was greyed out: "the song on your iPhone isn't in
+this Mac's queue". The station after a short queue plays songs the Mac never had, and Continue
+on Mac could only skip ahead in the Mac's queue. Music on the Mac can't be told to play a
+catalogue song outside the library (AppleScript plays library songs only; `open location` with
+a song's link only shows it), but `open location` with a **station's** link plays it. So a song
+the Mac's queue doesn't have now goes as its station: the new `playStation` command
+(`catalogID`), `Handover.sendAsStation`. When the station starts with the song (2 of 4 tries on
+the Mac), the Mac seeks to where the phone is (`.sentBack`); otherwise it plays on from the
+station's first song (`.sentAsStation`, which the app and the action say). Either way Apple
+Music here pauses once the Mac plays. The song is matched by catalogue ID, or by title before
+the Mac's lookup fills the ID in. `SendBackOutcome.notInMacQueue` is gone; the Continue on Mac
+row is enabled for any Apple Music song. An older Mac answers `unsupported_command`
+(`.macRefused`). Unit tests pass (`ContinueOnMacWithAStationTests`). **Tried from the phone on
+15 November** (a station song the Mac never had): the Mac picked it up from the same spot.
+
 ## A station after a short queue (15 November 2026)
 
 From a Mac playing an Apple Music station, Continue on iPhone brought one song and then

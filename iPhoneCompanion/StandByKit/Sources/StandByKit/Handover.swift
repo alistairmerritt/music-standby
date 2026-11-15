@@ -141,34 +141,17 @@ public struct Handover {
         return queue.firstIndex(of: catalogID)
     }
 
-    /// Continue on Mac: the reverse of Continue on iPhone, for a song in the
-    /// Mac's queue (the round trip). The Mac skips ahead to it, seeks to where
+    /// Continue on Mac: the reverse of Continue on iPhone. For a song in the
+    /// Mac's queue (the round trip), the Mac skips ahead to it, seeks to where
     /// the phone is and plays; once its state shows that song playing, Apple
     /// Music here pauses. Only existing commands, so it works for songs
-    /// outside the Mac's library too: it's Music's own queue.
+    /// outside the Mac's library too: it's Music's own queue. Any other
+    /// song goes over as its station (`sendAsStation`).
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
         // Playing or paused here: a paused song is still the phone's to hand on.
         guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
         guard let ahead = macQueuePosition(of: catalogID) else {
-            record("Send back to Mac: the song isn't in the Mac's queue")
-            return .notInMacQueue
-        }
-        /// False only when the Mac says no. A reply that doesn't come in time
-        /// isn't a no: the relay waits 1.2 s for the Mac, Music can take
-        /// longer (as while headphones move back to the Mac), and the step
-        /// usually happens anyway. The Mac's state decides below.
-        func step(_ command: RemoteCommand) async -> Bool {
-            do {
-                let ack = try await send(command)
-                if !ack.accepted { record("Send back to Mac: \(command.kind.rawValue) refused (\(ack.error?.code.rawValue ?? "no reason"))") }
-                return ack.accepted
-            } catch TransportError.commandRejected(let code) {
-                record("Send back to Mac: \(command.kind.rawValue) refused (\(code.rawValue))")
-                return false
-            } catch {
-                record("Send back to Mac: no answer to \(command.kind.rawValue) (\(error.localizedDescription)); carrying on")
-                return true
-            }
+            return await sendAsStation(here, catalogID: catalogID, with: player, timeout: timeout + Self.stationStartAllowance)
         }
         for _ in 0..<ahead {
             guard await step(RemoteCommand(kind: .next, issuedAt: now())) else { return .macRefused }
@@ -193,5 +176,60 @@ public struct Handover {
         }
         record("Send back to Mac: the Mac didn't start the song in \(Int(timeout)) s")
         return .macDidNotStart
+    }
+
+    /// A station takes longer to start than a skip in the queue.
+    static let stationStartAllowance: TimeInterval = 5
+
+    /// Continue on Mac for a song the Mac's queue doesn't have, as once the
+    /// phone has played past it (a station after the Mac's songs, seen 15
+    /// November 2026). Music on the Mac can't be told to play a catalogue
+    /// song outside the library, but it plays the song's station, which
+    /// usually starts with the song (2 of 3 tried). Then the Mac seeks to
+    /// where the phone is; otherwise it plays on from the station's first
+    /// song. Either way Apple Music here pauses once the Mac plays.
+    private func sendAsStation(_ here: PhoneNowPlaying, catalogID: String, with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> SendBackOutcome {
+        let before = latest()
+        guard await step(.playStation(seededBy: catalogID, issuedAt: now())) else { return .macRefused }
+        let deadline = now().addingTimeInterval(timeout)
+        while now() < deadline {
+            await refresh()
+            if let current = latest(), current.state == .playing, let track = current.track,
+               current.revision > (before?.revision ?? 0), track.id != before?.track?.id || track.catalogID == catalogID {
+                let sameSong = track.catalogID == catalogID
+                    || (track.catalogID == nil && here.title.map { track.title.caseInsensitiveCompare($0) == .orderedSame } == true)
+                if sameSong {
+                    // Where the phone is now, plus about the time the seek takes to land.
+                    let position = (player.nowPlaying()?.position ?? here.position) + 0.3
+                    _ = await step(.seek(to: position, issuedAt: now()))
+                }
+                if player.nowPlaying()?.isPlaying == true { player.pause() }
+                memory.save(nil)
+                record(sameSong ? "Send back to Mac: the song's station plays on the Mac from the same point; Apple Music here is paused"
+                                : "Send back to Mac: the song's station plays on the Mac, from another song; Apple Music here is paused")
+                return sameSong ? .sentBack : .sentAsStation
+            }
+            try? await sleep(0.5)
+        }
+        record("Send back to Mac: the Mac didn't start the song's station in \(Int(timeout)) s")
+        return .macDidNotStart
+    }
+
+    /// False only when the Mac says no. A reply that doesn't come in time
+    /// isn't a no: the relay waits 1.2 s for the Mac, Music can take longer
+    /// (as while headphones move back to the Mac), and the step usually
+    /// happens anyway. The Mac's state decides afterwards.
+    private func step(_ command: RemoteCommand) async -> Bool {
+        do {
+            let ack = try await send(command)
+            if !ack.accepted { record("Send back to Mac: \(command.kind.rawValue) refused (\(ack.error?.code.rawValue ?? "no reason"))") }
+            return ack.accepted
+        } catch TransportError.commandRejected(let code) {
+            record("Send back to Mac: \(command.kind.rawValue) refused (\(code.rawValue))")
+            return false
+        } catch {
+            record("Send back to Mac: no answer to \(command.kind.rawValue) (\(error.localizedDescription)); carrying on")
+            return true
+        }
     }
 }

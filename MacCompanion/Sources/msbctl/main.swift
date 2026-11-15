@@ -155,8 +155,8 @@ case "control":
     let verbs: [String: MusicCommand] = ["play": .play, "pause": .pause, "playpause": .playPause, "next": .next, "previous": .previous]
     let word = arguments.dropFirst().first ?? ""
     let value = arguments.dropFirst(2).joined(separator: " ")
-    let usage = "usage: msbctl control play|pause|playpause|next|previous | seek <seconds> | volume <0-100> | output <id or name>"
-    guard verbs[word] != nil || (["seek", "volume", "output"].contains(word) && !value.isEmpty) else {
+    let usage = "usage: msbctl control play|pause|playpause|next|previous | seek <seconds> | volume <0-100> | output <id or name> | station <catalogue ID>"
+    guard verbs[word] != nil || (["seek", "volume", "output", "station"].contains(word) && !value.isEmpty) else {
         print(usage)
         exit(2)
     }
@@ -180,6 +180,8 @@ case "control":
             // An id as the wire has it, or a device name from the snapshot.
             let id = before.outputs?.first { $0.id == value || $0.name == value }?.id ?? value
             outcome = await controller.selectOutput(id)
+        case "station":
+            outcome = await controller.playStation(seededBy: value)
         default:
             outcome = await controller.perform(verbs[word]!)
         }

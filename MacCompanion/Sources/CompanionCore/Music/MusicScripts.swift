@@ -33,6 +33,10 @@ public enum MusicScript: Hashable, Sendable {
     /// network address, or `name:<name>` for one without (the Mac itself).
     /// Answers "NOT_FOUND" when no device has that id. Added 11 November 2026.
     case selectOutput(String)
+    /// `open location <url>`: Music opens an iTunes Store or stream link. For
+    /// a station's link, Music starts playing it (seen 15 November 2026);
+    /// for a song's, it only shows the song. Added 15 November 2026.
+    case openLocation(String)
 
     /// Guard 2 of 2. Music may quit between the process check and the Apple
     /// Event, and `tell application "Music"` would relaunch it. `is running`
@@ -64,6 +68,14 @@ public enum MusicScript: Hashable, Sendable {
             \(Self.guardLine)
             with timeout of 3 seconds
             \ttell application "Music" to set sound volume to \(level)
+            end timeout
+            return "ok"
+            """
+        case .openLocation(let url):
+            """
+            \(Self.guardLine)
+            with timeout of 5 seconds
+            \ttell application "Music" to open location "\(url.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))"
             end timeout
             return "ok"
             """
