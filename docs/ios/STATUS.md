@@ -20,8 +20,8 @@ station's first song (`.sentAsStation`, which the app and the action say). Eithe
 Music here pauses once the Mac plays. The song is matched by catalogue ID, or by title before
 the Mac's lookup fills the ID in. `SendBackOutcome.notInMacQueue` is gone; the Continue on Mac
 row is enabled for any Apple Music song. An older Mac answers `unsupported_command`
-(`.macRefused`). Unit tests pass (`ContinueOnMacWithAStationTests`). **Not yet tried from the
-phone.**
+(`.macRefused`). Unit tests pass (`ContinueOnMacWithAStationTests`). **Tried from the phone on
+15 November** (a station song the Mac never had): the Mac picked it up from the same spot.
 
 ## A station after a short queue (15 November 2026)
 
