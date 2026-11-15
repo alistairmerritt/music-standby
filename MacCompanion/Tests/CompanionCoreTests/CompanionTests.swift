@@ -332,6 +332,24 @@ import StandByProtocol
         #expect(await r.relay.uploads[expectedID]?.width == 400)
     }
 
+    /// For the phone's Continue Listening status (16 November 2026).
+    @Test func eachStateSaysWhetherTheMacIsConnectedToMusic() async throws {
+        let r = await rig()
+        #expect(await states(r.relay).last?.musicConnection == .notConnected)
+        r.companion.remote = ConnectionRemote(forgotten: false)
+        #expect(await eventually { await states(r.relay).last?.musicConnection == .connected })
+        r.companion.remote = ConnectionRemote(forgotten: true)
+        #expect(await eventually { await states(r.relay).last?.musicConnection == .forgotten })
+        r.companion.remote = nil
+        #expect(await eventually { await states(r.relay).last?.musicConnection == .notConnected })
+    }
+
+    private struct ConnectionRemote: MusicRemoteReading {
+        let forgotten: Bool
+        func queue(current track: MusicTrack?) async -> RemoteQueue? { nil }
+        var isForgottenByMusic: Bool { get async { forgotten } }
+    }
+
     /// Music's remote protocol, giving artwork (or none) after a delay.
     private actor ArtworkRemote: MusicRemoteReading {
         let image: Data?

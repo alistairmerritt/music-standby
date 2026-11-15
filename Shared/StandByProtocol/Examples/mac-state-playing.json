@@ -16,6 +16,7 @@
     },
     "canGoNext": true,
     "canGoPrevious": true,
-    "listeningSessionID": "0C7E4A52-3D2B-4F3E-9A61-6B1F2E8D9C10"
+    "listeningSessionID": "0C7E4A52-3D2B-4F3E-9A61-6B1F2E8D9C10",
+    "musicConnection": "connected"
   }
 }

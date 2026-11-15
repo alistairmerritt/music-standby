@@ -1,6 +1,7 @@
 import os
 import StandByKit
 import SwiftUI
+import UIKit
 
 private let seekLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "seekbar")
 
@@ -11,6 +12,10 @@ struct HomeView: View {
     @State private var phoneMusic = SystemMusicPhonePlayer()
     /// Apple Music on this phone, read once a second while Home shows.
     @State private var phoneNowPlaying: PhoneNowPlaying?
+    /// For the Continue Listening row: Apple Music access and subscription here.
+    @State private var appleMusicAccess: AppleMusicAccess = .allowed
+    @State private var canPlayCatalog: Bool?
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Form {
@@ -46,8 +51,14 @@ struct HomeView: View {
         .task {
             // Apple Music here has no change notice worth the wiring; once a
             // second is plenty for which handoff to offer.
+            var tick = 0
             while !Task.isCancelled {
                 phoneNowPlaying = phoneMusic.nowPlaying()
+                let access = phoneMusic.access
+                // The subscription once access is allowed, then every five minutes.
+                if access != appleMusicAccess || tick % 300 == 0 { canPlayCatalog = await phoneMusic.canPlayCatalog() }
+                appleMusicAccess = access
+                tick += 1
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -101,16 +112,40 @@ struct HomeView: View {
         }
     }
 
+    private var continueListening: ContinueListeningStatus? {
+        ContinueListeningStatus.assess(mac: model.macMusicConnection, appleMusicAccess: appleMusicAccess, canPlayCatalog: canPlayCatalog)
+    }
+
     private var macSection: some View {
-        Section("Mac") {
+        Section {
             LabeledContent("Name", value: model.pairedMac?.name ?? "")
             LabeledContent("Status", value: statusText)
+            if let status = continueListening {
+                LabeledContent("Continue Listening", value: status.title)
+                if case .allowAppleMusic(let canAsk) = status {
+                    Button(canAsk ? "Allow Apple Music Access" : "Open Settings") {
+                        Task {
+                            if canAsk {
+                                _ = await phoneMusic.requestAccess()
+                                appleMusicAccess = phoneMusic.access
+                                canPlayCatalog = await phoneMusic.canPlayCatalog()
+                            } else if let url = URL(string: UIApplication.openSettingsURLString) {
+                                openURL(url)
+                            }
+                        }
+                    }
+                }
+            }
             Button("Reconnect") {
                 Task { await model.reconnect() }
             }
             Button("Unpair", role: .destructive) {
                 isConfirmingUnpair = true
             }
+        } header: {
+            Text("Mac")
+        } footer: {
+            if let detail = continueListening?.detail { Text(detail) }
         }
     }
 
@@ -383,5 +418,33 @@ private struct TransportControls: View {
             Label(label, systemImage: symbol).labelStyle(.iconOnly)
         }
         .buttonStyle(.borderless)
+    }
+}
+
+/// The Continue Listening row's words (16 November 2026).
+extension ContinueListeningStatus {
+    var title: String {
+        switch self {
+        case .ready: "Ready"
+        case .setUpOnMac: "Set Up on Your Mac"
+        case .reconnectOnMac: "Reconnect on Your Mac"
+        case .allowAppleMusic: "Allow Apple Music"
+        case .needsAppleMusic: "Needs Apple Music"
+        }
+    }
+
+    var detail: String? {
+        switch self {
+        case .ready:
+            nil
+        case .setUpOnMac:
+            "Continue Listening needs Second Chair on your Mac connected to Music. On your Mac, click the music note and choose Connect to Music…, then select Second Chair under Devices in Music and enter the code."
+        case .reconnectOnMac:
+            "Music on your Mac no longer recognises Second Chair. On your Mac, click the music note and choose Connect to Music… again."
+        case .allowAppleMusic:
+            "Continue Listening plays songs in Apple Music on this iPhone, which Second Chair needs your permission for."
+        case .needsAppleMusic:
+            "Continue on iPhone plays the song in Apple Music on this iPhone, which needs an Apple Music subscription."
+        }
     }
 }

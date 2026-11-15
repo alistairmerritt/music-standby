@@ -29,7 +29,7 @@ public struct PlaybackPublisher: Sendable {
     /// `queue`, from Music's remote protocol, adds the catalogue ID and Up
     /// Next; Up Next alone never makes a message.
     public mutating func ingest(_ snapshot: MusicSnapshot, artworkID: String?, queue: RemoteQueue? = nil,
-                                makeSessionID: () -> UUID = UUID.init) -> PlaybackMessage? {
+                                musicConnection: MusicConnection? = nil, makeSessionID: () -> UUID = UUID.init) -> PlaybackMessage? {
         if snapshot.state == .error, heldErrors < errorsToHold, let last = lastSent, last.state == .playing || last.state == .paused {
             heldErrors += 1
             return nil
@@ -37,7 +37,8 @@ public struct PlaybackPublisher: Sendable {
         if snapshot.state != .error { heldErrors = 0 }
 
         let session = sessions.update(for: snapshot.state, makeID: makeSessionID)
-        var candidate = Self.message(for: snapshot, artworkID: artworkID, queue: queue, session: session, revision: latestRevision)
+        var candidate = Self.message(for: snapshot, artworkID: artworkID, queue: queue, session: session, revision: latestRevision,
+                                     musicConnection: musicConnection)
         guard candidate.hasVisibleChange(from: lastSent) else { return nil }
         candidate.revision = revisions.next()
         lastSent = candidate
@@ -45,7 +46,7 @@ public struct PlaybackPublisher: Sendable {
     }
 
     static func message(for snapshot: MusicSnapshot, artworkID: String?, queue: RemoteQueue? = nil, session: UUID?,
-                        revision: UInt64) -> PlaybackMessage {
+                        revision: UInt64, musicConnection: MusicConnection? = nil) -> PlaybackMessage {
         let track = snapshot.track.map {
             TrackMetadata(id: $0.trackID, title: $0.title, artist: $0.artist, album: $0.album, duration: $0.duration, artworkID: artworkID,
                           catalogID: queue?.catalogID)
@@ -56,6 +57,6 @@ public struct PlaybackPublisher: Sendable {
             capturedAt: StandByWire.wirePrecision(snapshot.capturedAt), track: track, canGoNext: canSkip, canGoPrevious: canSkip,
             listeningSessionID: session, detail: snapshot.detail,
             volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs,
-            upNext: track == nil ? nil : queue?.upNext)
+            upNext: track == nil ? nil : queue?.upNext, musicConnection: musicConnection)
     }
 }

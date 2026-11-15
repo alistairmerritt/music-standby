@@ -64,6 +64,11 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
     /// visible change: on its own it isn't one (see `hasVisibleChange`), or
     /// every reordering would cost the phone a push. Added 12 November 2026.
     public var upNext: [QueuedTrack]?
+    /// Whether the Mac is connected to Music as a remote (its menu's Connect
+    /// to Music…), which Continue Listening needs: without it the Mac sends
+    /// no catalogue IDs or Up Next. The iPhone app shows it beside the Mac's
+    /// status. Nil from a Mac before 16 November 2026.
+    public var musicConnection: MusicConnection?
 
     /// The most `upNext` entries a Mac sends.
     public static let upNextLimit = 25
@@ -74,7 +79,8 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
 
     public init(revision: UInt64, state: PlaybackState, elapsedTime: TimeInterval, capturedAt: Date, track: TrackMetadata?,
                 canGoNext: Bool, canGoPrevious: Bool, listeningSessionID: UUID? = nil, detail: String? = nil,
-                volume: Double? = nil, outputs: [AudioOutput]? = nil, upNext: [QueuedTrack]? = nil) {
+                volume: Double? = nil, outputs: [AudioOutput]? = nil, upNext: [QueuedTrack]? = nil,
+                musicConnection: MusicConnection? = nil) {
         self.revision = revision
         self.state = state
         self.elapsedTime = elapsedTime
@@ -87,6 +93,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         self.volume = volume
         self.outputs = outputs
         self.upNext = upNext
+        self.musicConnection = musicConnection
     }
 
     /// The temporary contract's initialiser. A non-playing message with a
@@ -104,7 +111,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case revision, state, isPlaying, elapsedTime, capturedAt, track, canGoNext, canGoPrevious, listeningSessionID, detail, volume, outputs,
-             upNext
+             upNext, musicConnection
     }
 
     public init(from decoder: Decoder) throws {
@@ -120,6 +127,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         volume = try c.decodeIfPresent(Double.self, forKey: .volume)
         outputs = try c.decodeIfPresent([AudioOutput].self, forKey: .outputs)
         upNext = try c.decodeIfPresent([QueuedTrack].self, forKey: .upNext)
+        musicConnection = try c.decodeIfPresent(MusicConnection.self, forKey: .musicConnection)
         // `state` wins when present. Without it this is the temporary contract.
         if let state = try c.decodeIfPresent(PlaybackState.self, forKey: .state) {
             self.state = state
@@ -143,7 +151,30 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         try c.encodeIfPresent(volume, forKey: .volume)
         try c.encodeIfPresent(outputs, forKey: .outputs)
         try c.encodeIfPresent(upNext, forKey: .upNext)
+        try c.encodeIfPresent(musicConnection, forKey: .musicConnection)
     }
+}
+
+/// Whether the Mac is connected to Music as a remote. An open set, like
+/// `ErrorCode`: an app that doesn't know a value shows nothing for it.
+public struct MusicConnection: RawRepresentable, Codable, Hashable, Sendable, ExpressibleByStringLiteral, CustomStringConvertible {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(stringLiteral value: String) { rawValue = value }
+    public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+    public var description: String { rawValue }
+
+    /// Paired with Music, which answers.
+    public static let connected: MusicConnection = "connected"
+    /// Never paired, or unpaired on the Mac.
+    public static let notConnected: MusicConnection = "not_connected"
+    /// Paired, but Music has forgotten the pairing (Forget All Remotes, or a
+    /// changed library): connect again.
+    public static let forgotten: MusicConnection = "forgotten"
 }
 
 extension PlaybackMessage {
@@ -171,7 +202,7 @@ extension PlaybackMessage {
         guard let previous else { return true }
         if state != previous.state || track != previous.track || canGoNext != previous.canGoNext
             || canGoPrevious != previous.canGoPrevious || listeningSessionID != previous.listeningSessionID
-            || volume != previous.volume || outputs != previous.outputs {
+            || volume != previous.volume || outputs != previous.outputs || musicConnection != previous.musicConnection {
             return true
         }
         guard track != nil, state == .playing || state == .paused else { return false }

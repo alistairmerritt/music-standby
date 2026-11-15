@@ -63,6 +63,8 @@ export interface PlaybackMessage {
   outputs?: AudioOutput[];
   /** Up Next, at most 25. Added 12 November 2026. Reaches the phone in GET /v1/session; never pushed. */
   upNext?: QueuedTrack[];
+  /** Whether the Mac is connected to Music as a remote, for Continue Listening. Passed through. */
+  musicConnection?: string;
 }
 
 export interface ProtocolError {

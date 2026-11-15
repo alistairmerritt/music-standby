@@ -83,6 +83,7 @@ something visible changes (`hasVisibleChange(from:)`), never for ordinary progre
 | `detail` | string? | New. Diagnostic text for `automation_denied` and `error`. Not for display |
 | `volume`, `outputs` | number?, `[AudioOutput]`? | 11 November 2026. See §5 |
 | `upNext` | `[QueuedTrack]`? | 12 November 2026. What Music plays after `track`, in order, at most 25 (`upNextLimit`). Absent when the Mac can't read it. Not part of a visible change |
+| `musicConnection` | `MusicConnection`? | 16 November 2026. Whether the Mac is connected to Music as a remote, which Continue Listening needs: `connected`, `not_connected` or `forgotten` (Music has forgotten the pairing). An open set. Absent from an older Mac. The iPhone app shows it beside the Mac's status |
 
 `TrackMetadata.catalogID` (string?, 12 November 2026) is the song's Apple Music catalogue
 ID, the number `MPMusicPlayerController.setQueue(with:)` takes, and `QueuedTrack` carries
@@ -106,7 +107,7 @@ Relays pass both through untouched, and leave them out of pushes.
 | `error` | Music running but unreadable. Usually transient | No |
 
 **Visible change** = a different `state`, `track` (its `catalogID` included), `canGoNext`,
-`canGoPrevious`, `listeningSessionID`, `volume` or `outputs`, or a position more than 2 s
+`canGoPrevious`, `listeningSessionID`, `volume`, `outputs` or `musicConnection`, or a position more than 2 s
 from where the previous message predicts (a seek). `upNext` alone isn't one: a reordered
 queue would otherwise cost a push, so it travels with the next visible change. The relay can
 coalesce pushes on the same rule.

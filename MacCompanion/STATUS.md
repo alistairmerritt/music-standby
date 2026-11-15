@@ -23,6 +23,13 @@ unit-tested at most.
 | Relay | `RelayTransport` over a WebSocket to the deployed relay, with a real iPhone since 10 November |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
 
+## Connection to Music in every state (16 November 2026)
+
+Each state carries `musicConnection`: `not_connected` without a Music remote pairing,
+`forgotten` once Music answers that it no longer knows the pairing, else `connected`. It's a
+visible change, so connecting or forgetting reaches the phone at once; setting `remote` also
+asks for a fresh read. The iPhone app shows it as its Continue Listening row. 148 tests pass.
+
 ## Play a song's station (15 November 2026)
 
 `playStation` (`catalogID`) opens `music://music.apple.com/<region>/station/ra.<id>` in Music
