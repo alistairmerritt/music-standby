@@ -1,6 +1,8 @@
 # Mac companion — status
 
-12 November 2026, branch `feature/macos-hand-back` (off `feature/macos` at 1553014, with `contract/hand-back`). macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
+Last updated 15 November 2026, on `main`. Newest sections first after the summary.
+
+Measured on macOS 27.0.1, Xcode 27.2 (Swift 6.4.2, macOS 27.2
 SDK), Music.app 1.7.
 
 **Renamed to Second Chair on 11 November 2026.** The app is now `build/Second Chair.app`, and its menu and permission text say Second Chair. Its bundle identifier (`com.alistairmerritt.MusicStandBy.Mac`), its `defaults` domain and its Keychain items keep the old name, so approvals and the pairing carry over. Older entries use the old name.
@@ -13,12 +15,12 @@ unit-tested at most.
 | | State |
 | --- | --- |
 | Compiled | Yes. `swift build` and `scripts/build.sh` with Xcode 27.2, Swift 6 language mode, no warnings |
-| Unit tests | 132 tests in 19 suites pass (`scripts/test.sh`, 12 November) |
-| Shared protocol | 60 tests in 10 suites pass (`scripts/test.sh`, 12 November); builds for iOS with `xcodebuild`. This branch's copy has the song-ID change of 11 November (`pid:<id>-<12 hex>`), which `feature/ios` and `feature/relay` don't (59 tests there); neither needs it, since both only compare IDs |
+| Unit tests | 147 tests in 19 suites pass (`scripts/test.sh`, 15 November) |
+| Shared protocol | 68 tests in 11 suites pass (`scripts/test.sh`, 15 November); one copy on `main` for all three parts since 15 November |
 | How Music is driven | **Raw Apple Events addressed to Music's process id**, sent off the main thread (`RawEventRunner`, evening of 9 November). NSAppleScript is kept only as the reference `msbctl compare` checks against |
 | Against real Music.app | Executed through `msbctl`: reads, artwork, all five commands, phone commands, three quits with relaunches |
-| Menu-bar app | Launched and quit cleanly with the AppleScript runner. On the night of 9 November, launched again (raw events, relay build) from the shell: registered with a local relay, connected, saved its credential in the Keychain, reconnected with it after a relaunch, and said `goodbye` on each quit. On 10 November it drove real Music from a real iPhone through the deployed relay (below). The menu has never been clicked by hand |
-| Relay | `RelayTransport` over a WebSocket to the relay on `feature/relay`. **Executed end to end on this Mac** with real Music and a simulated iPhone, then a real iPhone (below) |
+| Menu-bar app | In daily use from `/Applications` since 12 November: pairing, Continue from iPhone, Launch at Login and the Music remote pairing all clicked by hand. Earlier launches, from the shell, are below |
+| Relay | `RelayTransport` over a WebSocket to the deployed relay, with a real iPhone since 10 November |
 | Xcode app project | Not made. The app is built by `scripts/build.sh` |
 
 ## Play a song's station (15 November 2026)

@@ -20,6 +20,8 @@ iPhone app. Foundation and CryptoKit only; iOS 17+ and macOS 14+.
 | `Frames.swift` | `MacFrame`, `RelayFrame` |
 | `Sequencing.swift` | `RevisionCounter`, `ListeningSessionTracker` |
 | `Relay.swift` | Relay API bodies: pairing, push tokens, `SessionState`, `NowPlayingAttributes` |
+| `Output.swift` | `AudioOutput`: Music's AirPlay devices, for volume and output |
+| `HandBack.swift` | Continue from iPhone: `HandBackRequest`, `HandBackStatus`, device tokens, `CommandReason` |
 
 ## Tests
 

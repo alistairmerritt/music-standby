@@ -1,6 +1,6 @@
 # iOS status
 
-Last updated 12 November 2026, branch `feature/shortcuts` (off `feature/ios` at db3a403).
+Last updated 15 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
 
 **Renamed to Second Chair on 11 November 2026.** Only the names people see changed (Home Screen, screens, notifications); bundle identifiers, App IDs, the push topic and the Keychain group keep `MusicStandBy`. Entries below that predate the rename use the old name.
 
@@ -253,7 +253,7 @@ The extension logs each request for the image ("asked for at WxH, cached: …", 
 | Relay client, credentials, command path | `StandByKit/Sources/StandByKit/Relay/` |
 | Mock transport for development | `StandByKit/Sources/StandByKit/Mock/` |
 | Wire protocol | `Shared/StandByProtocol/`, merged from `main` |
-| Relay endpoints the client assumes | [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md) |
+| Relay API the client uses | [docs/relay/API-v1.md](../relay/API-v1.md) (the 9 November assumptions are in [docs/archive](../archive/RELAY-CLIENT-CONTRACT.md)) |
 
 ## Observed on a physical iPhone
 
@@ -319,13 +319,13 @@ Deliberately reintroducing 14 of these bugs made the tests fail. One further cha
 
 App and extension build for the iOS 27.2 device SDK, Debug and Release. `RemoteSessionController` and the views have no automated tests.
 
-## Blocked
+## Open
 
-- **App Group.** Register `group.com.alistairmerritt.MusicStandBy` on the developer site (Identifiers → App Groups) and add it to both App IDs; `xcodebuild` can't. Until then, build with temporary entitlements that leave it out. Only the mock route's command log and Diagnostics use it.
-- **TestFlight and distribution.** Not started. Builds signed by the paid team now last a year.
+- **Not yet seen in use:** the Continue on Mac button on Apple Watch; Continue on iPhone a second time from a CarPlay automation; the station after a short queue in the car (seen on the phone with `StationProbe`).
 - **Still to try by hand:** a locked phone and StandBy with pushes, and late artwork arriving by push.
+- Done since this list began: the App Group is registered (TestFlight's export checks it), and TestFlight has been in use since 12 November. The MusicKit app service was turned on for the App ID on 15 November.
 
-Pairing with a real Mac, Lock Screen controls reaching it, artwork from the relay and the relay endpoints were done on 10 November; see [RELAY-CLIENT-CONTRACT.md](RELAY-CLIENT-CONTRACT.md).
+Pairing with a real Mac, Lock Screen controls reaching it, artwork from the relay and the relay endpoints were done on 10 November; see [docs/archive/RELAY-CLIENT-CONTRACT.md](../archive/RELAY-CLIENT-CONTRACT.md).
 
 ## Decisions
 
