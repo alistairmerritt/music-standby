@@ -22,6 +22,9 @@ struct ContinueOnIPhoneIntent: AppIntent {
         }
     }
 
+    /// Each step to the device log, as in the car there's nothing else to read.
+    @MainActor static func log(_ text: String) { shortcutLog.log("\(text, privacy: .public)") }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let canOpen = systemContext.currentMode.canContinueInForeground
@@ -32,13 +35,13 @@ struct ContinueOnIPhoneIntent: AppIntent {
         let player = SystemMusicPhonePlayer()
         var outcome = try await ShortcutRemote.run { remote in
             try await remote.read()
-            return await remote.handover().continueOnPhone(with: player, timeout: canOpen ? 6 : 10)
+            return await remote.handover(record: Self.log).continueOnPhone(with: player, timeout: canOpen ? 6 : 10)
         }
         if outcome == .didNotStart, canOpen {
             try await continueInForeground("Open Second Chair to start the song on your iPhone?", alwaysConfirm: false)
             outcome = try await ShortcutRemote.run { remote in
                 try await remote.read()
-                return await remote.handover().continueOnPhone(with: player)
+                return await remote.handover(record: Self.log).continueOnPhone(with: player)
             }
         }
         let dialog: IntentDialog

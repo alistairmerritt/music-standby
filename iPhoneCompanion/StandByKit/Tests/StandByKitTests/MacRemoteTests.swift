@@ -261,3 +261,61 @@ private let handoverStart = Date(timeIntervalSince1970: 1_000_000)
         #expect(memory.load() == nil, "the Mac has the music again, so the next Continue on iPhone takes it")
     }
 }
+
+/// Continue on iPhone from a Mac with little to come, as on a station, which
+/// lists only its next song: a station made from the song follows here.
+/// Added 15 November 2026.
+@MainActor
+@Suite struct ContinueWithAStationTests {
+    private func mac(upNext ids: [String?]) -> FakeRelay {
+        var song = track()
+        song.catalogID = "1102360418"
+        var playback = message(state: .playing, track: song)
+        playback.upNext = ids.enumerated().map { QueuedTrack(catalogID: $1, title: "Next \($0)", artist: "Artist", duration: 200) }
+        return FakeRelay(SessionState(sessionID: "s1", mac: PairedMac(id: "a", name: "Studio Mac"), macConnected: true, playback: playback, attributes: nil))
+    }
+
+    private func continueHere(_ relay: FakeRelay, _ phone: FakePhoneMusic) async throws -> ContinueOutcome {
+        let remote = MacRemote(client: relay, sleep: { _ in })
+        try await remote.read()
+        return await remote.handover().continueOnPhone(with: phone)
+    }
+
+    @Test func aMacOnAStationIsFollowedByAStationFromTheSong() async throws {
+        let relay = mac(upNext: ["1102359994"])   // what a station lists
+        let phone = FakePhoneMusic()
+        #expect(try await continueHere(relay, phone) == .continued)
+        #expect(phone.asked.first?.ids == ["1102360418", "1102359994"])
+        #expect(phone.stationSeeds == ["1102360418"], "the station is made from the song that was playing")
+        #expect(await relay.sent.map(\.command.kind) == [.pause], "the Mac pauses as before")
+    }
+
+    @Test func songsWithoutACatalogueIDDontCountAsToCome() async throws {
+        let phone = FakePhoneMusic()
+        _ = try await continueHere(mac(upNext: ["1102359994", nil, nil, nil]), phone)
+        #expect(phone.stationSeeds == ["1102360418"])
+    }
+
+    @Test func aFullUpNextNeedsNoStation() async throws {
+        let phone = FakePhoneMusic()
+        #expect(try await continueHere(mac(upNext: ["1", "2", "3"]), phone) == .continued)
+        #expect(phone.stationSeeds.isEmpty)
+    }
+
+    @Test func aStationThatCantBeAddedChangesNothingElse() async throws {
+        for result in [StationAppend.failed("catalogue: no developer token"), .noStation] {
+            let relay = mac(upNext: [])
+            let phone = FakePhoneMusic()
+            phone.station = result
+            #expect(try await continueHere(relay, phone) == .continued)
+            #expect(await relay.sent.map(\.command.kind) == [.pause])
+        }
+    }
+
+    @Test func noStationWhenTheSongDidntStartHere() async throws {
+        let phone = FakePhoneMusic()
+        phone.starts = false
+        #expect(try await continueHere(mac(upNext: []), phone) == .didNotStart)
+        #expect(phone.stationSeeds.isEmpty)
+    }
+}

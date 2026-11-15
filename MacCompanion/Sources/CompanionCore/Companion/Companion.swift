@@ -439,7 +439,12 @@ public final class Companion {
         guard let remote, let track = snapshot.track else { return nil }
         let key = "\(track.trackID)|\(snapshot.state.rawValue)"
         if remoteRead?.key != key {
-            remoteRead = (key, Task { await remote.queue(current: track) })
+            remoteRead = (key, Task {
+                let started = ContinuousClock.now
+                let queue = await remote.queue(current: track)
+                Self.logQueue(queue, read: ContinuousClock.now - started)
+                return queue
+            })
         }
         guard let task = remoteRead?.task else { return nil }
         if let answer = await Self.waitAtMost(Self.remoteWait, { await task.value }) { return answer }
@@ -793,6 +798,21 @@ public final class Companion {
     /// one end to end: `log stream --predicate 'category == "hand-back"'`.
     /// Only steps and statuses, never what's playing.
     private static let handBackLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy.Mac", category: "hand-back")
+
+    /// Each read of Music's queue, for following what Continue on iPhone
+    /// can take: `log stream --predicate 'category == "queue"'`. Counts only,
+    /// never what's playing (added 15 Nov 2026).
+    private static let queueLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy.Mac", category: "queue")
+
+    private static func logQueue(_ queue: RemoteQueue?, read duration: Duration) {
+        let ms = Int(duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000)
+        guard let queue else {
+            queueLog.log("read in \(ms, privacy: .public) ms: no answer from Music")
+            return
+        }
+        let withID = queue.upNext.filter { $0.catalogID != nil }.count
+        queueLog.log("read in \(ms, privacy: .public) ms: song \(queue.catalogID == nil ? "without" : "with", privacy: .public) a catalogue ID; Up Next \(queue.upNext.count, privacy: .public), \(withID, privacy: .public) with one")
+    }
 
     private func recordHandBack(_ text: String) {
         Self.handBackLog.log("\(text, privacy: .public)")
