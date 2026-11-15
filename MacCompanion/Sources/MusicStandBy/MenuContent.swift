@@ -54,18 +54,32 @@ private struct NowPlayingSection: View {
                    detail: "Allow it in System Settings › Privacy & Security › Automation.",
                    action: ("Open Privacy Settings", openAutomationSettings))
         default:
-            if let snapshot = companion.snapshot, let track = snapshot.track {
-                TrackRow(track: track, state: snapshot.state, artwork: companion.artwork?.image)
-                if let message = companion.message, let duration = message.track?.duration, duration > 0 {
-                    Progress(message: message, duration: duration)
+            // Once Continue on iPhone has taken the music, until Music plays
+            // here again, the Mac's own song steps back (16 November 2026).
+            // The Mac can't see what the phone plays, only that it handed over.
+            let handedOver = companion.phoneHasMusic && companion.snapshot?.state != .playing
+            HStack {
+                Text("On This Mac").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if handedOver {
+                    Label("Continued on iPhone", systemImage: "iphone").font(.caption).foregroundStyle(.secondary)
                 }
-            } else {
-                Notice(symbol: "music.note", title: companion.snapshot?.state == .error ? "Can’t read Music right now" : "Nothing playing",
-                       detail: companion.snapshot?.detail, action: nil)
             }
-            TransportControls(companion: companion)
+            Group {
+                if let snapshot = companion.snapshot, let track = snapshot.track {
+                    TrackRow(track: track, state: snapshot.state, artwork: companion.artwork?.image)
+                    if let message = companion.message, let duration = message.track?.duration, duration > 0 {
+                        Progress(message: message, duration: duration)
+                    }
+                } else {
+                    Notice(symbol: "music.note", title: companion.snapshot?.state == .error ? "Can’t read Music right now" : "Nothing playing",
+                           detail: companion.snapshot?.detail, action: nil)
+                }
+                TransportControls(companion: companion)
+            }
+            .opacity(handedOver ? 0.45 : 1)
             if companion.offersContinueFromPhone {
-                ContinueFromPhoneRow(companion: companion)
+                ContinueFromPhoneRow(companion: companion, prominent: handedOver)
             }
         }
     }
@@ -175,15 +189,24 @@ private struct TransportControls: View {
 /// from the phone (docs/relay/API-v1.md §14).
 private struct ContinueFromPhoneRow: View {
     let companion: Companion
+    /// The main button once the phone has the music.
+    var prominent = false
 
     var body: some View {
         let progress = companion.handBack
         let waiting = progress.map { !$0.isFinished } ?? false
         VStack(spacing: 4) {
-            Button {
-                companion.continueFromPhone()
-            } label: {
-                Label("Continue from iPhone", systemImage: "iphone.and.arrow.forward")
+            Group {
+                if prominent {
+                    Button { companion.continueFromPhone() } label: {
+                        Label("Continue from iPhone", systemImage: "iphone.and.arrow.forward")
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button { companion.continueFromPhone() } label: {
+                        Label("Continue from iPhone", systemImage: "iphone.and.arrow.forward")
+                    }
+                }
             }
             .disabled(waiting)
             if let line = progress?.message {
@@ -223,21 +246,23 @@ private struct MusicRemoteSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Continue on iPhone").font(.headline)
+            // "Continue Listening", as on the iPhone; "Continue on iPhone" here
+            // read like a button (16 November 2026).
+            Text("Continue Listening").font(.headline)
             switch account.state {
             case .unpaired:
-                note("Connect Second Chair to Music to continue listening on your iPhone, including your Up Next queue.")
+                note("Connect Second Chair to Music so your music can move between this Mac and your iPhone, with your Up Next queue.")
                 Button("Connect to Music…") { account.startPairing() }
             case .pairing(let code):
                 note("In Music, select Second Chair under Devices, then enter this code:")
                 Text(code.map(String.init).joined(separator: " ")).font(.system(.title, design: .monospaced))
                 Button("Cancel") { account.cancelPairing() }
             case .paired:
-                note("Connected to Music. Your iPhone can pick up where your Mac leaves off.")
-                Button("Disconnect") { account.forget() }
+                note("Connected to Music. Your music can move between this Mac and your iPhone.")
+                Button("Disconnect from Music") { account.forget() }
             case .forgottenByMusic:
-                note("The connection to Music has been lost. Connect again to continue listening on your iPhone.")
-                Button("Reconnect…") { account.startPairing() }
+                note("Music no longer recognises Second Chair. Connect again so your music can move between this Mac and your iPhone.")
+                Button("Connect to Music…") { account.startPairing() }
             case .failed(let message):
                 note(message)
                 Button("Try Again") { account.startPairing() }
@@ -263,8 +288,9 @@ private struct ConnectionSection: View {
                 Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
                 Text(text)
             }
+            // iOS gives the Mac only "iPhone" as the phone's name.
             LabeledContent("iPhone") {
-                Text(companion.pairedPhone?.name ?? "Not paired").foregroundStyle(.secondary)
+                Text(companion.pairedPhone == nil ? "Not paired" : "Paired").foregroundStyle(.secondary)
             }
             if let relay {
                 PairingControls(companion: companion, relay: relay)
@@ -279,7 +305,9 @@ private struct ConnectionSection: View {
     private var text: String {
         let status = companion.connection
         switch status.phase {
-        case .connected: return "Connected to \(status.peerName ?? "relay")"
+        // Not the relay's address: it means nothing to anyone, and it
+        // turned up in screenshots (16 November 2026).
+        case .connected: return "Connected"
         case .connecting: return "Connecting…"
         case .reconnecting: return "Reconnecting…"
         case .failed: return "Connection failed\(status.error.map { ": \($0.code)" } ?? "")"
