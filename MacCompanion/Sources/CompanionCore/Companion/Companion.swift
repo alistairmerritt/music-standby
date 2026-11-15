@@ -388,6 +388,9 @@ public final class Companion {
                     phoneHasMusic = true
                     recordHandBack("the iPhone has the music now")
                 }
+                if command.kind == .playStation, let position = command.position, let title = command.title {
+                    seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now())
+                }
             }
         }
         remember(ack)
@@ -480,6 +483,41 @@ public final class Companion {
             self.refresh()
         }
         return nil
+    }
+
+    @ObservationIgnored private var stationSeek: Task<Void, Never>?
+    /// How long a station may take to start before the seek is given up.
+    static let stationStartWait: TimeInterval = 10
+    static let stationPoll: Duration = .milliseconds(150)
+
+    /// Continue on Mac with a song the Mac's queue didn't have: Music plays
+    /// the song's station, which usually starts with the song. Once Music
+    /// plays a new song, if it's that one, seek to where the phone is: the
+    /// phone's position at `issuedAt`, plus the time since, as the phone
+    /// plays on. Seeking here rather than from the phone saves the second or
+    /// two the phone takes to see the Mac playing (16 November 2026). The
+    /// ack has gone already; the relay waits only 1.2 s for it.
+    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date) {
+        let before = snapshot?.track?.persistentID ?? snapshot?.track?.title
+        stationSeek?.cancel()
+        stationSeek = Task { [weak self] in
+            guard let self else { return }
+            let deadline = now().addingTimeInterval(Self.stationStartWait)
+            while now() < deadline, !Task.isCancelled {
+                try? await Task.sleep(for: Self.stationPoll)
+                let read = await controller.snapshot()
+                guard read.state == .playing, let track = read.track, (track.persistentID ?? track.title) != before else { continue }
+                guard track.title.compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame else {
+                    recordHandBack("playStation: the station starts with another song; no seek")
+                    return
+                }
+                let target = position + max(0, now().timeIntervalSince(issuedAt)) + 0.2
+                guard track.duration <= 0 || target < track.duration - 2 else { return }
+                _ = await controller.seek(to: target)
+                recordHandBack("playStation: the station starts with the song; seek to \(Int(target)) s")
+                return
+            }
+        }
     }
 
     /// For the phone's Continue Listening status: whether this Mac is

@@ -144,7 +144,8 @@ The phone sends a `RemoteCommand`; the Mac answers each with exactly one `Comman
 | `position` | Seconds into the track, for `seek`. Clamped to the track by the Mac |
 | `level` | Music's own output volume, 0 to 1, for `setVolume`. Clamped by the Mac. Not the Mac's system volume |
 | `outputID` | An `AudioOutput.id` from the last state, for `selectOutput`. Music then plays to that device alone |
-| `catalogID` | New on 15 November 2026. An Apple Music catalogue song ID, digits only, for `playStation`: Music plays that song's station (Create Station), usually starting with the song. It's how Continue on Mac hands over a song the Mac's queue doesn't have, which Music on the Mac can't be told to play by ID ([example](Examples/relay-command-play-station.json)). An older Mac answers `unsupported_command` |
+| `catalogID` | New on 15 November 2026. An Apple Music catalogue song ID, digits only, for `playStation`: Music plays that song's station (Create Station), usually starting with the song. It's how Continue on Mac hands over a song the Mac's queue doesn't have, which Music on the Mac can't be told to play by ID ([example](Examples/relay-command-play-station.json)). An older Mac answers `unsupported_command`. Since 16 November 2026 it can also carry `position` (where the phone was at `issuedAt`) and `title`: once Music plays a new song whose title matches, the Mac seeks to `position` plus the time since `issuedAt` itself. An older Mac ignores both |
+| `title` | New on 16 November 2026. The song's title, for `playStation` (above) |
 | `reason` | New on 12 November 2026, optional, an open set. `continue_on_phone` marks the `pause` Continue on iPhone sends once the song plays on the phone, so the Mac knows the phone has its music ([example](Examples/relay-command-continue-on-phone.json)). A Mac that doesn't know it runs the command as usual |
 
 The four value commands each need their field (`RemoteCommand.hasRequiredValue`); without it,

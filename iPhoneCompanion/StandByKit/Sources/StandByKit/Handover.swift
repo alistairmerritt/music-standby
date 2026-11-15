@@ -190,7 +190,10 @@ public struct Handover {
     /// song. Either way Apple Music here pauses once the Mac plays.
     private func sendAsStation(_ here: PhoneNowPlaying, catalogID: String, with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> SendBackOutcome {
         let before = latest()
-        guard await step(.playStation(seededBy: catalogID, issuedAt: now())) else { return .macRefused }
+        // Where the phone is and the song's title, so the Mac can seek itself
+        // the moment Music starts the song (16 November 2026).
+        let position = player.nowPlaying()?.position ?? here.position
+        guard await step(.playStation(seededBy: catalogID, position: position, title: here.title, issuedAt: now())) else { return .macRefused }
         let deadline = now().addingTimeInterval(timeout)
         while now() < deadline {
             await refresh()
@@ -198,11 +201,7 @@ public struct Handover {
                current.revision > (before?.revision ?? 0), track.id != before?.track?.id || track.catalogID == catalogID {
                 let sameSong = track.catalogID == catalogID
                     || (track.catalogID == nil && here.title.map { track.title.caseInsensitiveCompare($0) == .orderedSame } == true)
-                if sameSong {
-                    // Where the phone is now, plus about the time the seek takes to land.
-                    let position = (player.nowPlaying()?.position ?? here.position) + 0.3
-                    _ = await step(.seek(to: position, issuedAt: now()))
-                }
+                if sameSong { await seekIfTheMacMissedIt(player: player, here: here) }
                 if player.nowPlaying()?.isPlaying == true { player.pause() }
                 memory.save(nil)
                 record(sameSong ? "Send back to Mac: the song's station plays on the Mac from the same point; Apple Music here is paused"
@@ -213,6 +212,30 @@ public struct Handover {
         }
         record("Send back to Mac: the Mac didn't start the song's station in \(Int(timeout)) s")
         return .macDidNotStart
+    }
+
+    /// How far the Mac may be from the phone and still count as there.
+    static let seekTolerance: TimeInterval = 3
+
+    /// The Mac seeks itself once the station starts with the song. A Mac
+    /// from before 16 November 2026 doesn't, and a seek can go astray, so
+    /// give its seek a moment to show, then seek from here if it's still off.
+    private func seekIfTheMacMissedIt(player: any PhoneMusicPlaying, here: PhoneNowPlaying) async {
+        func gap() -> TimeInterval? {
+            guard let mac = latest() else { return nil }
+            return abs(mac.elapsed(at: now()) - (player.nowPlaying()?.position ?? here.position))
+        }
+        for attempt in 0..<4 {
+            if let gap = gap(), gap <= Self.seekTolerance { return }
+            if attempt < 3 {
+                try? await sleep(0.5)
+                await refresh()
+            }
+        }
+        // Where the phone is now, plus about the time the seek takes to land.
+        let position = (player.nowPlaying()?.position ?? here.position) + 0.3
+        record("Send back to Mac: the Mac didn't seek to the phone's point; seeking from here")
+        _ = await step(.seek(to: position, issuedAt: now()))
     }
 
     /// False only when the Mac says no. A reply that doesn't come in time

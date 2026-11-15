@@ -348,10 +348,12 @@ private let handoverStart = Date(timeIntervalSince1970: 1_000_000)
         return FakeRelay(mac(message(revision: 1, state: .paused, track: song)))
     }
 
-    private func macPlays(_ catalogID: String?, id: String = "t2", title: String = "Song") -> SessionState {
+    private func macPlays(_ catalogID: String?, id: String = "t2", title: String = "Song", at elapsed: TimeInterval = 0) -> SessionState {
         var song = TrackMetadata(id: id, title: title, artist: "Artist", album: "Album", duration: 200, artworkID: nil)
         song.catalogID = catalogID
-        return mac(message(revision: 2, state: .playing, track: song))
+        var playback = message(revision: 2, state: .playing, track: song)
+        playback.elapsedTime = elapsed
+        return mac(playback)
     }
 
     private func phone(_ catalogID: String = "999", title: String? = "Song") -> FakePhoneMusic {
@@ -367,14 +369,25 @@ private let handoverStart = Date(timeIntervalSince1970: 1_000_000)
         return await remote.handover().sendBackToMac(with: phone)
     }
 
-    @Test func theStationStartingWithTheSongPicksUpFromTheSamePoint() async throws {
+    @Test func theMacIsToldWhereThePhoneIsAndSeeksItself() async throws {
         let relay = pausedMac()
-        await relay.setNext(macPlays("999"))
+        await relay.setNext(macPlays("999", at: 61.5))   // the Mac's own seek has landed
+        let phone = phone()
+        #expect(try await handBack(relay, phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.map(\.kind) == [.playStation], "no seek from the phone")
+        #expect(sent.first?.catalogID == "999")
+        #expect(sent.first?.position == 61 && sent.first?.title == "Song")
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func aMacThatDoesntSeekIsSeekedFromThePhone() async throws {
+        let relay = pausedMac()
+        await relay.setNext(macPlays("999"))   // an older Mac: still at the start of the song
         let phone = phone()
         #expect(try await handBack(relay, phone) == .sentBack)
         let sent = await relay.sent.map(\.command)
         #expect(sent.map(\.kind) == [.playStation, .seek])
-        #expect(sent.first?.catalogID == "999")
         #expect(abs((sent.last?.position ?? 0) - 61.3) < 0.01)
         #expect(phone.pauses == 1)
     }
