@@ -1,8 +1,11 @@
 # Mac companion
 
 A SwiftUI menu-bar app that watches Apple Music on this Mac, publishes its state in the
-shared protocol (`Shared/StandByProtocol`), and applies playback commands from the
-iPhone. Today it talks to a built-in mock relay; the WebSocket relay is not built.
+shared protocol (`Shared/StandByProtocol`) to the relay over a WebSocket, and applies
+playback commands from the iPhone: play, pause, skip, seek, Music's own volume, and a song's
+station. Its menu pairs the iPhone, pairs with Music as a remote (for Up Next), offers
+Continue from iPhone (also a Shortcuts action) and Launch at Login. Without a relay host it
+runs on a built-in mock relay.
 
 What is verified, and how, is in **[STATUS.md](STATUS.md)**.
 
@@ -12,8 +15,9 @@ What is verified, and how, is in **[STATUS.md](STATUS.md)**.
 | --- | --- |
 | `Sources/CompanionCore/Music/` | `MusicController` (an actor on its own queue), `RawEventRunner` (raw Apple Events by PID), `MusicProcess` (finding Music without events), `MusicMonitor` (notifications, lifecycle, poll), `MusicScripts` (the AppleScript reference), `ArtworkProcessor`, `CatalogArtwork` (art Music doesn't have) |
 | `Sources/CompanionCore/Companion/` | `Companion` (the engine), `PlaybackPublisher` (snapshots → `PlaybackMessage`), `CompanionStore` |
-| `Sources/CompanionCore/Transport/` | `CompanionTransport` and `MockRelayTransport` |
-| `Sources/MusicStandBy/` | The menu-bar app: `MenuBarExtra`, menu content, Launch at Login |
+| `Sources/CompanionCore/Remote/` | Music's remote protocol (DACP, as Apple's Remote app used it): pairing, Up Next and catalogue IDs, artwork |
+| `Sources/CompanionCore/Transport/` | `RelayTransport` (the WebSocket), `RelayAccount` and `RelayClient` (registration, pairing), `RelayEndpoint`, `MockRelayTransport` |
+| `Sources/MusicStandBy/` | The menu-bar app: `MenuBarExtra`, menu content, Launch at Login, the Continue from iPhone Shortcuts action |
 | `Sources/msbctl/` | Command-line driver for checking CompanionCore against the real Music.app |
 | `Tests/CompanionCoreTests/` | Swift Testing suites, using a fake Music behind the script-runner seam |
 | `Prototypes/MusicProbe/` | The spike this started from, kept as it was |
@@ -34,8 +38,9 @@ scripts/build.sh
 Apple Development identity (ad-hoc if there is none, or with `MSB_SIGN_IDENTITY=-`), plus
 `.build/swiftc/msbctl`. Without a working Xcode it falls back to the Command Line Tools with
 a workaround for their broken module map (see `scripts/toolchain.sh`).
-SwiftPM alone can't make an `.app` with an `Info.plist`, which is why the script exists.
-An Xcode app project is still to do.
+SwiftPM alone can't make an `.app` with an `Info.plist`, which is why the script exists. It
+also compiles the Icon Composer icon with `actool` and extracts the App Intents metadata
+(`appintentsmetadataprocessor`) for the Shortcuts action, which Xcode would otherwise do.
 
 With a development identity, Automation and Keychain approvals survive rebuilds. An ad-hoc
 signature changes with every build, so macOS asks for both again.

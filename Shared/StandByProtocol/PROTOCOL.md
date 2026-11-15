@@ -6,7 +6,7 @@ JSON example lives in [`Examples/`](Examples/), where the tests decode and re-en
 each one so they can't drift.
 
 **Status.** Proposed in the pull request that adds this package. Nothing here is
-deployed. The relay is still a proposal (`docs/ios/RELAY-DESIGN-8-NOV-2026.md` on
+deployed. The relay is still a proposal (`docs/archive/RELAY-DESIGN-8-NOV-2026.md` on
 `feature/ios`); this package fixes the messages, not the relay's endpoints or platform.
 
 ---

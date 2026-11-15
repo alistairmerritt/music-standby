@@ -4,7 +4,7 @@ The contract between the relay, the Mac companion and the iPhone app (app and No
 extension). It builds on the shared protocol in `Shared/StandByProtocol`
 ([PROTOCOL.md](../../Shared/StandByProtocol/PROTOCOL.md)): every body and frame below is a
 Swift type there, with a JSON example in `Shared/StandByProtocol/Examples/` that the tests
-decode and re-encode. It turns `docs/ios/RELAY-DESIGN-8-NOV-2026.md` (on `feature/ios`) into
+decode and re-encode. It turns `docs/archive/RELAY-DESIGN-8-NOV-2026.md` into
 something to build against; section 12 lists where it differs.
 
 **Status:** proposed in its own pull request. The relay that implements it is on
