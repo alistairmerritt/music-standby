@@ -29,8 +29,10 @@ public final class Companion {
     public private(set) var events: [CompanionEvent] = []
     /// True once Continue on iPhone has paused this Mac: the phone has its
     /// music, so the menu offers Continue from iPhone. False again as soon as
-    /// Music plays here.
-    public private(set) var phoneHasMusic = false
+    /// Music plays here. Kept in the store across restarts.
+    public private(set) var phoneHasMusic = false {
+        didSet { if phoneHasMusic != oldValue { store.phoneHasMusic = phoneHasMusic } }
+    }
     /// The last Continue from iPhone request and how far it got. Nil once
     /// Music plays here, or before the first.
     public private(set) var handBack: HandBackProgress?
@@ -139,6 +141,7 @@ public final class Companion {
         self.monitor = MusicMonitor(controller: controller, isLaunching: isMusicLaunching)
         self.transport = transport
         self.store = store
+        phoneHasMusic = store.phoneHasMusic
         self.device = device
         self.artworkLookup = artworkLookup
         self.now = now

@@ -15,6 +15,7 @@ public final class CompanionStore: @unchecked Sendable {
         static let listeningSession = "listeningSession"
         static let listeningSessionSavedAt = "listeningSessionSavedAt"
         static let deviceID = "deviceID"
+        static let phoneHasMusic = "phoneHasMusic"
     }
 
     /// Written before each state frame is sent, so a crash can't reuse it.
@@ -44,6 +45,14 @@ public final class CompanionStore: @unchecked Sendable {
             defaults.removeObject(forKey: Key.listeningSession)
             defaults.removeObject(forKey: Key.listeningSessionSavedAt)
         }
+    }
+
+    /// `Companion.phoneHasMusic`, kept so the menu still offers Continue from
+    /// iPhone after the app restarts, as after an update or a login (seen 15
+    /// November 2026). Music playing here clears it, as before.
+    public var phoneHasMusic: Bool {
+        get { defaults.bool(forKey: Key.phoneHasMusic) }
+        set { defaults.set(newValue, forKey: Key.phoneHasMusic) }
     }
 
     /// Random, minted on first use. Never a serial number.
