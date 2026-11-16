@@ -35,6 +35,8 @@ public final class AppModel {
     public private(set) var isNowPlayingEnabled: Bool
     /// Set while pairing waits for the person at the Mac to allow this phone.
     public private(set) var pairingAwaitingMac: PairedMac?
+    /// True while the demo's simulated Mac stands in for a paired one.
+    public private(set) var isDemo: Bool
 
     public let sessionController: any RemoteSessionControlling
     public let container: SharedContainer
@@ -84,6 +86,7 @@ public final class AppModel {
         commandLog = CommandLog(container: container)
         artworkStore = ArtworkStore(container: container)
         hasSeenIntro = defaults.bool(forKey: "hasSeenIntro")
+        isDemo = (transport as? any DemoSwitching)?.isInDemo ?? false
         isNowPlayingEnabled = defaults.bool(forKey: "nowPlayingEnabled")
         pairedMac = pairingStore.pairedMac
         // Read into a local: @Observable makes commandsFromSystem computed, so it
@@ -169,6 +172,32 @@ public final class AppModel {
             pairingAwaitingMac = mac
             record("Waiting for \(mac.name) to allow this iPhone")
         }
+    }
+
+    /// Whether this build can offer the demo.
+    public var canTryDemo: Bool { transport is any DemoSwitching }
+
+    /// The simulated Mac, treated as paired. Only from the pairing screen:
+    /// a real pairing is never set aside for it.
+    public func startDemo() async {
+        guard pairedMac == nil, let switcher = transport as? any DemoSwitching else { return }
+        let mac = await switcher.startDemo()
+        defaults.set(true, forKey: DemoMode.key)
+        isDemo = true
+        pairingStore.pairedMac = mac
+        pairedMac = mac
+        record("Started the demo")
+        await transport.connect()
+    }
+
+    /// Ends the demo's Now Playing and goes back to pairing.
+    public func leaveDemo() async {
+        guard isDemo, let switcher = transport as? any DemoSwitching else { return }
+        await unpair()
+        await switcher.endDemo()
+        defaults.set(false, forKey: DemoMode.key)
+        isDemo = false
+        record("Left the demo")
     }
 
     public func reconnect() async {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Invented songs for exercising Now Playing before the Mac app exists.
+/// Invented songs, for development and for the demo App Review sees.
 public struct MockLibrary: Sendable {
     public let tracks: [TrackMetadata]
 

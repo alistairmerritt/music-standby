@@ -25,15 +25,17 @@ enum AppEnvironment {
     static func makeModel() -> AppModel {
         let container = SharedContainer.appGroup()
         let defaults = UserDefaults(suiteName: AppGroup.identifier) ?? .standard
+        let inDemo = DemoMode.resumes(defaults)
         let transport: any PlaybackTransport
         let registrar: any PushTokenRegistrar
         if let relayConfiguration {
             let credentials = KeychainCredentialStore()
             // Keep the remembered Mac in step with the relay credential: a Mac
             // left over from the development mock has none, so pair again.
+            // The demo's Mac has none either, and stays.
             let pairing = PairingStore(defaults: defaults)
             switch Result(catching: { try credentials.load() }) {
-            case .success(nil):
+            case .success(nil) where !inDemo:
                 pairing.pairedMac = nil
             case .success(let credential?) where pairing.pairedMac == nil:
                 // The Keychain outlives a deleted app; its settings don't.
@@ -56,7 +58,8 @@ enum AppEnvironment {
             registrar = MockPushTokenRegistrar(container: container)
         }
         return AppModel(
-            transport: transport,
+            // Any build can run the demo, for App Review.
+            transport: DemoCapableTransport(real: transport, startsInDemo: inDemo),
             sessionController: RemoteSessionController(),
             container: container,
             defaults: defaults,

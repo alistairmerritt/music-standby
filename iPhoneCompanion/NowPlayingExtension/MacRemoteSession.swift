@@ -13,7 +13,12 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
     let id: String
     private(set) var attributes: MacPlaybackAttributes
 
-    @ObservationIgnored private let services = ExtensionServices.make(container: SharedContainer.appGroup(), credentials: KeychainCredentialStore())
+    @ObservationIgnored private let services = ExtensionServices.make(
+        container: SharedContainer.appGroup(),
+        credentials: KeychainCredentialStore(),
+        // The demo's taps act on the simulated Mac, as development builds' do.
+        allowMock: BuildFlavor.isDebug || DemoMode.isOn(UserDefaults(suiteName: AppGroup.identifier) ?? .standard)
+    )
     @ObservationIgnored private let logger = Logger(subsystem: "com.alistairmerritt.MusicStandBy.NowPlaying", category: "session")
     /// The artwork now in the cache. `content` reads it, so a finished fetch
     /// makes the system read the session again and pick the image up.

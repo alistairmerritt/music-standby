@@ -15,7 +15,7 @@ What is verified on a real iPhone, and how, is in **[docs/ios/STATUS.md](../docs
 | `App/Shortcuts/` | The Shortcuts actions and App Shortcuts. Each goes straight to the relay through `MacRemote`, so it runs without opening the app |
 | `App/StationProbe.swift` | Development builds only: tries a queue followed by a station from the Mac, without anyone at the phone (below) |
 | `NowPlayingExtension/` | The remote media session extension: what iOS shows on the Lock Screen and in StandBy, and the commands from it |
-| `StandByKit/` | The logic, as a Swift package with its own tests: `AppModel`, the session lifecycle, `Handover` (Continue on iPhone and on Mac), `HandBackResponder` (Continue from iPhone), the relay client, credentials, reminders, and a mock Mac for development |
+| `StandByKit/` | The logic, as a Swift package with its own tests: `AppModel`, the session lifecycle, `Handover` (Continue on iPhone and on Mac), `HandBackResponder` (Continue from iPhone), the relay client, credentials, reminders, and a mock Mac for development and the demo |
 | `Signing/` | Info.plists and entitlements for both targets |
 | `scripts/archive.sh` | Archives for TestFlight, with the relay host built in |
 
@@ -38,6 +38,11 @@ xcrun devicectl device install app --device <udid> build/dd/Build/Products/Debug
 
 The relay host is a build setting, empty in the repository, so it never enters this public
 repository. Without it, a Debug build runs on the built-in mock Mac.
+
+Any build, TestFlight and the App Store included, offers **Try a Demo** on the pairing
+screen: a simulated Mac called Demo Mac, playing invented songs, so App Review can see the
+Lock Screen player without a Mac. Leave Demo goes back to pairing. The demo is remembered
+in the App Group, where the Now Playing extension reads it to act on the simulated Mac.
 
 **Before installing over a running copy, tap Stop Showing in the app.** Otherwise the Now
 Playing extension keeps running from the old build, its commands fail, and only a restart

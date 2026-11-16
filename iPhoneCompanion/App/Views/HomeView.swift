@@ -19,7 +19,9 @@ struct HomeView: View {
 
     var body: some View {
         Form {
-            Section("Now Playing") {
+            if model.isDemo { demoSection }
+
+            Section("Now Playing on Mac") {
                 if let attributes = model.attributes, let track = attributes.track {
                     NowPlayingRow(track: track, attributes: attributes, artwork: model.artwork) { seconds in
                         Task { await model.seek(to: seconds) }
@@ -38,9 +40,18 @@ struct HomeView: View {
                 }
             }
 
-            HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic)
+            if model.isDemo {
+                // Both directions need the real Mac's Music, so the demo only says what they do.
+                Section("Continue Listening") {
+                    Text("With Second Chair on your Mac, move what’s playing to Apple Music on this iPhone, and back again.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic)
+            }
             nowPlayingSection
-            remindersSection
+            // The reminder comes from the relay, which the demo doesn't use.
+            if !model.isDemo { remindersSection }
             macSection
 
             Section {
@@ -74,7 +85,8 @@ struct HomeView: View {
     private var nowPlayingSection: some View {
         Section {
             if model.sessionController.isActive {
-                LabeledContent("Status", value: model.sessionController.isSystemPrimary ? "Primary Session" : "Not Primary")
+                // The system's own words were "primary session"; this says what it means.
+                LabeledContent("Status", value: model.sessionController.isSystemPrimary ? "Showing" : "Another app is showing")
                 Button("Refresh Now Playing") {
                     Task { await model.activateNowPlaying() }
                 }
@@ -127,17 +139,33 @@ struct HomeView: View {
         }
     }
 
+    /// What the demo is, for App Review above all, and the way out.
+    private var demoSection: some View {
+        Section {
+            Text("You’re trying Second Chair with a simulated Mac. Its songs are invented, and nothing plays aloud.")
+            Button("Leave Demo") {
+                Task { await model.leaveDemo() }
+            }
+        } header: {
+            Text("Demo")
+        } footer: {
+            Text("Tap Show in Now Playing, then lock your iPhone or set it down to charge in StandBy.")
+        }
+    }
+
     /// The Mac alone: its buttons say what they act on, now that Continue
     /// Listening has a status of its own (16 November 2026).
     private var macSection: some View {
         Section("Mac") {
             LabeledContent("Name", value: model.pairedMac?.name ?? "")
             LabeledContent("Status", value: statusText)
-            Button("Reconnect to Mac") {
-                Task { await model.reconnect() }
-            }
-            Button("Unpair Mac", role: .destructive) {
-                isConfirmingUnpair = true
+            if !model.isDemo {
+                Button("Reconnect to Mac") {
+                    Task { await model.reconnect() }
+                }
+                Button("Unpair Mac", role: .destructive) {
+                    isConfirmingUnpair = true
+                }
             }
         }
     }
