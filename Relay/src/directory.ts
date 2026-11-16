@@ -3,12 +3,25 @@ import { sha256Hex } from "./crypto";
 import type { Env } from "./env";
 
 // One instance, named "directory": live pairing codes and rate limits. Codes
-// are stored as SHA-256 hashes and consumed by the first claim.
+// are stored as SHA-256 hashes and consumed by the first claim. A rate-limit
+// count is keyed by IP address, so it's deleted as soon as its window ends:
+// the alarm always wakes for the next code or count due to go (privacy
+// policy, 16 November 2026).
 
 interface CodeEntry {
   pairingID: string;
   expiresAt: number;
 }
+
+/** A rate-limit count. Before 16 November 2026 counts were bare numbers. */
+interface RateEntry {
+  count: number;
+  /** When the window ends and the count is deleted. */
+  until: number;
+}
+
+/** How long a bare-number count from before 16 November 2026 is kept: the longest window. */
+const LEGACY_RATE_KEEP_MS = 60 * 60 * 1000;
 
 export const CODE_TTL_MS = 5 * 60 * 1000;
 /** Wrong guesses inside one code lifetime before every live code is killed. */
@@ -22,6 +35,7 @@ export class Directory extends DurableObject<Env> {
     const hash = await sha256Hex(code);
     const expiresAt = now + CODE_TTL_MS;
     await this.ctx.storage.put({ [`code:${hash}`]: { pairingID, expiresAt } satisfies CodeEntry, [`pairing:${pairingID}`]: hash });
+    await this.scheduleCleanup(expiresAt);
     return expiresAt;
   }
 
@@ -49,11 +63,12 @@ export class Directory extends DurableObject<Env> {
   async hit(key: string, limit: number, windowSeconds: number, now = Date.now()): Promise<number> {
     const windowMs = windowSeconds * 1000;
     const start = Math.floor(now / windowMs) * windowMs;
+    const until = start + windowMs;
     const storageKey = `rate:${key}:${start}`;
-    const count = ((await this.ctx.storage.get<number>(storageKey)) ?? 0) + 1;
-    await this.ctx.storage.put(storageKey, count);
-    if (count === 1) await this.scheduleCleanup(start + windowMs);
-    return count > limit ? Math.ceil((start + windowMs - now) / 1000) : 0;
+    const count = rateCount(await this.ctx.storage.get<RateEntry | number>(storageKey)) + 1;
+    await this.ctx.storage.put(storageKey, { count, until } satisfies RateEntry);
+    if (count === 1) await this.scheduleCleanup(until);
+    return count > limit ? Math.ceil((until - now) / 1000) : 0;
   }
 
   /** Too many wrong codes: kill every live code. Each Mac must make a new one. */
@@ -76,17 +91,28 @@ export class Directory extends DurableObject<Env> {
     if (current === null || current > at) await this.ctx.storage.setAlarm(at + 1000);
   }
 
+  /** Deletes every count and code whose time is up, then wakes again for the next. */
   async alarm(): Promise<void> {
     const now = Date.now();
     const stale: string[] = [];
-    for (const [key, value] of await this.ctx.storage.list<unknown>({ prefix: "rate:" })) {
-      const start = Number(key.split(":").pop());
-      if (start + 3_600_000 < now) stale.push(key);
-      void value;
+    const later: number[] = [];
+    for (const [key, value] of await this.ctx.storage.list<RateEntry | number>({ prefix: "rate:" })) {
+      // An IPv6 address has colons of its own: the window's start is the last field.
+      const until = typeof value === "number" ? Number(key.split(":").pop()) + LEGACY_RATE_KEEP_MS : value.until;
+      if (until <= now) stale.push(key);
+      else later.push(until);
     }
     for (const [key, value] of await this.ctx.storage.list<CodeEntry>({ prefix: "code:" })) {
       if (value.expiresAt <= now) stale.push(key, `pairing:${value.pairingID}`);
+      else later.push(value.expiresAt);
     }
-    if (stale.length) await this.ctx.storage.delete(stale);
+    // Storage deletes at most 128 keys at a time.
+    for (let i = 0; i < stale.length; i += 128) await this.ctx.storage.delete(stale.slice(i, i + 128));
+    if (later.length) await this.ctx.storage.setAlarm(Math.min(...later) + 1000);
   }
+}
+
+function rateCount(entry: RateEntry | number | undefined): number {
+  if (entry === undefined) return 0;
+  return typeof entry === "number" ? entry : entry.count;
 }
