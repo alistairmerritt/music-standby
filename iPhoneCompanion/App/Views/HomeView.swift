@@ -19,7 +19,7 @@ struct HomeView: View {
 
     var body: some View {
         Form {
-            if model.isDemo { demoSection }
+            if isDemoLayout { demoSection }
 
             Section("Now Playing on Mac") {
                 if let attributes = model.attributes, let track = attributes.track {
@@ -40,7 +40,7 @@ struct HomeView: View {
                 }
             }
 
-            if model.isDemo {
+            if isDemoLayout {
                 // Both directions need the real Mac's Music, so the demo only says what they do.
                 Section("Continue Listening") {
                     Text("With Second Chair on your Mac, move what’s playing to Apple Music on this iPhone, and back again.")
@@ -51,7 +51,7 @@ struct HomeView: View {
             }
             nowPlayingSection
             // The reminder comes from the relay, which the demo doesn't use.
-            if !model.isDemo { remindersSection }
+            if !isDemoLayout { remindersSection }
             macSection
 
             Section {
@@ -139,6 +139,15 @@ struct HomeView: View {
         }
     }
 
+    /// The demo's own layout. Development builds' screenshots of the demo
+    /// show a paired Mac's instead.
+    private var isDemoLayout: Bool {
+        #if DEBUG
+        if ScreenshotMode.isOn { return false }
+        #endif
+        return model.isDemo
+    }
+
     /// What the demo is, for App Review above all, and the way out.
     private var demoSection: some View {
         Section {
@@ -159,7 +168,7 @@ struct HomeView: View {
         Section("Mac") {
             LabeledContent("Name", value: model.pairedMac?.name ?? "")
             LabeledContent("Status", value: statusText)
-            if !model.isDemo {
+            if !isDemoLayout {
                 Button("Reconnect to Mac") {
                     Task { await model.reconnect() }
                 }

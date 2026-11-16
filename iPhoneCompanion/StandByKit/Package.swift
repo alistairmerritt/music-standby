@@ -9,7 +9,12 @@ let package = Package(
     products: [.library(name: "StandByKit", targets: ["StandByKit"])],
     dependencies: [.package(path: "../../Shared/StandByProtocol")],
     targets: [
-        .target(name: "StandByKit", dependencies: [.product(name: "StandByProtocol", package: "StandByProtocol")]),
+        .target(
+            name: "StandByKit",
+            dependencies: [.product(name: "StandByProtocol", package: "StandByProtocol")],
+            // The demo's album covers, from madewithmerritt.com/second-chair/ (16 November 2026).
+            resources: [.copy("Resources/DemoArtwork")]
+        ),
         .testTarget(name: "StandByKitTests", dependencies: ["StandByKit"]),
     ]
 )

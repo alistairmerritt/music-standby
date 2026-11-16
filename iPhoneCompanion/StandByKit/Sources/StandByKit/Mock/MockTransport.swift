@@ -19,10 +19,21 @@ public actor MockTransport: PlaybackTransport {
     private var volume = 0.5
     private var outputs: [AudioOutput]
 
-    public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"), now: @escaping @Sendable () -> Date = { Date() }) {
+    /// Whether Music on the simulated Mac says it's connected, for Continue Listening. Nil says nothing, as Macs before 16 November 2026 did.
+    private let musicConnection: MusicConnection?
+
+    /// `startingAt`, `elapsed`, `isPlaying` and `musicConnection` set the scene
+    /// for development builds' screenshots; the demo starts at the first song.
+    public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"),
+                startingAt index: Int = 0, elapsed: TimeInterval = 0, isPlaying: Bool = true, musicConnection: MusicConnection? = nil,
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.library = library
         self.mac = mac
         self.now = now
+        self.index = library.tracks.indices.contains(index) ? index : 0
+        self.elapsed = elapsed
+        self.isPlaying = isPlaying
+        self.musicConnection = musicConnection
         anchor = now()
         // The Mac's own speakers carry its name, as Music's do.
         outputs = [
@@ -107,7 +118,7 @@ public actor MockTransport: PlaybackTransport {
     }
 
     public func artwork(id: String) async throws -> Data {
-        guard MockArtwork.isMockID(id), let data = MockArtwork.png(id: id) else { throw TransportError.artworkUnavailable }
+        guard MockArtwork.isMockID(id), let data = MockArtwork.data(id: id) else { throw TransportError.artworkUnavailable }
         return data
     }
 
@@ -127,7 +138,8 @@ public actor MockTransport: PlaybackTransport {
             canGoNext: true,
             canGoPrevious: true,
             volume: volume,
-            outputs: outputs
+            outputs: outputs,
+            musicConnection: musicConnection
         )))
     }
 }
