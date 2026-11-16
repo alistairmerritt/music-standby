@@ -8,7 +8,7 @@ import UIKit
 /// (16 November 2026).
 ///
 ///     xcrun devicectl device process launch --device <udid> --terminate-existing \
-///         com.alistairmerritt.MusicStandBy -- -screenshotDemo [-screenshotSong N] [-screenshotAt S] [-screenshotPaused]
+///         com.alistairmerritt.MusicStandBy -- -screenshotDemo [-screenshotSong N] [-screenshotAt S] [-screenshotPaused] [-screenshotIntro]
 ///
 /// `N` is 1 to 6, in `MockLibrary.standard`'s order. The song starts `S` seconds in (1:12 by default)
 /// and shows in Now Playing straight away. The interface stays portrait,
@@ -27,7 +27,8 @@ enum ScreenshotMode {
     static func makeModel() -> AppModel {
         let defaults = UserDefaults(suiteName: suite) ?? .standard
         defaults.removePersistentDomain(forName: suite)
-        defaults.set(true, forKey: "hasSeenIntro")
+        // -screenshotIntro: the first-launch screen, which otherwise shows once.
+        defaults.set(!showsIntro, forKey: "hasSeenIntro")
         defaults.set(true, forKey: DemoMode.key)
         PairingStore(defaults: defaults).pairedMac = mac
         let scratch = SharedContainer(directory: FileManager.default.temporaryDirectory.appending(path: "screenshots", directoryHint: .isDirectory))
@@ -48,7 +49,7 @@ enum ScreenshotMode {
 
     /// Shows the song in Now Playing once the simulated Mac has sent it.
     static func start(model: AppModel) {
-        guard isOn else { return }
+        guard isOn, !showsIntro else { return }
         Task {
             try? await Task.sleep(for: .seconds(1.5))
             // A fresh session, so nothing of the last launch's lingers.
@@ -65,6 +66,8 @@ enum ScreenshotMode {
                           duration: track.duration, artworkID: track.artworkID, catalogID: String(1_800_000_001 + offset))
         })
     }
+
+    private static var showsIntro: Bool { ProcessInfo.processInfo.arguments.contains("-screenshotIntro") }
 
     private static var songIndex: Int {
         number(after: "-screenshotSong").map { Int($0) - 1 } ?? 0
