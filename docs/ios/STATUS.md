@@ -6,6 +6,20 @@ Last updated 15 November 2026, on `main`. The newest work is at the top; older s
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Continue on iPhone for songs the Mac can't find (16 November 2026)
+
+Continue Listening said Ready but there was no Continue on iPhone for Daniel Caesar's
+"Japanese Denim" from a station. The Mac gets catalogue IDs for songs outside the library
+from Apple's public search, which doesn't have that song: by title it returns only covers, and
+it can't find Music's album for it ("Get You - Single") either. Now when the Mac sends no
+catalogue ID, Continue on iPhone (the app's button, the Shortcuts action, a CarPlay
+automation) looks the song up in the phone's Apple Music catalogue (MusicKit
+`MusicCatalogSearchRequest`) and takes the artist's own song of about the same length
+(`CatalogCandidate.best`: same title and lead artist, within 5 s). The button is offered for
+any song, saying the phone will look it up; a song not in the catalogue at all (an upload)
+still ends with "This song couldn't be found in Apple Music." Unit tests pass. **Not yet tried
+on the phone.**
+
 ## Artwork that never loaded on the Lock Screen (16 November 2026)
 
 About one song in ten, the Lock Screen and StandBy player's artwork spun forever. iOS was

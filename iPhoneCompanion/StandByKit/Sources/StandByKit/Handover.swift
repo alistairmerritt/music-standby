@@ -45,7 +45,11 @@ public struct Handover {
     /// song this phone took, where it stopped), it has nothing new, and
     /// Apple Music here, which has played on since, carries on instead.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
-        guard let message = latest(), let catalogID = message.track?.catalogID else { return .unavailable }
+        guard let message = latest(), let track = message.track else { return .unavailable }
+        guard let catalogID = await catalogID(for: track, with: player) else {
+            record("Continue on iPhone: \(track.title) isn't in the Apple Music catalogue")
+            return .unavailable
+        }
         if let mark = memory.load(), mark.isUntouched(by: message, at: now()), let here = player.nowPlaying() {
             if here.isPlaying {
                 record("Continue on iPhone: already playing here; nothing new on the Mac since it was continued")
@@ -73,6 +77,20 @@ public struct Handover {
             await followWithStation(seededBy: catalogID, songsAfter: queue.count - 1, with: player)
         }
         return outcome
+    }
+
+    /// The Mac's catalogue ID, or, when the Mac has none, the phone's own
+    /// Apple Music search. The Mac looks songs outside the library up in
+    /// Apple's public search, which doesn't have some (Daniel Caesar's
+    /// "Japanese Denim", 16 November 2026, only covers); the phone's Apple
+    /// Music catalogue does.
+    private func catalogID(for track: TrackMetadata, with player: any PhoneMusicPlaying) async -> String? {
+        if let id = track.catalogID { return id }
+        guard await player.requestAccess() else { return nil }
+        let candidates = await player.searchCatalog(title: track.title, artist: track.artist)
+        let found = CatalogCandidate.best(title: track.title, artist: track.artist, duration: track.duration, in: candidates)
+        record(found == nil ? "Continue on iPhone: no catalogue match here for \(track.title)" : "Continue on iPhone: found \(track.title) in the catalogue here")
+        return found?.id
     }
 
     /// With fewer songs than this to come on the Mac, a station made from

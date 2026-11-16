@@ -296,13 +296,10 @@ private struct HandoffSection: View {
                 }
                 if showsContinueOnPhone {
                     row("Continue on iPhone", symbol: "iphone",
-                        detail: "Continue listening on your iPhone, including your Up Next queue. Playback on your Mac will pause.",
+                        detail: model.macSongHasNoCatalogID
+                            ? "Your iPhone will look this song up in Apple Music, then continue it here with your Up Next queue. Playback on your Mac will pause."
+                            : "Continue listening on your iPhone, including your Up Next queue. Playback on your Mac will pause.",
                         enabled: !(phonePlaying && !macPlaying)) { await continueHere() }
-                } else if model.macSongHasNoCatalogID, status == .ready {
-                    // Ready, but not for this song: say why rather than show nothing.
-                    row("Continue on iPhone", symbol: "iphone",
-                        detail: "Your Mac couldn’t find this song in Apple Music. Try again with the next song, or in a minute.",
-                        enabled: false) { nil }
                 }
                 if showsContinueOnMac {
                     row("Continue on Mac", symbol: "laptopcomputer",
