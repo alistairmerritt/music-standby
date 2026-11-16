@@ -7,7 +7,11 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @Bindable var flow: OnboardingCoordinator
-    @Namespace private var artworkSpace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var artworkNamespace
+    /// The cover flies from the Mac picture to the Lock Screen picture; with
+    /// Reduce Motion the screens only crossfade.
+    private var artworkSpace: Namespace.ID? { reduceMotion ? nil : artworkNamespace }
 
     var body: some View {
         let facts = flow.facts(for: model)
@@ -56,14 +60,17 @@ private struct SetupScaffold<Content: View, Actions: View>: View {
                     if showsBack {
                         Button { flow.back() } label: { Image(systemName: "chevron.left").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
                             .accessibilityLabel("Back")
+                            .accessibilityShowsLargeContentViewer()
                     }
                     Spacer()
                     switch trailing {
                     case .help:
                         Button { flow.showingHelp = true } label: { Image(systemName: "questionmark.circle").font(.title3).frame(width: 44, height: 44) }
                             .accessibilityLabel("Setup Help")
+                            .accessibilityShowsLargeContentViewer()
                     case .notNow(let action):
                         Button("Not Now", action: action).padding(.horizontal, 8).frame(height: 44)
+                            .accessibilityShowsLargeContentViewer()
                     case .none:
                         EmptyView()
                     }
@@ -72,17 +79,44 @@ private struct SetupScaffold<Content: View, Actions: View>: View {
                     SetupProgress(step: step.index, of: step.of, names: step.of == 3 ? setupSteps : continueSteps)
                 }
             }
+            // Like a navigation bar: it stops growing, and a long press shows
+            // the large content viewer.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .padding(.horizontal, 8)
+            ActionsLayout { content } actions: { actions }
+        }
+    }
+}
+
+/// A scrolling body with its actions under it. The actions stay at the
+/// bottom, except at accessibility text sizes, where pinned buttons would take
+/// half the screen: there they follow the words and scroll with them.
+private struct ActionsLayout<Content: View, Actions: View>: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var spacing: CGFloat = 16
+    var horizontalPadding: CGFloat = 24
+    var topPadding: CGFloat = 8
+    @ViewBuilder var content: Content
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        let inline = typeSize.isAccessibilitySize
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) { content }
-                    .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 24)
-                    .frame(maxWidth: 560, alignment: .leading)
-                    .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: spacing) {
+                    content
+                    if inline { VStack(spacing: 4) { actions }.padding(.top, 8) }
+                }
+                .padding(.horizontal, horizontalPadding).padding(.top, topPadding).padding(.bottom, 24)
+                .frame(maxWidth: 560, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
-            VStack(spacing: 4) { actions }
-                .padding(.horizontal, 24).padding(.bottom, 8)
-                .frame(maxWidth: 560)
+            if !inline {
+                VStack(spacing: 4) { actions }
+                    .padding(.horizontal, 24).padding(.vertical, 8)
+                    .frame(maxWidth: 560)
+            }
         }
     }
 }
@@ -121,7 +155,7 @@ private struct DeviceLabel: View {
 
 private struct Headline: View {
     let text: String
-    var body: some View { Text(text).font(.title.bold()).fixedSize(horizontal: false, vertical: true) }
+    var body: some View { Text(text).font(.title.bold()).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader) }
 }
 
 private struct Explanation: View {
@@ -202,32 +236,23 @@ private struct WelcomeScene: View {
     private var record: DemoRecord { DemoRecord.welcome[index % DemoRecord.welcome.count] }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                NowPlayingPicture(artwork: record.cover, title: record.title, artist: record.artist, source: "MacBook Pro",
-                                  wall: record.wall, elapsed: elapsed, duration: record.duration)
-                    .id(record.id)
-                    .transition(.opacity)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Your Mac’s music.\nOn your iPhone.").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
-                    Text("Play, pause and skip from your Lock Screen and StandBy. When you head out, take it with you: same song, same place, same queue.")
-                        .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
+        ActionsLayout(spacing: 24, horizontalPadding: 20, topPadding: 16) {
+            NowPlayingPicture(artwork: record.cover, title: record.title, artist: record.artist, source: "MacBook Pro",
+                              wall: record.wall, elapsed: elapsed, duration: record.duration)
+                .id(record.id)
+                .transition(.opacity)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Your Mac’s music.\nOn your iPhone.").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Play, pause and skip from your Lock Screen and StandBy. When you head out, take it with you: same song, same place, same queue.")
+                    .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 24)
-            .frame(maxWidth: 560).frame(maxWidth: .infinity)
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 2) {
-                PrimaryButton("Get Started") { flow.getStarted(model) }
-                SecondaryButton("Explore the Demo") { flow.exploreDemo(model) }
-                Text("Requires Second Chair for Mac, a free download.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 4)
-            .frame(maxWidth: 560)
-            .background(.background)
+        } actions: {
+            PrimaryButton("Get Started") { flow.getStarted(model) }
+            SecondaryButton("Explore the Demo") { flow.exploreDemo(model) }
+            Text("Requires Second Chair for Mac, a free download.")
+                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
         }
         .background(alignment: .top) {
             LinearGradient(colors: [record.wall.top.opacity(0.32), .clear], startPoint: .top, endPoint: .center)
@@ -270,12 +295,12 @@ private struct MacAppScene: View {
             if flow.linkSent {
                 PrimaryButton("Continue") { flow.go(.pair) }
                 ShareLink(item: macAppURL, subject: Text("Second Chair for Mac"), message: Text("Second Chair for Mac, free.")) {
-                    Text("Send Again").frame(maxWidth: .infinity)
+                    Text("Send Again").multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderless).controlSize(.large).padding(.vertical, 8)
             } else {
                 ShareLink(item: macAppURL, subject: Text("Second Chair for Mac"), message: Text("Second Chair for Mac, free.")) {
-                    Text("Send Link to Mac").frame(maxWidth: .infinity)
+                    Text("Send Link to Mac").multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).buttonBorderShape(.capsule)
                 .simultaneousGesture(TapGesture().onEnded { flow.linkSent = true })
@@ -307,7 +332,7 @@ private struct PairScene: View {
             DeviceLabel(onMac: true, text: "On your Mac, then here")
             Headline(text: "Connect your iPhone.")
             Explanation(text: "On your Mac, click ♪ in the menu bar, then **\(MacMenuText.pairIPhone)** Type the six-digit code here.")
-            CodeField(code: $flow.code, invalid: problemText != nil, disabled: flow.isPairing) { flow.submitCode(model) }
+            CodeField(code: $flow.code, invalid: problemText != nil, disabled: flow.isPairing, paused: flow.showingHelp) { flow.submitCode(model) }
                 .padding(.top, 4)
             if let problemText {
                 Text(problemText).font(.subheadline).foregroundStyle(.red).frame(maxWidth: .infinity).multilineTextAlignment(.center)
@@ -367,6 +392,9 @@ private struct CodeField: View {
     @Binding var code: String
     var invalid: Bool
     var disabled: Bool
+    /// True while something covers the field, such as the help sheet: the
+    /// number pad steps aside and comes back after.
+    var paused = false
     var onComplete: () -> Void
     @FocusState private var focused: Bool
 
@@ -396,7 +424,8 @@ private struct CodeField: View {
         .frame(maxWidth: .infinity)
         .contentShape(.rect)
         .onTapGesture { focused = true }
-        .onAppear { focused = true }
+        .onAppear { focused = !paused }
+        .onChange(of: paused) { _, now in focused = !now }
     }
 
     private func box(_ i: Int) -> some View {
@@ -414,18 +443,29 @@ private struct CodeField: View {
 private struct PlayScene: View {
     @Environment(AppModel.self) private var model
     let flow: OnboardingCoordinator
-    let artworkSpace: Namespace.ID
+    let artworkSpace: Namespace.ID?
+
+    /// "Connected" while the Mac is reachable; only "paired" while it's
+    /// offline, so the line above the offline note doesn't contradict it.
+    private func connectedLine(mac: String, offline: Bool) -> String {
+        switch (flow.resumed, offline) {
+        case (false, false): "Connected to \(mac)"
+        case (false, true): "Paired with \(mac)"
+        case (true, false): "Welcome back. You’re connected."
+        case (true, true): "Welcome back. You’re paired."
+        }
+    }
 
     var body: some View {
         let mac = flow.macName(model)
         let offline = flow.isMacOffline(model)
         let playing = model.macIsPlaying
         SetupScaffold(flow: flow, showsBack: false, trailing: .notNow { flow.finish() }) {
-            Label(flow.resumed ? "Welcome back. You’re connected." : "Connected to \(mac)", systemImage: "checkmark.circle.fill")
+            Label(connectedLine(mac: mac, offline: offline), systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
                 .symbolRenderingMode(.multicolor)
                 .padding(.vertical, 8).padding(.horizontal, 12)
-                .background(Color.secondary.opacity(0.12), in: .capsule)
+                .background(Color.secondary.opacity(0.12), in: .rect(cornerRadius: 18, style: .continuous))
             MacPicture(part: .play(title: model.macTrack?.title, artist: model.macTrack?.artist, playing: playing),
                        artwork: model.artworkImage, artworkNamespace: artworkSpace)
             DeviceLabel(onMac: true, text: "On your Mac")
@@ -467,36 +507,29 @@ private struct PlayScene: View {
 private struct SuccessScene: View {
     @Environment(AppModel.self) private var model
     let flow: OnboardingCoordinator
-    let artworkSpace: Namespace.ID
+    let artworkSpace: Namespace.ID?
 
     var body: some View {
         let track = model.attributes?.track
         let title = track?.title ?? model.macTrack?.title ?? "Your music"
         let wall = ArtworkColours.wall(for: model.artwork)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    NowPlayingPicture(artwork: model.artworkImage ?? Image(systemName: "music.note"),
-                                      title: title, artist: track?.artist ?? model.macTrack?.artist ?? "",
-                                      source: flow.macName(model), wall: wall,
-                                      elapsed: model.attributes?.elapsed(at: context.date) ?? 0,
-                                      duration: track?.duration ?? model.macTrack?.duration ?? 1,
-                                      artworkNamespace: artworkSpace)
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("\(title) is on your Lock Screen.").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
-                    Text("Lock your iPhone to see it. Stand it on a charger, on its side, for StandBy.")
-                        .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
+        ActionsLayout(spacing: 24, horizontalPadding: 20, topPadding: 16) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                NowPlayingPicture(artwork: model.artworkImage ?? Image(systemName: "music.note"),
+                                  title: title, artist: track?.artist ?? model.macTrack?.artist ?? "",
+                                  source: flow.macName(model), wall: wall,
+                                  elapsed: model.attributes?.elapsed(at: context.date) ?? 0,
+                                  duration: track?.duration ?? model.macTrack?.duration ?? 1,
+                                  artworkNamespace: artworkSpace)
             }
-            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 24)
-            .frame(maxWidth: 560).frame(maxWidth: .infinity)
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("\(title) is on your Lock Screen.").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Lock your iPhone to see it. Stand it on a charger, on its side, for StandBy.")
+                    .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        } actions: {
             PrimaryButton("Continue") { flow.go(.continueIntro) }
-                .padding(.horizontal, 24).padding(.vertical, 8).frame(maxWidth: 560)
-                .background(.background)
         }
         .background(alignment: .top) {
             LinearGradient(colors: [wall.top.opacity(0.32), .clear], startPoint: .top, endPoint: .center).ignoresSafeArea()

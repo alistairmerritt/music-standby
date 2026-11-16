@@ -92,6 +92,7 @@ struct NowPlayingPicture: View {
         .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).strokeBorder(.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.25), radius: 20, y: 10)
         .environment(\.colorScheme, .dark)
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("A picture of the Lock Screen player: \(title) by \(artist), playing from \(source).")
     }
@@ -187,6 +188,7 @@ struct MacPicture: View {
         .frame(height: part == .menuBar ? 150 : nil)
         .frame(minHeight: 150)
         .clipShape(.rect(cornerRadius: 22, style: .continuous))
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(description)
     }
@@ -388,6 +390,7 @@ struct SeatsPicture: View {
         }
         .frame(height: 220)
         .clipShape(.rect(cornerRadius: 22, style: .continuous))
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("The song moving from your Mac to your iPhone, at the same point, with what’s up next.")
     }
