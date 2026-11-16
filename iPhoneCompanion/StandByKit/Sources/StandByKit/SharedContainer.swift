@@ -111,11 +111,11 @@ public struct ArtworkStore: Sendable {
     /// player's artwork kept spinning (16 November 2026).
     static let inFlight = InFlightArtwork()
 
-    /// Cached file, then generated placeholder art, then the relay. Without a
+    /// Cached file, then the demo's art, then the relay. Without a
     /// fetcher a URL is ignored: there is no trusted host to allow it against.
     public func resolve(id: String, remoteURL: URL?) async throws -> Data {
         if let cached = load(id: id) { return cached }
-        if MockArtwork.isMockID(id), let generated = MockArtwork.png(id: id) { return generated }
+        if MockArtwork.isMockID(id), let demo = MockArtwork.data(id: id) { return demo }
         guard let fetcher else { throw TransportError.artworkUnavailable }
         guard remoteURL != nil || ArtworkID.isValid(id) else { throw TransportError.artworkUnavailable }
         let store = self

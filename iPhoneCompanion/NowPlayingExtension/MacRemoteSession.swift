@@ -124,6 +124,10 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             duration: .finite(track.duration),
             artwork: track.artworkReference.map { artworkID in
                 Artwork(id: artworkID) { size in
+                    // The demo's covers are bundled JPEGs: handed over as they are.
+                    if let cover = MockArtwork.cover(id: artworkID) {
+                        return try ArtworkRepresentation(data: cover)
+                    }
                     // PNG encoding never finished inside this extension on iOS 27.2 and the
                     // system kept relaunching it, so generated art skips the encoder.
                     if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {

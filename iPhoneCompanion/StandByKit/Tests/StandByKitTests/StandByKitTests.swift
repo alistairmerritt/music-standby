@@ -154,7 +154,7 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
         let message = PlaybackMessage(revision: 7, isPlaying: false, elapsedTime: 3, capturedAt: Date(timeIntervalSince1970: 1), track: MockLibrary.standard.tracks[1], canGoNext: true, canGoPrevious: false)
         let mapped = MacPlaybackAttributes(mac: PairedMac(id: "x", name: "Mac"), message: message)
         #expect(mapped.id == "mac-x")
-        #expect(mapped.track?.title == "Second Glance")
+        #expect(mapped.track?.title == "Small Hours")
         #expect(mapped.canGoPrevious == false)
     }
 }
@@ -172,7 +172,7 @@ private func attributes(revision: UInt64 = 1, isPlaying: Bool = true, elapsed: T
     }
 
     @Test func previousWrapsToLastTrack() {
-        #expect(library.applying(.previous, to: attributes(), at: date).track?.id == "mock-3")
+        #expect(library.applying(.previous, to: attributes(), at: date).track?.id == "mock-6")
     }
 
     @Test func pauseCapturesExtrapolatedPosition() {

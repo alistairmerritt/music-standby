@@ -24,9 +24,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         reminders.refresh()
         #if DEBUG
         StationProbe.runIfAsked(model: model)
+        ScreenshotMode.start(model: model)
         #endif
         return true
     }
+
+    #if DEBUG
+    /// Screenshots are portrait, whichever way the phone lies.
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        ScreenshotMode.isOn ? .portrait : .allButUpsideDown
+    }
+    #endif
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Task { await AppEnvironment.uploadDeviceToken(deviceToken) }

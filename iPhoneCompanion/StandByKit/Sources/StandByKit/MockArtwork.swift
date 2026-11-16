@@ -3,10 +3,27 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Generates placeholder album art so no image files or network are needed.
+/// The demo's album art: a bundled cover for `mock-art-<name>` when there is
+/// one, otherwise a generated placeholder. No network either way.
 public enum MockArtwork {
     public static func isMockID(_ id: String) -> Bool {
         id.hasPrefix("mock-art-")
+    }
+
+    /// The image to hand over for a mock artwork ID: the bundled JPEG as it
+    /// is, so the Now Playing extension never decodes it, or a generated PNG.
+    public static func data(id: String) -> Data? {
+        cover(id: id) ?? png(id: id)
+    }
+
+    /// A cover in `Resources/DemoArtwork`, named after the ID without its prefix.
+    public static func cover(id: String) -> Data? {
+        guard isMockID(id) else { return nil }
+        let name = String(id.dropFirst("mock-art-".count))
+        guard !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }),
+              let url = Bundle.module.url(forResource: name, withExtension: "jpg", subdirectory: "DemoArtwork")
+        else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     public static func png(id: String, pixelSize: Int = 600) -> Data? {

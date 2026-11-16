@@ -23,6 +23,9 @@ enum AppEnvironment {
     }
 
     static func makeModel() -> AppModel {
+        #if DEBUG
+        if ScreenshotMode.isOn { return ScreenshotMode.makeModel() }
+        #endif
         let container = SharedContainer.appGroup()
         let defaults = UserDefaults(suiteName: AppGroup.identifier) ?? .standard
         let inDemo = DemoMode.resumes(defaults)

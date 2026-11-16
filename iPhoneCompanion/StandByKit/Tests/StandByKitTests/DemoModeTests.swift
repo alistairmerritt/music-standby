@@ -98,3 +98,39 @@ struct DemoModeTests {
         }
     }
 }
+
+/// The demo's covers: the website's six invented records, bundled (16 November 2026).
+struct DemoArtworkTests {
+    @Test func everyDemoSongHasItsBundledCover() throws {
+        for track in MockLibrary.standard.tracks {
+            let id = try #require(track.artworkID)
+            let data = try #require(MockArtwork.data(id: id), "\(track.title)")
+            // Handed over as the JPEG it is, never decoded or redrawn.
+            #expect(data.starts(with: [0xFF, 0xD8, 0xFF]), "\(track.title)")
+            let image = try #require(MockArtwork.decode(data))
+            #expect(image.width == 720)
+        }
+    }
+
+    @Test func aMockIDWithoutACoverStillGetsGeneratedArt() throws {
+        let data = try #require(MockArtwork.data(id: "mock-art-1"))
+        #expect(data.starts(with: [0x89, 0x50, 0x4E, 0x47]))
+        #expect(MockArtwork.data(id: "mock-art-../../secret") != nil)
+        #expect(MockArtwork.cover(id: "mock-art-../../secret") == nil)
+    }
+
+    @Test func theSimulatedMacCanStartMidSongWithMusicConnected() async throws {
+        let transport = MockTransport(startingAt: 3, elapsed: 72, isPlaying: false, musicConnection: .connected)
+        let events = await transport.subscribe()
+        await transport.connect()
+        for await event in events {
+            if case .playback(let message) = event {
+                #expect(message.track?.title == "Ticket Hall")
+                #expect(message.elapsedTime == 72)
+                #expect(message.state == .paused)
+                #expect(message.musicConnection == .connected)
+                return
+            }
+        }
+    }
+}

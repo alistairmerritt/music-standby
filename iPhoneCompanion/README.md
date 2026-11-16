@@ -43,6 +43,20 @@ Any build, TestFlight and the App Store included, offers **Try a Demo** on the p
 screen: a simulated Mac called Demo Mac, playing invented songs, so App Review can see the
 Lock Screen player without a Mac. Leave Demo goes back to pairing. The demo is remembered
 in the App Group, where the Now Playing extension reads it to act on the simulated Mac.
+Its six records and covers are the website's (`StandByKit/Sources/StandByKit/Resources/DemoArtwork`).
+
+**Screenshots** (Debug builds only) run the demo on a paired phone without unpairing it:
+
+```bash
+xcrun devicectl device process launch --device <udid> --terminate-existing \
+  com.alistairmerritt.MusicStandBy -- -screenshotDemo -screenshotSong 3
+```
+
+The song (1 to 6) starts 1:12 in and shows in Now Playing at once, laid out as a paired
+Mac's, in portrait whichever way the phone lies. `-screenshotPaused` pauses it. Capture with
+`xcrun devicectl device capture screenshot --device <udid> --destination shot.png`. Lock
+Screen controls do nothing meanwhile. To go back, tap Stop Showing, launch normally with
+`-showNowPlaying`.
 
 **Before installing over a running copy, tap Stop Showing in the app.** Otherwise the Now
 Playing extension keeps running from the old build, its commands fail, and only a restart
