@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         application.registerForRemoteNotifications()
         reminders.refresh()
         #if DEBUG
-        StationProbe.runIfAsked()
+        StationProbe.runIfAsked(model: model)
         #endif
         return true
     }
