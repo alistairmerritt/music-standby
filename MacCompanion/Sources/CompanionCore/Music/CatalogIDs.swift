@@ -16,15 +16,21 @@ public protocol CatalogIDLookup: Sendable {
 /// at once. It sends the album, lead artist and storefront, nothing else.
 public actor ITunesCatalogIDs: CatalogIDLookup {
     public static let searchesPerCall = 4
-    /// An album with no match isn't searched again for this long.
+    /// An album the catalogue doesn't have isn't searched again for this long.
     public static let missRetry: TimeInterval = 1800
+    /// A search that failed (no connection, or Apple's rate limit) is tried
+    /// again after this. It once counted as a miss for 30 minutes, so after a
+    /// burst of skips a song couldn't be continued on the iPhone for half an
+    /// hour (16 November 2026).
+    public static let failureRetry: TimeInterval = 60
 
     private let country: String
     private let fetch: @Sendable (URL) async throws -> Data
     private let now: @Sendable () -> Date
     private var found: [String: String] = [:]
     private var albums: [String: [ITunesCatalogArtwork.Song]] = [:]
-    private var missedAlbums: [String: Date] = [:]
+    /// When an album that wasn't found may be searched again.
+    private var retryAt: [String: Date] = [:]
 
     public init(country: String = Locale.current.region?.identifier ?? "US",
                 fetch: (@Sendable (URL) async throws -> Data)? = nil,
@@ -56,7 +62,7 @@ public actor ITunesCatalogIDs: CatalogIDLookup {
                 continue
             }
             let album = Self.albumKey(query)
-            if albums[album] == nil, missedAlbums[album].map({ now().timeIntervalSince($0) >= Self.missRetry }) ?? true,
+            if albums[album] == nil, retryAt[album].map({ now() >= $0 }) ?? true,
                searches < Self.searchesPerCall {
                 searches += 1
                 await search(album: album, for: query)
@@ -73,13 +79,13 @@ public actor ITunesCatalogIDs: CatalogIDLookup {
         do {
             let songs = try JSONDecoder().decode(ITunesCatalogArtwork.SearchResponse.self, from: try await fetch(url)).results
             if songs.isEmpty {
-                missedAlbums[key] = now()
+                retryAt[key] = now().addingTimeInterval(Self.missRetry)
             } else {
                 albums[key] = songs
-                missedAlbums[key] = nil
+                retryAt[key] = nil
             }
         } catch {
-            missedAlbums[key] = now()
+            retryAt[key] = now().addingTimeInterval(Self.failureRetry)
         }
     }
 

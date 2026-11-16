@@ -255,6 +255,24 @@ private func catalogueSong(_ title: String, _ millis: Int, _ id: Int, album: Str
         _ = await lookup.catalogIDs(for: Array(six.prefix(1)))
         #expect(catalogue.searches.withLock { $0.count } == 7, "a miss is tried again after half an hour")
     }
+
+    /// A failed search isn't a miss: after a burst of skips Apple's search
+    /// can refuse for a while, and the song is in the catalogue (16 Nov 2026).
+    @Test func aFailedSearchIsTriedAgainAfterAMinute() async {
+        let attempts = OSAllocatedUnfairLock(initialState: 0)
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1000))
+        let lookup = ITunesCatalogIDs(country: "AU", fetch: { _ in
+            attempts.withLock { $0 += 1 }
+            throw URLError(.badServerResponse)
+        }, now: { clock.withLock { $0 } })
+        let song = [query("Song", 200, album: "Album")]
+        _ = await lookup.catalogIDs(for: song)
+        _ = await lookup.catalogIDs(for: song)
+        #expect(attempts.withLock { $0 } == 1, "not again straight away")
+        clock.withLock { $0 += ITunesCatalogIDs.failureRetry + 1 }
+        _ = await lookup.catalogIDs(for: song)
+        #expect(attempts.withLock { $0 } == 2, "again after a minute, not half an hour")
+    }
 }
 
 private struct FixedRemote: MusicRemoteReading {
