@@ -30,6 +30,8 @@ export interface Env {
   HAND_BACK_NOTIFY_MS?: string;
   /** Continue from iPhone: when a request is forgotten. Default 120000. */
   HAND_BACK_EXPIRY_MS?: string;
+  /** A pairing whose Mac hasn't connected for this long is deleted, as if unpaired. Default 90 days; 0 keeps pairings for good. */
+  ABANDON_AFTER_MS?: string;
 }
 
 export function directory(env: Env) {

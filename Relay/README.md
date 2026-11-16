@@ -82,6 +82,7 @@ from `playback.outputs` in `session`.
 | `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
 | `PUBLIC_BASE_URL` | the origin the Mac connected to | Base of artwork URLs |
 | `ACK_TIMEOUT_MS`, `DISCONNECT_GRACE_MS`, `PAUSED_TIMEOUT_MS` | 1200, 60000, 0 | `PAUSED_TIMEOUT_MS` 0 never ends a paused session |
+| `ABANDON_AFTER_MS` | 7776000000 (90 days) | A pairing whose Mac hasn't connected for this long is deleted, as if unpaired. 0 keeps pairings for good. The privacy policy promises 90 days |
 
 ## Deployment
 
@@ -217,8 +218,14 @@ npx wrangler deploy
 - **Pairing:** a code is six CSPRNG digits, valid for five minutes, used once, stored hashed,
   and grants nothing until the Mac approves.
 - **Rate limits:** ten claims a minute and five pairings an hour per address. Five wrong codes
-  clear every live code.
-- **Logs:** tokens, codes and push tokens are never logged; ids are logged truncated.
+  clear every live code. A count is keyed by the IP address and deleted when its window ends.
+- **Logs:** tokens, codes, push tokens and device names are never logged; ids are logged
+  truncated.
+- **Retention** (what madewithmerritt.com/privacy/#second-chair promises): only the latest
+  playback state is kept, with the artwork of the last 64 songs. Unpairing from either side
+  deletes everything for the pairing at once. A pairing whose Mac hasn't connected for 90 days
+  is deleted the same way. Pairings from before 16 November 2026 get that deadline the next
+  time their Mac connects or disconnects.
 
 ## APNs status
 

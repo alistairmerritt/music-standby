@@ -188,13 +188,23 @@ export class Pairing extends DurableObject<Env> {
   private get handBackLifetime(): number {
     return Number(this.env.HAND_BACK_EXPIRY_MS ?? 2 * 60_000);
   }
+  /**
+   * A pairing whose Mac hasn't connected for this long is deleted, as if
+   * unpaired, so apps deleted without unpairing don't leave their data here
+   * for good (privacy policy, 16 November 2026).
+   */
+  private get abandonAfter(): number {
+    return Number(this.env.ABANDON_AFTER_MS ?? 90 * 24 * 60 * 60_000);
+  }
 
   // MARK: RPC from the Worker
 
   async create(pairingID: string, mac: DeviceIdentity, macTokenHash: string): Promise<void> {
     const record: PairingRecord = { pairingID, mac, macTokenHash, artworkKey: hex(randomBytes(32)), createdAt: Date.now() };
     await this.ctx.storage.put("record", record);
-    console.log(`pairing ${short(pairingID)}: created for "${mac.name}"`);
+    // Device names stay out of the logs.
+    console.log(`pairing ${short(pairingID)}: created`);
+    await this.scheduleAlarm();
   }
 
   /** Records a claim made with this pairing's code. Nil if the pairing is gone. */
@@ -206,7 +216,7 @@ export class Pairing extends DurableObject<Env> {
     await this.ctx.storage.put("claims", claims);
     this.sendToMac({ type: "pair-request", request: { claimID, phone, expiresAt: iso(expiresAt) } });
     await this.scheduleAlarm();
-    console.log(`pairing ${short(record.pairingID)}: claim from "${phone.name}" waiting for the Mac`);
+    console.log(`pairing ${short(record.pairingID)}: claim waiting for the Mac`);
     return { id: record.mac.id, name: record.mac.name };
   }
 
@@ -311,7 +321,7 @@ export class Pairing extends DurableObject<Env> {
     record.phoneTokenHash = await sha256Hex(phoneToken);
     await this.ctx.storage.put("record", record);
     this.sendToMac({ type: "paired", phone: claim.phone });
-    console.log(`pairing ${short(record.pairingID)}: paired with "${claim.phone.name}"`);
+    console.log(`pairing ${short(record.pairingID)}: paired with a phone`);
     return json(200, { status: "approved", pairingID: record.pairingID, phoneToken, mac: { id: record.mac.id, name: record.mac.name } });
   }
 
@@ -327,7 +337,7 @@ export class Pairing extends DurableObject<Env> {
     console.log(`pairing: claim ${short(claimID)} ${claim.status} on the Mac`);
   }
 
-  private async unpair(record: PairingRecord, by: "mac" | "phone"): Promise<Response> {
+  private async unpair(record: PairingRecord, by: "mac" | "phone" | "relay"): Promise<Response> {
     await this.endSession("unpaired");
     for (const ws of this.ctx.getWebSockets("mac")) {
       try {
@@ -340,7 +350,8 @@ export class Pairing extends DurableObject<Env> {
     await directory(this.env).removeCodeFor(record.pairingID);
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
-    console.log(`pairing ${short(record.pairingID)}: unpaired by the ${by}; all credentials revoked`);
+    const why = by === "relay" ? "deleted after its Mac stayed away too long" : `unpaired by the ${by}`;
+    console.log(`pairing ${short(record.pairingID)}: ${why}; all credentials revoked`);
     return empty();
   }
 
@@ -364,6 +375,7 @@ export class Pairing extends DurableObject<Env> {
       await this.ctx.storage.put("record", record);
     }
     await this.ctx.storage.delete(["macDisconnectedAt", "goodbye"]);
+    await this.ctx.storage.put("macLastSeenAt", Date.now());
     await this.scheduleAlarm();
     console.log(`pairing ${short(record.pairingID)}: Mac connected`);
     return new Response(null, { status: 101, webSocket: client });
@@ -431,7 +443,8 @@ export class Pairing extends DurableObject<Env> {
     } else {
       await this.ctx.storage.put("macDisconnectedAt", Date.now());
     }
-    await this.scheduleAlarm();
+    await this.ctx.storage.put("macLastSeenAt", Date.now());
+    await this.scheduleAlarm(ws);
     console.log(`pairing: Mac disconnected (${code})${said ? " after goodbye" : ""}`);
   }
 
@@ -1029,6 +1042,14 @@ export class Pairing extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     const now = Date.now();
+    const abandonedAt = await this.abandonedAt();
+    if (abandonedAt !== undefined && now >= abandonedAt) {
+      const record = await this.record();
+      if (record) {
+        await this.unpair(record, "relay");
+        return;
+      }
+    }
     const session = await this.ctx.storage.get<Session>("session");
     const disconnectedAt = await this.ctx.storage.get<number>("macDisconnectedAt");
     if (session && !session.macAway && disconnectedAt && now - disconnectedAt >= this.disconnectGrace) {
@@ -1054,8 +1075,24 @@ export class Pairing extends DurableObject<Env> {
     await this.scheduleAlarm();
   }
 
-  private async scheduleAlarm(): Promise<void> {
+  /**
+   * When the pairing counts as abandoned: its Mac last seen `abandonAfter`
+   * ago, or created that long ago and never seen. Never while the Mac is
+   * connected. `closing` is a socket on its way out.
+   */
+  private async abandonedAt(closing?: WebSocket): Promise<number | undefined> {
+    if (this.abandonAfter <= 0) return undefined;
+    if (this.ctx.getWebSockets("mac").some((s) => s !== closing && s.readyState === WebSocket.OPEN)) return undefined;
+    const record = await this.record();
+    if (!record) return undefined;
+    const seen = (await this.ctx.storage.get<number>("macLastSeenAt")) ?? record.createdAt;
+    return seen + this.abandonAfter;
+  }
+
+  private async scheduleAlarm(closing?: WebSocket): Promise<void> {
     const deadlines: number[] = [];
+    const abandonedAt = await this.abandonedAt(closing);
+    if (abandonedAt !== undefined) deadlines.push(abandonedAt);
     const session = await this.ctx.storage.get<Session>("session");
     const disconnectedAt = await this.ctx.storage.get<number>("macDisconnectedAt");
     if (session && !session.macAway && disconnectedAt) deadlines.push(disconnectedAt + this.disconnectGrace);

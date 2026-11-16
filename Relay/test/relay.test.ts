@@ -6,6 +6,7 @@ import {
   createMac,
   directoryStub,
   editStorage,
+  macDevice,
   newCommandID,
   pairPhone,
   pairingStub,
@@ -951,5 +952,130 @@ describe("continue from iPhone (hand-back)", () => {
     expect(forwarded.command).toEqual(command);
     mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 1 } });
     expect((await answer).status).toBe(200);
+  });
+});
+
+// What the privacy policy promises (16 November 2026).
+describe("retention", () => {
+  const DAY = 24 * 60 * 60_000;
+
+  it("deletes an address's pairing-attempt count when its window ends, and wakes for the next", async () => {
+    const ip = "198.51.100.77";
+    await call("POST", "/v1/pairing/claim", { body: { code: "123456", phone: phoneDevice }, headers: { "CF-Connecting-IP": ip } });
+    await runInDurableObject(directoryStub(), async (_instance, state) => {
+      const counts = await state.storage.list<{ count: number; until: number }>({ prefix: `rate:claim:${ip}:` });
+      expect(counts.size).toBe(1);
+      const [key, entry] = [...counts][0];
+      expect(entry.count).toBe(1);
+      // A claim's window is a minute: the alarm is due by then.
+      expect(entry.until - Date.now()).toBeLessThanOrEqual(60_000);
+      const alarm = await state.storage.getAlarm();
+      expect(alarm).not.toBeNull();
+      expect(alarm!).toBeLessThanOrEqual(entry.until + 1000);
+      await state.storage.put(key, { ...entry, until: Date.now() - 1 });
+    });
+    await runDurableObjectAlarm(directoryStub());
+    await runInDurableObject(directoryStub(), async (_instance, state) => {
+      expect((await state.storage.list({ prefix: `rate:claim:${ip}:` })).size).toBe(0);
+    });
+  });
+
+  it("deletes a count stored before counts carried their window, an hour after it began", async () => {
+    const old = `rate:create:2001:db8::7:${Date.now() - 2 * 60 * 60_000}`;
+    const recent = `rate:create:2001:db8::8:${Date.now() - 10 * 60_000}`;
+    await runInDurableObject(directoryStub(), async (_instance, state) => {
+      await state.storage.put({ [old]: 3, [recent]: 1 });
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    await runDurableObjectAlarm(directoryStub());
+    await runInDurableObject(directoryStub(), async (_instance, state) => {
+      expect(await state.storage.get(old)).toBeUndefined();
+      expect(await state.storage.get(recent)).toBe(1);
+      // Still held, so the alarm comes back for it.
+      expect(await state.storage.getAlarm()).not.toBeNull();
+    });
+  });
+
+  it("wakes to delete a pairing code when it expires", async () => {
+    const { macToken } = await createMac();
+    await call("POST", "/v1/pairing/code", { token: macToken });
+    await runInDurableObject(directoryStub(), async (_instance, state) => {
+      const alarm = await state.storage.getAlarm();
+      expect(alarm).not.toBeNull();
+      expect(alarm! - Date.now()).toBeLessThanOrEqual(5 * 60_000 + 1000);
+    });
+  });
+
+  it("deletes a pairing whose Mac has been away for 90 days", async () => {
+    const { mac, macToken, pairingID, phoneToken } = await pairedSetup();
+    mac.close(1001);
+    await new Promise((r) => setTimeout(r, 50));
+    await editStorage(pairingID, async (storage) => {
+      expect(await storage.getAlarm()).not.toBeNull();
+      await storage.put("macLastSeenAt", Date.now() - 90 * DAY - 1000);
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await call("GET", "/v1/session", { token: phoneToken })).status).toBe(401);
+    expect((await call("POST", "/v1/pairing/code", { token: macToken })).status).toBe(401);
+    await editStorage(pairingID, async (storage) => {
+      expect((await storage.list()).size).toBe(0);
+      expect(await storage.getAlarm()).toBeNull();
+    });
+  });
+
+  it("keeps a pairing whose Mac was away for less than 90 days, and wakes when the 90 are up", async () => {
+    const { mac, pairingID, phoneToken } = await pairedSetup();
+    mac.close(1001);
+    await new Promise((r) => setTimeout(r, 50));
+    const seen = Date.now() - 89 * DAY;
+    await editStorage(pairingID, async (storage) => {
+      await storage.put("macLastSeenAt", seen);
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await call("GET", "/v1/session", { token: phoneToken })).status).toBe(200);
+    await editStorage(pairingID, async (storage) => {
+      expect(await storage.getAlarm()).toBe(seen + 90 * DAY);
+    });
+  });
+
+  it("never deletes a pairing while its Mac is connected", async () => {
+    const { pairingID, phoneToken } = await pairedSetup();
+    await editStorage(pairingID, async (storage) => {
+      await storage.put("macLastSeenAt", Date.now() - 365 * DAY);
+      await storage.setAlarm(Date.now() + 60_000);
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await call("GET", "/v1/session", { token: phoneToken })).status).toBe(200);
+  });
+
+  it("deletes a pairing whose Mac never connected, 90 days after it was made", async () => {
+    const { macToken, pairingID } = await createMac();
+    await editStorage(pairingID, async (storage) => {
+      const record = (await storage.get<{ createdAt: number }>("record"))!;
+      expect(await storage.getAlarm()).toBe(record.createdAt + 90 * DAY);
+      await storage.put("record", { ...record, createdAt: Date.now() - 90 * DAY - 1000 });
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect((await call("POST", "/v1/pairing/code", { token: macToken })).status).toBe(401);
+  });
+
+  it("keeps device names out of the logs", async () => {
+    const logged: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    };
+    try {
+      const { mac } = await pairedSetup();
+      mac.close(1000);
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      console.log = original;
+    }
+    expect(logged.length).toBeGreaterThan(0);
+    for (const line of logged) {
+      expect(line).not.toContain(macDevice.name);
+      expect(line).not.toContain(phoneDevice.name);
+    }
   });
 });
