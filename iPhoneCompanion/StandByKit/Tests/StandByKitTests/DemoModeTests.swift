@@ -134,3 +134,31 @@ struct DemoArtworkTests {
         }
     }
 }
+
+/// The simulated Mac's songs follow on by themselves instead of stopping at
+/// the end. Only while the app runs, or when it next does: the Now Playing
+/// extension is suspended between updates, so a timer there never fires
+/// (tried on an iPhone, 16 November 2026).
+struct DemoSongsFollowOnTests {
+    @Test func theSimulatedMacPlaysTheNextSongWhenOneEnds() async throws {
+        let short = MockLibrary(tracks: [
+            TrackMetadata(id: "a", title: "A", artist: "X", album: "Y", duration: 0.2),
+            TrackMetadata(id: "b", title: "B", artist: "X", album: "Y", duration: 30),
+        ])
+        let transport = MockTransport(library: short)
+        let events = await transport.subscribe()
+        await transport.connect()
+        var titles: [String] = []
+        for await event in events {
+            if case .playback(let message) = event, let title = message.track?.title {
+                titles.append(title)
+                if title == "B" {
+                    #expect(message.state == .playing)
+                    #expect(message.elapsedTime < 1)
+                    break
+                }
+            }
+        }
+        #expect(titles == ["A", "B"])
+    }
+}

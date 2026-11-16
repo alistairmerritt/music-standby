@@ -19,6 +19,10 @@ public actor MockTransport: PlaybackTransport {
     private var volume = 0.5
     private var outputs: [AudioOutput]
 
+    /// Moves on to the next song when this one ends, as a Mac does.
+    private var songEnd: Task<Void, Never>?
+    private let sleep: @Sendable (TimeInterval) async throws -> Void
+
     /// Whether Music on the simulated Mac says it's connected, for Continue Listening. Nil says nothing, as Macs before 16 November 2026 did.
     private let musicConnection: MusicConnection?
 
@@ -28,7 +32,8 @@ public actor MockTransport: PlaybackTransport {
     /// above the last, or the Now Playing extension keeps the old state.
     public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"),
                 startingAt index: Int = 0, elapsed: TimeInterval = 0, isPlaying: Bool = true, musicConnection: MusicConnection? = nil,
-                revision: UInt64 = 0, now: @escaping @Sendable () -> Date = { Date() }) {
+                revision: UInt64 = 0, now: @escaping @Sendable () -> Date = { Date() },
+                sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) {
         self.library = library
         self.mac = mac
         self.now = now
@@ -37,6 +42,7 @@ public actor MockTransport: PlaybackTransport {
         self.isPlaying = isPlaying
         self.musicConnection = musicConnection
         self.revision = revision
+        self.sleep = sleep
         anchor = now()
         // The Mac's own speakers carry its name, as Music's do.
         outputs = [
@@ -67,6 +73,8 @@ public actor MockTransport: PlaybackTransport {
 
     public func disconnect() async {
         isConnected = false
+        songEnd?.cancel()
+        songEnd = nil
         hub.send(.connection(.disconnected))
     }
 
@@ -130,7 +138,36 @@ public actor MockTransport: PlaybackTransport {
         return min(elapsed + running, library.tracks[index].duration)
     }
 
+    /// The songs follow on by themselves while playing: when one ends, the
+    /// next starts, carrying on for any time since (16 November 2026).
+    private func scheduleSongEnd() {
+        songEnd?.cancel()
+        songEnd = nil
+        guard isConnected, isPlaying else { return }
+        let remaining = max(0, library.tracks[index].duration - position(at: now()))
+        let sleep = self.sleep
+        songEnd = Task { [weak self] in
+            try? await sleep(remaining)
+            guard !Task.isCancelled else { return }
+            await self?.songEnded()
+        }
+    }
+
+    private func songEnded() {
+        let date = now()
+        var position = elapsed + (isPlaying ? max(0, date.timeIntervalSince(anchor)) : 0)
+        guard isConnected, isPlaying, position >= library.tracks[index].duration else { return scheduleSongEnd() }
+        while position >= library.tracks[index].duration {
+            position -= library.tracks[index].duration
+            index = library.index(after: index)
+        }
+        elapsed = position
+        anchor = date
+        emitPlayback()
+    }
+
     private func emitPlayback() {
+        scheduleSongEnd()
         revision += 1
         hub.send(.playback(PlaybackMessage(
             revision: revision,
