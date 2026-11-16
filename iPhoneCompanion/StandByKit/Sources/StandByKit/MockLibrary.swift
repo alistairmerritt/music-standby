@@ -10,10 +10,12 @@ public struct MockLibrary: Sendable {
     }
 
     /// The website's six invented records, with their covers (16 November 2026).
+    /// Hollow Coast and Juniper Hall turned out to be real artists, so Low Sun
+    /// is now by Drift Hotel, and Rooftop Season replaces Overcast, Brightening.
     public static let standard = MockLibrary(tracks: [
-        TrackMetadata(id: "mock-1", title: "Low Sun", artist: "Hollow Coast", album: "Breakwater", duration: 214, artworkID: "mock-art-low-sun"),
+        TrackMetadata(id: "mock-1", title: "Low Sun", artist: "Drift Hotel", album: "Breakwater", duration: 214, artworkID: "mock-art-low-sun"),
         TrackMetadata(id: "mock-2", title: "Small Hours", artist: "Fen Lights", album: "Lit Windows", duration: 252, artworkID: "mock-art-small-hours"),
-        TrackMetadata(id: "mock-3", title: "Overcast, Brightening", artist: "Juniper Hall", album: "Weather for Walking", duration: 231, artworkID: "mock-art-overcast"),
+        TrackMetadata(id: "mock-3", title: "Rooftop Season", artist: "Tavi Rhodes", album: "Daylight Savings", duration: 188, artworkID: "mock-art-rooftop-season"),
         TrackMetadata(id: "mock-4", title: "Ticket Hall", artist: "Polly Atlas", album: "Concourse", duration: 178, artworkID: "mock-art-ticket-hall"),
         TrackMetadata(id: "mock-5", title: "Tidewater", artist: "Brennan & Hale", album: "Estuary", duration: 306, artworkID: "mock-art-tidewater"),
         TrackMetadata(id: "mock-6", title: "Allotment", artist: "The Small Holdings", album: "Seed Catalogue", duration: 197, artworkID: "mock-art-allotment"),
