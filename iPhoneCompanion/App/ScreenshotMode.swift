@@ -8,9 +8,9 @@ import UIKit
 /// (16 November 2026).
 ///
 ///     xcrun devicectl device process launch --device <udid> --terminate-existing \
-///         com.alistairmerritt.MusicStandBy -- -screenshotDemo [-screenshotSong N] [-screenshotPaused]
+///         com.alistairmerritt.MusicStandBy -- -screenshotDemo [-screenshotSong N] [-screenshotAt S] [-screenshotPaused]
 ///
-/// `N` is 1 to 6, in `MockLibrary.standard`'s order. The song starts 1:12 in
+/// `N` is 1 to 6, in `MockLibrary.standard`'s order. The song starts `S` seconds in (1:12 by default)
 /// and shows in Now Playing straight away. The interface stays portrait,
 /// even on a charger on its side. Settings live in their own defaults suite
 /// and the Keychain is never read, so the real pairing is untouched; push
@@ -31,7 +31,7 @@ enum ScreenshotMode {
         defaults.set(true, forKey: DemoMode.key)
         PairingStore(defaults: defaults).pairedMac = mac
         let scratch = SharedContainer(directory: FileManager.default.temporaryDirectory.appending(path: "screenshots", directoryHint: .isDirectory))
-        let demo = MockTransport(library: library, mac: mac, startingAt: songIndex, elapsed: 72,
+        let demo = MockTransport(library: library, mac: mac, startingAt: songIndex, elapsed: number(after: "-screenshotAt") ?? 72,
                                  isPlaying: !ProcessInfo.processInfo.arguments.contains("-screenshotPaused"),
                                  musicConnection: .connected,
                                  // Above any earlier launch's, so the Lock Screen takes this one.
@@ -67,10 +67,13 @@ enum ScreenshotMode {
     }
 
     private static var songIndex: Int {
+        number(after: "-screenshotSong").map { Int($0) - 1 } ?? 0
+    }
+
+    private static func number(after flag: String) -> Double? {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let flag = arguments.firstIndex(of: "-screenshotSong"), arguments.indices.contains(flag + 1),
-              let number = Int(arguments[flag + 1]) else { return 0 }
-        return number - 1
+        guard let at = arguments.firstIndex(of: flag), arguments.indices.contains(at + 1) else { return nil }
+        return Double(arguments[at + 1])
     }
 }
 #endif
