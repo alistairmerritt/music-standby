@@ -59,6 +59,17 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
 
     func resume() { player.play() }
 
+    /// Apple Music's own catalogue search (MusicKit), for a song the Mac has
+    /// no catalogue ID for: Apple's public search, which the Mac uses,
+    /// doesn't have every song (16 November 2026).
+    func searchCatalog(title: String, artist: String) async -> [CatalogCandidate] {
+        guard access == .allowed else { return [] }
+        var request = MusicCatalogSearchRequest(term: "\(title) \(artist)", types: [Song.self])
+        request.limit = 15
+        guard let songs = try? await request.response().songs else { return [] }
+        return songs.map { CatalogCandidate(id: $0.id.rawValue, title: $0.title, artist: $0.artistName, duration: $0.duration) }
+    }
+
     /// For the Continue Listening row (16 November 2026).
     var access: AppleMusicAccess {
         switch MPMediaLibrary.authorizationStatus() {

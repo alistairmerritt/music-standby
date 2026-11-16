@@ -65,6 +65,6 @@ import Testing
         #expect(h.model.attributes == nil, "still nothing in Now Playing without a session")
         #expect(!h.model.macSongHasNoCatalogID)
         await h.transport.emit(.playback(message(revision: 4, state: .playing, track: track("t2"))))
-        await eventually("a song without an ID says so") { h.model.macSongHasNoCatalogID && !h.model.canContinueOnPhone }
+        await eventually("a song without an ID is still offered, to be looked up here") { h.model.macSongHasNoCatalogID && h.model.canContinueOnPhone }
     }
 }

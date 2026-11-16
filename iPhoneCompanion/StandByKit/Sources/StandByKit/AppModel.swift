@@ -24,9 +24,9 @@ public final class AppModel {
     /// state, with or without a session. Nil until a Mac that says has sent
     /// a state (16 November 2026).
     public private(set) var macMusicConnection: MusicConnection?
-    /// The Mac has a song, but no Apple Music catalogue ID for it, so it
-    /// can't be continued here: a song outside the catalogue, or one the
-    /// Mac couldn't find there yet (16 November 2026).
+    /// The Mac has a song, but no Apple Music catalogue ID for it: Continue
+    /// on iPhone looks it up in the phone's Apple Music first (16 November
+    /// 2026).
     public private(set) var macSongHasNoCatalogID = false
     public private(set) var artwork: CGImage?
     public private(set) var pushTokens = PushTokens()
@@ -339,7 +339,8 @@ public final class AppModel {
         latestMessage = message
         macMusicConnection = message.musicConnection
         outputs = message.outputs ?? []
-        canContinueOnPhone = message.track?.catalogID != nil
+        // Any song: one the Mac has no catalogue ID for is looked up here.
+        canContinueOnPhone = message.track != nil
         macSongHasNoCatalogID = message.track != nil && message.track?.catalogID == nil
         // A relay names every session. Showing one under a made-up name would
         // leave the Lock Screen with controls the relay refuses.

@@ -27,6 +27,12 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         resumes += 1
         current?.isPlaying = true
     }
+    var catalog: [CatalogCandidate] = []
+    private(set) var searches: [String] = []
+    func searchCatalog(title: String, artist: String) async -> [CatalogCandidate] {
+        searches.append("\(title) \(artist)")
+        return catalog
+    }
     var station: StationAppend = .added
     private(set) var stationSeeds: [String] = []
     func appendStation(seededBy catalogID: String) async -> StationAppend {
@@ -52,7 +58,7 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         let task = await h.run()
         await h.connected()
         await h.transport.emit(.playback(m))
-        await eventually("catalogue ID seen") { h.model.canContinueOnPhone == (m.track?.catalogID != nil) && h.controller.isActive }
+        await eventually("the Mac's song seen") { h.model.canContinueOnPhone == (m.track != nil) && h.controller.isActive }
         return (h, task)
     }
 
@@ -84,13 +90,33 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         #expect(await h.model.continueOnPhone(with: refused) == .notAllowed)
         #expect(refused.asked.isEmpty)
 
+        // No catalogue ID from the Mac, and none in the catalogue here either.
         let (plain, plainTask) = await ready(message())
         defer { plainTask.cancel() }
-        #expect(!plain.model.canContinueOnPhone)
+        #expect(plain.model.canContinueOnPhone, "offered: the phone looks it up")
+        #expect(plain.model.macSongHasNoCatalogID)
         let phone = FakePhoneMusic()
         #expect(await plain.model.continueOnPhone(with: phone) == .unavailable)
+        #expect(phone.searches == ["Song Artist"], "looked up here first")
         #expect(phone.asked.isEmpty)
         #expect(await plain.transport.sent.isEmpty)
+    }
+
+    /// The Mac couldn't find Daniel Caesar's "Japanese Denim" in Apple's
+    /// public search, which has only covers of it; the phone's Apple Music
+    /// catalogue has it (16 November 2026).
+    @Test func aSongTheMacCouldntFindIsLookedUpHere() async {
+        let (h, task) = await ready(message(state: .playing))   // "Song" by "Artist", 200 s, no catalogue ID
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.catalog = [
+            CatalogCandidate(id: "111", title: "Song", artist: "Someone Covering It", duration: 200),
+            CatalogCandidate(id: "222", title: "Song (Instrumental)", artist: "Artist", duration: 200),
+            CatalogCandidate(id: "333", title: "Song", artist: "Artist", duration: 201),
+        ]
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.asked.first?.ids.first == "333", "the artist's own, not a cover or another version")
+        #expect(await h.transport.sent.map(\.kind) == [.pause])
     }
 
     @Test func tellsAPausedMacTooSoItOffersContinueFromIPhone() async {
@@ -222,5 +248,21 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         h.sleeper.releaseAll()
         #expect(await sending.value == .macDidNotStart)
         #expect(phone.pauses == 0)
+    }
+}
+
+@Suite struct CatalogCandidateTests {
+    @Test func theArtistsOwnSongOfAboutTheSameLength() {
+        let songs = [
+            CatalogCandidate(id: "cover", title: "Japanese Denim", artist: "Rachel Bobbitt & Justice Der", duration: 369),
+            CatalogCandidate(id: "piano", title: "Japanese Denim (Piano Arrangement)", artist: "The Theorist", duration: 264),
+            CatalogCandidate(id: "live", title: "Japanese Denim", artist: "Daniel Caesar", duration: 300),
+            CatalogCandidate(id: "own", title: "Japanese Denim", artist: "Daniel Caesar", duration: 270.5),
+        ]
+        #expect(CatalogCandidate.best(title: "Japanese Denim", artist: "Daniel Caesar", duration: 270.6, in: songs)?.id == "own")
+        #expect(CatalogCandidate.best(title: "japanese denim", artist: "Daniel Caesar & Someone", duration: 271, in: songs)?.id == "own",
+                "case and a featured artist don't matter")
+        #expect(CatalogCandidate.best(title: "Japanese Denim", artist: "Daniel Caesar", duration: 100, in: songs) == nil, "too far off in length")
+        #expect(CatalogCandidate.best(title: "Japanese Denim", artist: "Nobody", duration: 270, in: songs) == nil)
     }
 }

@@ -21,6 +21,45 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// Station) after everything queued here, so the music doesn't stop
     /// when the queue does.
     func appendStation(seededBy catalogID: String) async -> StationAppend
+    /// Apple Music catalogue songs like this one, for a song the Mac has no
+    /// catalogue ID for. Empty when none, or Apple Music can't be asked.
+    func searchCatalog(title: String, artist: String) async -> [CatalogCandidate]
+}
+
+/// One song from an Apple Music catalogue search.
+public struct CatalogCandidate: Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var artist: String
+    public var duration: TimeInterval?
+
+    public init(id: String, title: String, artist: String, duration: TimeInterval?) {
+        self.id = id
+        self.title = title
+        self.artist = artist
+        self.duration = duration
+    }
+
+    /// The candidate that is this song: the same title and lead artist,
+    /// closest in length, and within `durationTolerance` when both lengths
+    /// are known. Covers by other artists and other versions don't count.
+    public static func best(title: String, artist: String, duration: TimeInterval, in candidates: [CatalogCandidate]) -> CatalogCandidate? {
+        let wanted = fold(title)
+        let lead = fold(artist.components(separatedBy: CharacterSet(charactersIn: ",&")).first ?? artist)
+        func gap(_ c: CatalogCandidate) -> TimeInterval {
+            guard let length = c.duration, duration > 0 else { return 0 }
+            return abs(length - duration)
+        }
+        let matching = candidates.filter { fold($0.title) == wanted && fold($0.artist).contains(lead) && gap($0) <= durationTolerance }
+        return matching.min { gap($0) < gap($1) }
+    }
+
+    public static let durationTolerance: TimeInterval = 5
+
+    static func fold(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 /// What `appendStation(seededBy:)` managed (added 15 November 2026).
