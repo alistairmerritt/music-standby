@@ -168,21 +168,29 @@ unlisted link in the notes. Shot list:
 
 ## Screenshots
 
-**Required:** the 6.9-inch iPhone set, at 1320 × 2868 (or 1290 × 2796), portrait. From 1 to 10.
-App Store Connect scales them down for smaller iPhones. No iPad set is needed: the app is
-iPhone only (`TARGETED_DEVICE_FAMILY = 1`).
+**Required:** the 6.9-inch iPhone set, 1320 × 2868, portrait. App Store Connect scales it
+down for smaller iPhones. No iPad set: the app is iPhone only (`TARGETED_DEVICE_FAMILY = 1`).
 
-Use the demo's invented songs and covers, never real album artwork: the store can't show
-covers the app has no rights to.
+The four in [`screenshots/`](screenshots/), in this order:
 
-| # | Shows | Caption |
-| --- | --- | --- |
-| 1 | The Lock Screen with the demo song playing | Your Mac's music, on your Lock Screen |
-| 2 | StandBy, landscape, set into the portrait frame | And in StandBy |
-| 3 | The app: Now Playing on Mac, with controls and volume | Press it here. It happens there. |
-| 4 | Continue Listening, which needs a real Mac: crop to that section, so the real song's artwork stays out | Take your music with you |
-| 5 | The Mac menu, with the iPhone beside it, playing a song whose artwork you may show | Second Chair for Mac, free |
+| # | File | Shows | Caption |
+| --- | --- | --- | --- |
+| 1 | `1-lock-screen.jpg` | The Lock Screen playing Low Sun | Your Mac’s music, *on your Lock Screen.* |
+| 2 | `2-standby.jpg` | StandBy with Low Sun, Small Hours and Ticket Hall | And in StandBy, *on the charger.* |
+| 3 | `3-controls.jpg` | The app: Now Playing on Mac, controls, volume | *Press it here.* It happens there. |
+| 4 | `4-continue.jpg` | The app, with Continue Listening enlarged | Take your music with you. *Then bring it back.* |
 
-Raw screenshots come from a phone in the demo. The spare iPhone 13, installing build
-202611161444 from TestFlight, keeps the main phone's pairing. They're then set at 1320 × 2868
-with a caption.
+They show the demo's invented records, never real album art. They were captured on an iPhone
+15 Pro on 16 November 2026, with the Debug build's screenshot mode (see the iPhone README).
+Each one sits in the website's iPhone 18 Pro frame, on its record's colour, with an IvyPresto
+Headline Light caption. To remake them:
+
+1. `render_frames.py`, run against the website's `_docs/devices`, renders the frames at
+   1172 px.
+2. `compose.py` sets each screenshot.
+
+Both read the website's folder and the Adobe Fonts copy of IvyPresto on this Mac; `compose.py` takes the raw device captures from a `shots/` folder beside this one, which isn't kept. The font
+files aren't in the repository, and mustn't be.
+
+Screenshot 1 shows the Lock Screen as it was: the wallpaper, and the widgets for activity,
+sunset, temperature and a Melbourne clock.

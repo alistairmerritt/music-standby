@@ -33,7 +33,9 @@ enum ScreenshotMode {
         let scratch = SharedContainer(directory: FileManager.default.temporaryDirectory.appending(path: "screenshots", directoryHint: .isDirectory))
         let demo = MockTransport(library: library, mac: mac, startingAt: songIndex, elapsed: 72,
                                  isPlaying: !ProcessInfo.processInfo.arguments.contains("-screenshotPaused"),
-                                 musicConnection: .connected)
+                                 musicConnection: .connected,
+                                 // Above any earlier launch's, so the Lock Screen takes this one.
+                                 revision: UInt64(Date().timeIntervalSince1970))
         return AppModel(
             transport: DemoCapableTransport(real: UnconfiguredTransport(), demo: demo, startsInDemo: true),
             sessionController: RemoteSessionController(),
@@ -49,6 +51,8 @@ enum ScreenshotMode {
         guard isOn else { return }
         Task {
             try? await Task.sleep(for: .seconds(1.5))
+            // A fresh session, so nothing of the last launch's lingers.
+            await model.stopNowPlaying()
             await model.activateNowPlaying()
         }
     }

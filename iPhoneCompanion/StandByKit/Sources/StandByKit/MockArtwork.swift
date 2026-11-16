@@ -17,7 +17,7 @@ public enum MockArtwork {
     }
 
     /// A cover in `Resources/DemoArtwork`, named after the ID without its prefix.
-    static func cover(id: String) -> Data? {
+    public static func cover(id: String) -> Data? {
         guard isMockID(id) else { return nil }
         let name = String(id.dropFirst("mock-art-".count))
         guard !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }),

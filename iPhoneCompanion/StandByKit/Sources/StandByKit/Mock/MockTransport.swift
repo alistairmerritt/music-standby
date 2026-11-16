@@ -24,9 +24,11 @@ public actor MockTransport: PlaybackTransport {
 
     /// `startingAt`, `elapsed`, `isPlaying` and `musicConnection` set the scene
     /// for development builds' screenshots; the demo starts at the first song.
+    /// `revision` is where its revisions count from: a relaunch must count
+    /// above the last, or the Now Playing extension keeps the old state.
     public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"),
                 startingAt index: Int = 0, elapsed: TimeInterval = 0, isPlaying: Bool = true, musicConnection: MusicConnection? = nil,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                revision: UInt64 = 0, now: @escaping @Sendable () -> Date = { Date() }) {
         self.library = library
         self.mac = mac
         self.now = now
@@ -34,6 +36,7 @@ public actor MockTransport: PlaybackTransport {
         self.elapsed = elapsed
         self.isPlaying = isPlaying
         self.musicConnection = musicConnection
+        self.revision = revision
         anchor = now()
         // The Mac's own speakers carry its name, as Music's do.
         outputs = [
