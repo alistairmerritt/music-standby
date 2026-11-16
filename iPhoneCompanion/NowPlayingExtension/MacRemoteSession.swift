@@ -34,6 +34,7 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             return
         }
         attributes = incoming
+        logger.log("Update to revision \(incoming.revision); memory \(Self.footprint(), privacy: .public)")
         prefetchArtwork()
     }
 
@@ -49,11 +50,12 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
               fetchedArtwork != artworkID, fetchingArtwork != artworkID else { return }
         fetchingArtwork = artworkID
         let store = services.artwork, url = track.artworkURL, logger = logger, started = Date()
-        logger.log("Fetching artwork \(artworkID.prefix(12), privacy: .public)")
+        logger.log("Fetching artwork \(artworkID.prefix(12), privacy: .public); memory \(Self.footprint(), privacy: .public)")
         let fetch = Task { [weak self] in
             do {
                 _ = try await store.resolve(id: artworkID, remoteURL: url)
-                logger.log("Artwork \(artworkID.prefix(12), privacy: .public) cached in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+                Self.relieveMemory()
+                logger.log("Artwork \(artworkID.prefix(12), privacy: .public) cached in \(Int(Date().timeIntervalSince(started) * 1000)) ms; memory \(Self.footprint(), privacy: .public)")
                 self?.artworkCached(artworkID)
             } catch {
                 logger.error("Artwork fetch failed: \(error.localizedDescription, privacy: .public)")
@@ -69,6 +71,28 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
             }
             _ = done.wait(timeout: .now() + 8)
         }
+    }
+
+    /// Hands memory the process has freed, but malloc still holds, back to
+    /// the system. iOS counts held pages against the extension's limit, and
+    /// a connection's worth stayed counted after each request.
+    nonisolated static func relieveMemory() {
+        _ = malloc_zone_pressure_relief(nil, 0)
+    }
+
+    /// This process's memory as iOS counts it against the extension's limit
+    /// (about 6 MB), for the log: where the artwork's memory goes.
+    nonisolated static func footprint() -> String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return "unknown" }
+        // The peak too: the spike that kills the extension comes after a
+        // handover, while the system works on the image.
+        return String(format: "%.2f MB (peak %.2f MB)", Double(info.phys_footprint) / 1_048_576,
+                      Double(info.ledger_phys_footprint_peak) / 1_048_576)
     }
 
     private func artworkCached(_ artworkID: String?) {
@@ -100,11 +124,14 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
                     if MockArtwork.isMockID(artworkID), let image = MockArtwork.image(id: artworkID, pixelSize: 300) {
                         return try ArtworkRepresentation(cgImage: image)
                     }
-                    let cached = store.load(id: artworkID) != nil
-                    logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached)")
+                    // Asked whether it's cached without reading it: the read
+                    // below is the only copy (16 November 2026).
+                    let cached = store.isCached(id: artworkID)
+                    logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached); memory \(Self.footprint(), privacy: .public)")
                     do {
                         let representation = try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
-                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over")
+                        MacRemoteSession.relieveMemory()
+                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over; memory \(Self.footprint(), privacy: .public)")
                         return representation
                     } catch {
                         logger.error("Artwork \(artworkID.prefix(12), privacy: .public) not handed over: \(error.localizedDescription, privacy: .public)")
@@ -169,6 +196,11 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
         let name = command.kind.rawValue
         logger.log("Received command: \(name, privacy: .public), relay: \(self.services.usesRelay)")
         let started = Date()
+        // Each command opens a connection and reads the state back; what
+        // that frees goes back to the system, not left counted against the
+        // extension's 6 MB (16 November 2026: skips from StandBy took it to
+        // a 5.91 MB peak).
+        defer { Self.relieveMemory() }
         do {
             if let result = try await services.commands.perform(command, on: attributes) {
                 update(result)

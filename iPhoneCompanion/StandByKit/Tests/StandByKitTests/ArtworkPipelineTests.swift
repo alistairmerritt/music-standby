@@ -158,3 +158,36 @@ private func container() -> SharedContainer {
         #expect(image.width == 64)
     }
 }
+
+/// A fetch that takes a moment, counting how many were made.
+private actor SlowFetcher: ArtworkFetching {
+    private(set) var fetches = 0
+    let result: Data
+    init(result: Data) { self.result = result }
+    func fetch(url: URL) async throws -> Data { try await fetch(id: url.lastPathComponent) }
+    func fetch(id: String) async throws -> Data {
+        fetches += 1
+        try await Task.sleep(for: .milliseconds(100))
+        return result
+    }
+}
+
+/// The extension's prefetch and the system's request for the image
+/// overlapped, and two fetches at once took it over its memory limit
+/// (16 November 2026).
+@Suite struct ArtworkFetchOnceTests {
+    @Test func twoRequestsAtOnceMakeOneFetch() async throws {
+        let fetcher = SlowFetcher(result: Data([0xFF, 0xD8, 0xFF, 0x01]))
+        let store = ArtworkStore(container: container(), fetcher: fetcher)
+        let id = String(repeating: "ab", count: 32)
+        #expect(!store.isCached(id: id))
+        async let first = store.resolve(id: id, remoteURL: nil)
+        async let second = store.resolve(id: id, remoteURL: nil)
+        let (a, b) = try await (first, second)
+        #expect(a == b)
+        #expect(await fetcher.fetches == 1)
+        #expect(store.isCached(id: id))
+        _ = try await store.resolve(id: id, remoteURL: nil)
+        #expect(await fetcher.fetches == 1, "then from the cache")
+    }
+}

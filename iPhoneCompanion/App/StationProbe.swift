@@ -18,10 +18,23 @@ import StandByKit
 enum StationProbe {
     private static let log = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "StationProbe")
 
-    static func runIfAsked() {
+    static func runIfAsked(model: AppModel) {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-stationProbe") { Task { await run() } }
         if arguments.contains("-stationProbePlaying") { Task { await runPlaying() } }
+        // Stop Showing and Show in Now Playing from the Mac, so a test build
+        // can go on without anyone tapping: installing over a live session
+        // leaves the extension running from the old build (16 November 2026).
+        if arguments.contains("-stopShowing") {
+            Task { await model.stopNowPlaying(); say("stopped showing") }
+        }
+        if arguments.contains("-showNowPlaying") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                await model.activateNowPlaying()
+                say("showing")
+            }
+        }
     }
 
     /// The same queues, playing: a station loads its next songs only as it

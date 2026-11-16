@@ -16,7 +16,14 @@ public struct ProcessedArtwork: Equatable, Sendable {
 }
 
 public enum ArtworkProcessor {
-    public static let maximumPixelSize = 600
+    /// The longest side of the artwork sent to the phone. 600 by default;
+    /// `defaults write com.alistairmerritt.MusicStandBy.Mac artworkPixelSize
+    /// <200–1200>` overrides it, for measuring what the phone's Now Playing
+    /// extension, held to about 6 MB, can take (16 November 2026).
+    public static var maximumPixelSize: Int {
+        let override = UserDefaults.standard.integer(forKey: "artworkPixelSize")
+        return (200...1200).contains(override) ? override : 600
+    }
     public static let jpegQuality = 0.85
 
     /// Nil if ImageIO cannot read the bytes.

@@ -99,22 +99,46 @@ public struct ArtworkStore: Sendable {
         try? Data(contentsOf: url(for: id))
     }
 
+    /// Whether it's cached, without reading it.
+    public func isCached(id: String) -> Bool {
+        FileManager.default.fileExists(atPath: url(for: id).path)
+    }
+
+    /// One fetch per artwork at a time in this process. The extension's
+    /// prefetch and the system's own request for the image overlapped, and
+    /// two fetches at once (two connections, two copies) cost memory the Now
+    /// Playing extension doesn't have: iOS killed it at its limit and the
+    /// player's artwork kept spinning (16 November 2026).
+    static let inFlight = InFlightArtwork()
+
     /// Cached file, then generated placeholder art, then the relay. Without a
     /// fetcher a URL is ignored: there is no trusted host to allow it against.
     public func resolve(id: String, remoteURL: URL?) async throws -> Data {
         if let cached = load(id: id) { return cached }
         if MockArtwork.isMockID(id), let generated = MockArtwork.png(id: id) { return generated }
         guard let fetcher else { throw TransportError.artworkUnavailable }
-        let data: Data
-        if let remoteURL {
-            data = try await fetcher.fetch(url: remoteURL)
-        } else if ArtworkID.isValid(id) {
-            data = try await fetcher.fetch(id: id)
-        } else {
-            throw TransportError.artworkUnavailable
+        guard remoteURL != nil || ArtworkID.isValid(id) else { throw TransportError.artworkUnavailable }
+        let store = self
+        // Keyed by where it's cached too: one cache, one fetch.
+        return try await Self.inFlight.data(for: "\(container.directory.path)|\(id)") {
+            let data = if let remoteURL { try await fetcher.fetch(url: remoteURL) } else { try await fetcher.fetch(id: id) }
+            try? store.save(data, id: id)
+            return data
         }
-        try? save(data, id: id)
-        return data
+    }
+}
+
+/// Fetches in progress, by artwork id: a second request for one already
+/// on its way waits for that one instead of starting another.
+actor InFlightArtwork {
+    private var tasks: [String: Task<Data, any Error>] = [:]
+
+    func data(for id: String, fetch: @escaping @Sendable () async throws -> Data) async throws -> Data {
+        if let running = tasks[id] { return try await running.value }
+        let task = Task { try await fetch() }
+        tasks[id] = task
+        defer { tasks[id] = nil }
+        return try await task.value
     }
 }
 

@@ -6,6 +6,33 @@ Last updated 15 November 2026, on `main`. The newest work is at the top; older s
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
 
+## Artwork that never loaded on the Lock Screen (16 November 2026)
+
+About one song in ten, the Lock Screen and StandBy player's artwork spun forever. iOS was
+killing the Now Playing extension at its memory limit (`per-process-limit`, about 6 MB) just
+as it handed over the artwork, so the request died with it. Measured on the iPhone with the
+extension's footprint in its log (now with the peak):
+
+- The prefetch and the system's own requests (1200, 903, 171, 88 pixels) fetched the same
+  artwork at once. They now share one fetch (`InFlightArtwork`), and the cache is checked
+  without reading the file.
+- Decoding the artwork in the extension (a 480-pixel `CGImage`) cost about 2.7 MB at once and
+  got it killed on every request: reverted. Handing the system the JPEG's bytes doesn't spike.
+- The artwork's size made no difference: 600, 400 and 300 pixels from the Mac (its new
+  `artworkPixelSize` default) peaked at 4.99–5.11 MB in StandBy. The big requests (1200, 903)
+  only come while the Lock Screen or StandBy shows the player, so test with the phone there.
+- Skips from StandBy were the cause: each sends the command, reads the state back and fetches
+  the artwork, each on a fresh connection, and what they freed stayed counted (5.72 MB after
+  two skips, peak 5.91). Now malloc's free pages go back after each command and artwork step,
+  and requests in a burst share one session (`BurstSessions`, 1 s window, since iOS kills a
+  suspended extension's sockets). Ten skips in StandBy, seven covers downloaded: no kills,
+  peak 5.77 MB, settling at 4.6–4.9 MB.
+
+Development builds take `-stopShowing` and `-showNowPlaying` (`StationProbe`), so a test build
+goes on from the Mac with the phone unlocked: `xcrun devicectl device process launch --device
+<udid> --terminate-existing com.alistairmerritt.MusicStandBy -- -stopShowing`, install, wait a
+minute, then `-showNowPlaying`.
+
 ## Continue Listening status (16 November 2026)
 
 Continue Listening had no presence on the phone when it couldn't work: its box only appeared

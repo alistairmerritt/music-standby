@@ -14,18 +14,24 @@ private final class RedirectRefusal: NSObject, URLSessionTaskDelegate, Sendable 
 }
 
 public struct URLSessionHTTP: HTTPSending {
-    /// Nil when every request gets a session, and so a connection, of its own.
+    /// Nil for the extension, whose requests share a session only in bursts.
     private let shared: URLSession?
+    private let bursts: BurstSessions?
 
     /// `reuseConnections: false` is for the Now Playing extension. iOS suspends
     /// it between taps and kills its sockets, so on an iPhone a kept connection
-    /// was dead by the next tap whenever more than about 2 s had passed. A
-    /// fresh connection costs about 150 ms there, well inside the budget.
+    /// was dead by the next tap whenever more than about 2 s had passed. So a
+    /// session, and its connection, lasts only for a burst: requests while one
+    /// is in flight, or within `BurstSessions.window` of the last, share it. A
+    /// skip from StandBy sends the command, reads the state back and fetches
+    /// the artwork at once; three connections at once took the extension to
+    /// 5.97 MB against its 6 MB (16 November 2026).
     public init(reuseConnections: Bool = true) {
         shared = reuseConnections ? URLSession(configuration: Self.configuration()) : nil
+        bursts = reuseConnections ? nil : BurstSessions()
     }
 
-    private static func configuration() -> URLSessionConfiguration {
+    static func configuration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
@@ -35,8 +41,9 @@ public struct URLSessionHTTP: HTTPSending {
 
     public func send(_ request: URLRequest, maxBytes: Int?) async throws -> (Data, HTTPURLResponse) {
         if let shared { return try await send(request, maxBytes: maxBytes, on: shared) }
-        let session = URLSession(configuration: Self.configuration())
-        defer { session.finishTasksAndInvalidate() }
+        guard let bursts else { throw TransportError.notConnected }
+        let session = bursts.begin()
+        defer { bursts.end() }
         return try await send(request, maxBytes: maxBytes, on: session)
     }
 
