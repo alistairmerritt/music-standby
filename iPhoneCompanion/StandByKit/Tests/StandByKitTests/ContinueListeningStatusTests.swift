@@ -48,3 +48,23 @@ import Testing
         await eventually("the newest wins") { h.model.macMusicConnection == .forgotten }
     }
 }
+
+@MainActor
+@Suite struct ContinueWithoutASessionTests {
+    /// Continue Listening works from the Mac's state while the player isn't
+    /// showing (16 November 2026).
+    @Test func continueOnIPhoneIsOfferedWithoutASession() async {
+        let h = Harness(relayNamesSessions: true)
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        var song = track()
+        song.catalogID = "1102360418"
+        await h.transport.emit(.playback(message(revision: 3, state: .playing, track: song)))
+        await eventually("offered") { h.model.canContinueOnPhone }
+        #expect(h.model.attributes == nil, "still nothing in Now Playing without a session")
+        #expect(!h.model.macSongHasNoCatalogID)
+        await h.transport.emit(.playback(message(revision: 4, state: .playing, track: track("t2"))))
+        await eventually("a song without an ID says so") { h.model.macSongHasNoCatalogID && !h.model.canContinueOnPhone }
+    }
+}

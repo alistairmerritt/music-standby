@@ -24,7 +24,10 @@ public final class AppModel {
     /// state, with or without a session. Nil until a Mac that says has sent
     /// a state (16 November 2026).
     public private(set) var macMusicConnection: MusicConnection?
-    @ObservationIgnored private var musicConnectionRevision: UInt64?
+    /// The Mac has a song, but no Apple Music catalogue ID for it, so it
+    /// can't be continued here: a song outside the catalogue, or one the
+    /// Mac couldn't find there yet (16 November 2026).
+    public private(set) var macSongHasNoCatalogID = false
     public private(set) var artwork: CGImage?
     public private(set) var pushTokens = PushTokens()
     public private(set) var commandsFromSystem: [CommandRecord] = []
@@ -188,7 +191,7 @@ public final class AppModel {
         latestMessage = nil
         assignedSessionID = nil
         macMusicConnection = nil
-        musicConnectionRevision = nil
+        macSongHasNoCatalogID = false
         setNowPlayingEnabled(false)
     }
 
@@ -325,22 +328,22 @@ public final class AppModel {
 
     private func apply(playback message: PlaybackMessage) async {
         guard let mac = pairedMac else { return }
-        // Before the session check below: the Mac section shows it even
-        // while nothing shows in Now Playing.
-        if musicConnectionRevision.map({ message.revision >= $0 }) ?? true {
-            macMusicConnection = message.musicConnection
-            musicConnectionRevision = message.revision
-        }
-        // A relay names every session. Showing one under a made-up name would
-        // leave the Lock Screen with controls the relay refuses.
-        if transport.issuesSessionIDs, assignedSessionID == nil { return }
         if let latestMessage, !latestMessage.isSuperseded(by: message) {
             record("Ignored stale revision \(message.revision)")
             return
         }
+        // Continue Listening works from the Mac's state with or without a
+        // Now Playing session: before the session check below. With it after,
+        // Continue on iPhone never appeared while the player wasn't showing,
+        // though the status said Ready (16 November 2026).
         latestMessage = message
+        macMusicConnection = message.musicConnection
         outputs = message.outputs ?? []
         canContinueOnPhone = message.track?.catalogID != nil
+        macSongHasNoCatalogID = message.track != nil && message.track?.catalogID == nil
+        // A relay names every session. Showing one under a made-up name would
+        // leave the Lock Screen with controls the relay refuses.
+        if transport.issuesSessionIDs, assignedSessionID == nil { return }
         var updated = MacPlaybackAttributes(mac: mac, message: message, sessionID: assignedSessionID)
         // Once Music stops or quits the Mac reports no track. Keep the last one,
         // paused, in the same session: iOS shows only a session the app asked
