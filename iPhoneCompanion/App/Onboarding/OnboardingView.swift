@@ -536,7 +536,7 @@ private struct ContinueIntroScene: View {
         SetupScaffold(flow: flow, showsBack: false, trailing: .none) {
             SongSeats(moves: true)
             Headline(text: "Take your music with you.")
-            Explanation(text: "Move what’s playing between your Mac and iPhone without losing your place or your queue.")
+            Explanation(text: "Take what’s playing to your iPhone, from the same point and with your Up Next queue. Back at your desk, your Mac picks the song up where you left off.")
             if noSubscription {
                 Note(title: "Needs Apple Music.", text: "Continue Listening plays the song in Apple Music on this iPhone, which needs a subscription. You can set it up later from Second Chair.")
             } else {
