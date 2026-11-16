@@ -48,7 +48,7 @@ Music.app ──Apple Events, remote protocol──▶ Mac companion ──WebSo
 | [`iPhoneCompanion/`](iPhoneCompanion/) | The iPhone app, its Now Playing extension and `StandByKit` | [README](iPhoneCompanion/README.md), [STATUS](docs/ios/STATUS.md) |
 | [`Relay/`](Relay/) | The Cloudflare Worker | [README](Relay/README.md) |
 | [`Shared/StandByProtocol/`](Shared/StandByProtocol/) | The wire protocol all three share, with an example of every message | [README](Shared/StandByProtocol/README.md), [PROTOCOL](Shared/StandByProtocol/PROTOCOL.md) |
-| [`docs/`](docs/) | The relay API, iOS device notes, and an [archive](docs/archive/) of early plans | [API-v1](docs/relay/API-v1.md) |
+| [`docs/`](docs/) | The relay API, iOS device notes, the App Store listing, and an [archive](docs/archive/) of early plans | [API-v1](docs/relay/API-v1.md), [App Store listing](docs/app-store/LISTING.md) |
 
 ## Status
 
