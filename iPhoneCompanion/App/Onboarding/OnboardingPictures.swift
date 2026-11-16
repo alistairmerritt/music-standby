@@ -229,6 +229,7 @@ struct MacPicture: View {
             case .menuBar:
                 EmptyView()
             case .pairButton:
+                connectedLine
                 row(MacMenuText.iPhone, MacMenuText.notPaired)
                 macButton(MacMenuText.pairIPhone, prominent: false, pointed: true)
             case .pairingCode:
@@ -243,13 +244,19 @@ struct MacPicture: View {
             case .play(let title, let artist, let playing):
                 Text(MacMenuText.onThisMac).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 HStack(spacing: 10) {
-                    songArtwork.frame(width: 40, height: 40)
+                    songArtwork.frame(width: 50, height: 50)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title ?? "Nothing playing").font(.callout.weight(.semibold)).lineLimit(1)
-                        Text(title == nil ? "Play something in Music" : "\(artist ?? "") · \(playing ? "Playing" : "Paused")")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        if let title, !title.isEmpty {
+                            Text(artist ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(playing ? "Playing" : "Paused").font(.caption2).foregroundStyle(.tertiary)
+                        } else {
+                            Text("Play something in Music").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
+                Capsule().fill(.secondary.opacity(0.25)).frame(height: 4)
+                    .overlay(alignment: .leading) { Capsule().fill(Color.accentColor).frame(width: title == nil ? 0 : 120, height: 4) }
                 HStack(spacing: 26) {
                     Image(systemName: "backward.fill")
                     Image(systemName: playing ? "pause.fill" : "play.fill")
@@ -257,7 +264,7 @@ struct MacPicture: View {
                         .overlay(alignment: .bottomTrailing) { if !playing { pointer.offset(x: 12, y: 14) } }
                     Image(systemName: "forward.fill")
                 }
-                .font(.callout).frame(maxWidth: .infinity)
+                .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity)
             case .connectToMusic:
                 Text(MacMenuText.continueListening).font(.callout.weight(.semibold))
                 Text(MacMenuText.connectToMusicNote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -275,7 +282,8 @@ struct MacPicture: View {
         }
         .padding(12)
         .frame(width: part == .musicCode ? 190 : 250, alignment: .leading)
-        .background(.regularMaterial, in: .rect(cornerRadius: 12, style: .continuous))
+        .background(.regularMaterial, in: .rect(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.12)))
         .shadow(color: .black.opacity(0.25), radius: 10, y: 6)
         .padding(.bottom, 14)
     }
@@ -314,7 +322,11 @@ struct MacPicture: View {
     }
 
     private func row(_ name: String, _ value: String) -> some View {
-        HStack { Text(name); Spacer(); Text(value).foregroundStyle(.secondary) }.font(.callout)
+        HStack(spacing: 6) { Text(name); Text(value).foregroundStyle(.secondary) }.font(.callout)
+    }
+
+    private var connectedLine: some View {
+        HStack(spacing: 6) { Circle().fill(.green).frame(width: 7, height: 7); Text(MacMenuText.connected) }.font(.callout)
     }
 
     private func macButton(_ title: String, prominent: Bool, pointed: Bool) -> some View {
