@@ -59,7 +59,7 @@ private struct NowPlayingSection: View {
             // The Mac can't see what the phone plays, only that it handed over.
             let handedOver = companion.phoneHasMusic && companion.snapshot?.state != .playing
             HStack {
-                Text("On This Mac").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(MacMenuText.onThisMac).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 if handedOver {
                     Label("Continued on iPhone", systemImage: "iphone").font(.caption).foregroundStyle(.secondary)
@@ -199,12 +199,12 @@ private struct ContinueFromPhoneRow: View {
             Group {
                 if prominent {
                     Button { companion.continueFromPhone() } label: {
-                        Label("Continue from iPhone", systemImage: "iphone.and.arrow.forward")
+                        Label(MacMenuText.continueFromIPhone, systemImage: "iphone.and.arrow.forward")
                     }
                     .buttonStyle(.borderedProminent)
                 } else {
                     Button { companion.continueFromPhone() } label: {
-                        Label("Continue from iPhone", systemImage: "iphone.and.arrow.forward")
+                        Label(MacMenuText.continueFromIPhone, systemImage: "iphone.and.arrow.forward")
                     }
                 }
             }
@@ -248,21 +248,21 @@ private struct MusicRemoteSection: View {
         VStack(alignment: .leading, spacing: 6) {
             // "Continue Listening", as on the iPhone; "Continue on iPhone" here
             // read like a button (16 November 2026).
-            Text("Continue Listening").font(.headline)
+            Text(MacMenuText.continueListening).font(.headline)
             switch account.state {
             case .unpaired:
-                note("Connect Second Chair to Music so your music can move between this Mac and your iPhone, with your Up Next queue.")
-                Button("Connect to Music…") { account.startPairing() }
+                note(MacMenuText.connectToMusicNote)
+                Button(MacMenuText.connectToMusic) { account.startPairing() }
             case .pairing(let code):
-                note("In Music, select Second Chair under Devices, then enter this code:")
+                note(MacMenuText.musicCodeNote)
                 Text(code.map(String.init).joined(separator: " ")).font(.system(.title, design: .monospaced))
                 Button("Cancel") { account.cancelPairing() }
             case .paired:
-                note("Connected to Music. Your music can move between this Mac and your iPhone.")
+                note(MacMenuText.connectedToMusicNote)
                 Button("Disconnect from Music") { account.forget() }
             case .forgottenByMusic:
                 note("Music no longer recognises Second Chair. Connect again so your music can move between this Mac and your iPhone.")
-                Button("Connect to Music…") { account.startPairing() }
+                Button(MacMenuText.connectToMusic) { account.startPairing() }
             case .failed(let message):
                 note(message)
                 Button("Try Again") { account.startPairing() }
@@ -289,8 +289,8 @@ private struct ConnectionSection: View {
                 Text(text)
             }
             // iOS gives the Mac only "iPhone" as the phone's name.
-            LabeledContent("iPhone") {
-                Text(companion.pairedPhone == nil ? "Not paired" : "Paired").foregroundStyle(.secondary)
+            LabeledContent(MacMenuText.iPhone) {
+                Text(companion.pairedPhone == nil ? MacMenuText.notPaired : MacMenuText.paired).foregroundStyle(.secondary)
             }
             if let relay {
                 PairingControls(companion: companion, relay: relay)
@@ -307,7 +307,7 @@ private struct ConnectionSection: View {
         switch status.phase {
         // Not the relay's address: it means nothing to anyone, and it
         // turned up in screenshots (16 November 2026).
-        case .connected: return "Connected"
+        case .connected: return MacMenuText.connected
         case .connecting: return "Connecting…"
         case .reconnecting: return "Reconnecting…"
         case .failed: return "Connection failed\(status.error.map { ": \($0.code)" } ?? "")"
@@ -334,16 +334,16 @@ private struct PairingControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let request = companion.pairRequests.first {
-                Text("“\(request.phone.name)” wants to show this Mac’s music.")
+                Text(MacMenuText.wantsToShow(request.phone.name))
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Button("Allow") { companion.decidePairing(request.claimID, approved: true); relay.clearPairingCode() }
+                    Button(MacMenuText.allow) { companion.decidePairing(request.claimID, approved: true); relay.clearPairingCode() }
                         .keyboardShortcut(.defaultAction)
-                    Button("Don’t Allow") { companion.decidePairing(request.claimID, approved: false) }
+                    Button(MacMenuText.dontAllow) { companion.decidePairing(request.claimID, approved: false) }
                 }
             } else if companion.pairedPhone != nil {
                 // Paired: any code still on file was used up by the phone's claim.
-                Button("Unpair iPhone") { Task { await relay.unpair() } }
+                Button(MacMenuText.unpairIPhone) { Task { await relay.unpair() } }
             } else if let code = relay.pairingCode, code.expiresAt > Date() {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let left = max(0, Int(code.expiresAt.timeIntervalSince(context.date)))
@@ -351,12 +351,12 @@ private struct PairingControls: View {
                         Text(code.code.map(String.init).joined(separator: " "))
                             .font(.system(.title, design: .monospaced).weight(.semibold))
                             .textSelection(.enabled)
-                        Text(left > 0 ? "Type this in Second Chair on your iPhone. Expires in \(left / 60):\(String(format: "%02d", left % 60))." : "Expired.")
+                        Text(left > 0 ? "\(MacMenuText.typeThisOnIPhone) Expires in \(left / 60):\(String(format: "%02d", left % 60))." : "Expired.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             } else {
-                Button("Pair iPhone…") { Task { await relay.requestPairingCode() } }
+                Button(MacMenuText.pairIPhone) { Task { await relay.requestPairingCode() } }
                     .disabled(!relay.isRegistered || companion.connection.phase != .connected)
             }
             if let error = relay.lastError {

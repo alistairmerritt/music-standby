@@ -8,6 +8,7 @@ private let seekLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", cate
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(ReminderModel.self) private var reminders
+    @Environment(OnboardingCoordinator.self) private var onboarding
     @State private var isConfirmingUnpair = false
     @State private var phoneMusic = SystemMusicPhonePlayer()
     /// Apple Music on this phone, read once a second while Home shows.
@@ -20,6 +21,7 @@ struct HomeView: View {
     var body: some View {
         Form {
             if isDemoLayout { demoSection }
+            if !model.isDemo, !onboarding.progress.snapshot.playerHasShown { finishSetupSection }
 
             Section("Now Playing on Mac") {
                 if let attributes = model.attributes, let track = attributes.track {
@@ -47,7 +49,9 @@ struct HomeView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic)
+                HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic) {
+                    onboarding.resume(.continueMusic)
+                }
             }
             nowPlayingSection
             // The reminder comes from the relay, which the demo doesn't use.
@@ -146,6 +150,19 @@ struct HomeView: View {
         if ScreenshotMode.isOn { return false }
         #endif
         return model.isDemo
+    }
+
+    /// Until the player has shown once: the first run, from where it stopped.
+    private var finishSetupSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Play something on \(model.pairedMac?.name ?? "your Mac").").font(.headline)
+                Text("Your music shows up here and on your Lock Screen once it’s playing.").font(.subheadline).foregroundStyle(.secondary)
+            }
+            Button("Continue Setup") { onboarding.resume(.play) }
+        } header: {
+            Text("Finish Setting Up")
+        }
     }
 
     /// What the demo is, for App Review above all, and the way out.
@@ -303,6 +320,8 @@ private struct HandoffSection: View {
     /// there's nothing to say yet.
     let status: ContinueListeningStatus?
     let allowAppleMusic: (_ canAsk: Bool) async -> Void
+    /// Continue Listening's setup, from the first run.
+    let setUp: () -> Void
     @State private var working = false
     @State private var problem: String?
 
@@ -325,6 +344,9 @@ private struct HandoffSection: View {
             Section {
                 if let status {
                     LabeledContent("Status", value: status.title)
+                    if status == .setUpOnMac || status == .reconnectOnMac {
+                        Button("Set Up Continue Listening", action: setUp)
+                    }
                     if case .allowAppleMusic(let canAsk) = status {
                         Button(canAsk ? "Allow Apple Music Access" : "Open Settings") {
                             Task { await allowAppleMusic(canAsk) }

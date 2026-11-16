@@ -37,6 +37,12 @@ public final class AppModel {
     public private(set) var pairingAwaitingMac: PairedMac?
     /// True while the demo's simulated Mac stands in for a paired one.
     public private(set) var isDemo: Bool
+    /// The Mac's song and whether it's playing, from its latest state, with or
+    /// without a Now Playing session. The first run's "Play something" step
+    /// shows it before the relay has named a session, which it does only once
+    /// the Mac plays (16 November 2026).
+    public private(set) var macTrack: TrackMetadata?
+    public private(set) var macIsPlaying = false
 
     public let sessionController: any RemoteSessionControlling
     public let container: SharedContainer
@@ -162,6 +168,10 @@ public final class AppModel {
         pairingStore.pairedMac = mac
         pairedMac = mac
         record("Paired with \(mac.name)")
+        // Showing is on from the start: the Mac's first song puts the player on
+        // the Lock Screen while the app is still open, which iOS requires. There's
+        // no Show in Now Playing button to miss (first run V2, 16 November 2026).
+        setNowPlayingEnabled(true)
         await uploadTokens()
         await transport.connect()
     }
@@ -218,6 +228,8 @@ public final class AppModel {
         attributes = nil
         artwork = nil
         latestMessage = nil
+        macTrack = nil
+        macIsPlaying = false
         assignedSessionID = nil
         macMusicConnection = nil
         macSongHasNoCatalogID = false
@@ -366,6 +378,8 @@ public final class AppModel {
         // Continue on iPhone never appeared while the player wasn't showing,
         // though the status said Ready (16 November 2026).
         latestMessage = message
+        macTrack = message.track
+        macIsPlaying = message.state == .playing
         macMusicConnection = message.musicConnection
         outputs = message.outputs ?? []
         // Any song: one the Mac has no catalogue ID for is looked up here.
