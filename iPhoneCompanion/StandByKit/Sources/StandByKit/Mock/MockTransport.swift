@@ -1,6 +1,7 @@
 import Foundation
 
 /// Simulated Mac. Holds a small player so commands produce real state changes.
+/// Development builds without a relay run on it, and so does the demo.
 public actor MockTransport: PlaybackTransport {
     public static let rejectedCode = "000000"
 
@@ -16,17 +17,19 @@ public actor MockTransport: PlaybackTransport {
     private var anchor: Date
     private var revision: UInt64 = 0
     private var volume = 0.5
-    private var outputs = [
-        AudioOutput(id: "name:Mock Mac", name: "Mock Mac", kind: .computer, isSelected: true),
-        AudioOutput(id: "aa:bb:cc:dd:ee:01", name: "Kitchen HomePod", kind: .homePod, isSelected: false),
-        AudioOutput(id: "aa:bb:cc:dd:ee:02", name: "Living Room Apple TV", kind: .appleTV, isSelected: false, isAvailable: false),
-    ]
+    private var outputs: [AudioOutput]
 
     public init(library: MockLibrary = .standard, mac: PairedMac = PairedMac(id: "mock", name: "Mock Mac"), now: @escaping @Sendable () -> Date = { Date() }) {
         self.library = library
         self.mac = mac
         self.now = now
         anchor = now()
+        // The Mac's own speakers carry its name, as Music's do.
+        outputs = [
+            AudioOutput(id: "name:\(mac.name)", name: mac.name, kind: .computer, isSelected: true),
+            AudioOutput(id: "aa:bb:cc:dd:ee:01", name: "Kitchen HomePod", kind: .homePod, isSelected: false),
+            AudioOutput(id: "aa:bb:cc:dd:ee:02", name: "Living Room Apple TV", kind: .appleTV, isSelected: false, isAvailable: false),
+        ]
     }
 
     public func subscribe() -> AsyncStream<TransportEvent> {

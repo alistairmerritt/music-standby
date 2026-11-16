@@ -69,6 +69,17 @@ struct PairingView: View {
             }
             .disabled(PairingCode(code) == nil || isPairing)
         }
+
+        if model.canTryDemo {
+            Section {
+                Button("Try a Demo") {
+                    Task { await model.startDemo() }
+                }
+                .disabled(isPairing)
+            } footer: {
+                Text("No Second Chair on your Mac yet? See how it works with a simulated Mac.")
+            }
+        }
     }
 
     private func pair() async {
