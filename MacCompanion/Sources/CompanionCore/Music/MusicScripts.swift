@@ -37,6 +37,10 @@ public enum MusicScript: Hashable, Sendable {
     /// a station's link, Music starts playing it (seen 15 November 2026);
     /// for a song's, it only shows the song. Added 15 November 2026.
     case openLocation(String)
+    /// `set shuffle enabled to <true|false>`: after a playlist starts from a
+    /// song for Continue on Mac, Music keeps that song and shuffles the
+    /// rest when it's on (seen 17 November 2026). Added 17 November 2026.
+    case setShuffle(Bool)
 
     /// Guard 2 of 2. Music may quit between the process check and the Apple
     /// Event, and `tell application "Music"` would relaunch it. `is running`
@@ -68,6 +72,14 @@ public enum MusicScript: Hashable, Sendable {
             \(Self.guardLine)
             with timeout of 3 seconds
             \ttell application "Music" to set sound volume to \(level)
+            end timeout
+            return "ok"
+            """
+        case .setShuffle(let on):
+            """
+            \(Self.guardLine)
+            with timeout of 3 seconds
+            \ttell application "Music" to set shuffle enabled to \(on ? "true" : "false")
             end timeout
             return "ok"
             """

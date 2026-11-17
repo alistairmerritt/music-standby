@@ -288,7 +288,32 @@ private actor ListedLookup: CatalogIDLookup {
     }
 }
 
+private actor PlayingRemote: MusicRemoteReading, MusicRemotePlaying {
+    private(set) var asked: [String] = []
+    func queue(current track: MusicTrack?) async -> RemoteQueue? { RemoteQueue(catalogID: "1", upNext: [], playlist: PlaylistPlace(name: "Road Trip", count: 5, index: 1)) }
+    func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome {
+        asked.append(catalogID)
+        return .played(index: place.index)
+    }
+}
+
 @Suite struct CatalogFillingRemoteTests {
+    /// The app wraps its client in this: Continue on Mac's playlist must
+    /// still reach the client (it didn't, on the first try on 17 November 2026).
+    @Test func passesPlaylistsThroughBothWays() async throws {
+        let inner = PlayingRemote()
+        let wrapped: any MusicRemoteReading = CatalogFillingRemote(remote: inner, lookup: ListedLookup())
+        let player = try #require(wrapped as? any MusicRemotePlaying)
+        #expect(await player.play("13", in: PlaylistPlace(name: "Road Trip", count: 5, index: 2)) == .played(index: 2))
+        #expect(await inner.asked == ["13"])
+        #expect(await wrapped.queue(current: nil)?.playlist == PlaylistPlace(name: "Road Trip", count: 5, index: 1))
+
+        let readOnly = CatalogFillingRemote(remote: FixedRemote(answer: RemoteQueue(catalogID: "1", upNext: [])), lookup: ListedLookup())
+        if case .failed = await readOnly.play("13", in: PlaylistPlace(name: "Road Trip", count: 5, index: 2)) {} else {
+            Issue.record("a remote that can't play says so, and the companion plays the station")
+        }
+    }
+
     @Test func fillsTheCurrentSongAndUpNextWhereMusicGaveNoID() async throws {
         let remote = FixedRemote(answer: RemoteQueue(catalogID: nil, upNext: [
             QueuedTrack(catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", album: "LNT", duration: 312),
@@ -308,5 +333,117 @@ private actor ListedLookup: CatalogIDLookup {
         let lookup = ListedLookup()
         _ = await CatalogFillingRemote(remote: remote, lookup: lookup).queue(current: nil)
         #expect(await lookup.asked.isEmpty)
+    }
+}
+
+// MARK: Playlists (17 November 2026)
+
+/// A library with a playlist, as Music's remote protocol answered on 17
+/// November 2026 (made-up songs): the library itself (`abpl`), one of
+/// Music's own lists (`aePS`), "Road Trip" with five songs, and a smaller "Road Trip"
+/// that doesn't have the song.
+private enum Lists {
+    static let aa: UInt32 = 52001
+    static let aaPersistent: UInt64 = 0x2A3B_4C5D_6E7F_8091
+    static let smallAA: UInt32 = 55391
+    /// The current song (persistent 71F8…, catalogue 1102360418) is Road Trip's second.
+    static let aaSongs: [(item: UInt32, catalog: UInt32)] = [(101, 11), (102, 1_102_360_418), (103, 13), (104, 14), (105, 15)]
+    static let playlists = Fake.node("aply", Fake.u32("mstt", 200), Fake.node("mlcl",
+        Fake.node("mlit", Fake.u32("miid", 62), Fake.u64("mper", 5), Fake.text("minm", "Library"), Fake.u32("abpl", 1), Fake.u32("mimc", 3312)),
+        Fake.node("mlit", Fake.u32("miid", 50500), Fake.u64("mper", 77), Fake.text("minm", "Music"), Fake.u32("aePS", 6), Fake.u32("mimc", 3312)),
+        Fake.node("mlit", Fake.u32("miid", aa), Fake.u64("mper", aaPersistent), Fake.text("minm", "Road Trip"), Fake.u32("mimc", 5)),
+        Fake.node("mlit", Fake.u32("miid", smallAA), Fake.u64("mper", 0x1234), Fake.text("minm", "Road Trip"), Fake.u32("mimc", 2))))
+    static func songs(_ list: [(item: UInt32, catalog: UInt32)]) -> Data {
+        Fake.node("apso", Fake.u32("mstt", 200), Fake.node("mlcl", list.map {
+            Fake.node("mlit", Fake.u32("mcti", $0.item), Fake.u32("aeSI", $0.catalog))
+        }.reduce(Data(), +)))
+    }
+    /// Up Next: these places in this playlist, in this order.
+    static func queue(_ playlist: UInt32, _ items: [UInt32]) -> Data {
+        Fake.node("ceQR", Fake.u32("mstt", 200), Fake.node("mlcl", items.map { item in
+            let spec = [61, playlist, item, 40000 + item].reduce(Data()) { data, word in data + withUnsafeBytes(of: word.bigEndian) { Data($0) } }
+            return Fake.node("mlit", DMAPNode.encode("ceQs", spec), Fake.text("ceQn", "Song \(item)"), Fake.text("ceQr", "Artist"), Fake.u32("astm", 200_000))
+        }.reduce(Data(), +)))
+    }
+    static func music(upNext: Data) -> FakeDACP {
+        FakeDACP([("/login", 200, Fake.login),
+                  ("/databases/61/containers/\(aa)/items", 200, songs(aaSongs)),
+                  ("/databases/61/containers/\(smallAA)/items", 200, songs([(201, 11), (202, 12)])),
+                  ("/databases/61/containers", 200, playlists),
+                  ("/databases/61/items", 200, Fake.library), ("/databases", 200, Fake.databases),
+                  ("/ctrl-int/1/playqueue-contents", 200, upNext),
+                  ("/ctrl-int/1/playspec", 204, Data())])
+    }
+}
+
+@Suite struct MusicRemotePlaylistTests {
+    private let current = song("71F8D70086B0C8D9")
+
+    @Test func namesThePlaylistWhenUpNextIsTheRestOfItInOrder() async throws {
+        let queue = try #require(await client(Lists.music(upNext: Lists.queue(Lists.aa, [103, 104, 105]))).queue(current: current))
+        #expect(queue.playlist == PlaylistPlace(name: "Road Trip", count: 5, index: 1))
+        #expect(queue.upNext.count == 3)
+    }
+
+    @Test func noPlaylistWhenUpNextIsShuffledOrStartsWithSomethingElse() async throws {
+        let shuffled = await client(Lists.music(upNext: Lists.queue(Lists.aa, [103, 105, 101]))).queue(current: current)
+        #expect(shuffled?.playlist == nil)
+        // Play Next put a song from the library ahead of the playlist.
+        let added = await client(Lists.music(upNext: Lists.queue(62, [9]))).queue(current: current)
+        #expect(added?.playlist == nil)
+        // Up Next goes on from the playlist, but the song before it there isn't the current one.
+        let elsewhere = await client(Lists.music(upNext: Lists.queue(Lists.aa, [104, 105]))).queue(current: current)
+        #expect(elsewhere?.playlist == nil)
+        #expect(elsewhere?.upNext.count == 2, "Up Next is still read")
+    }
+
+    /// Near a playlist's end, Up Next goes on with Autoplay's songs.
+    @Test func namesThePlaylistNearItsEndToo() async throws {
+        let music = Lists.music(upNext: Lists.queue(Lists.aa, [105]) )
+        music.setAnswer("/databases/61/containers/\(Lists.aa)/items", 200,
+                        Lists.songs([(101, 11), (102, 12), (103, 13), (104, 1_102_360_418), (105, 15)]))
+        let autoplay = Fake.node("ceQR", Fake.u32("mstt", 200), Fake.node("mlcl",
+            [(Lists.aa, UInt32(105)), (62, 9), (62, 10)].map { playlist, item in
+                let spec = [61, playlist, item, 40000 + item].reduce(Data()) { $0 + withUnsafeBytes(of: $1.bigEndian) { Data($0) } }
+                return Fake.node("mlit", DMAPNode.encode("ceQs", spec), Fake.text("ceQn", "Song \(item)"), Fake.text("ceQr", "Artist"), Fake.u32("astm", 200_000))
+            }.reduce(Data(), +)))
+        music.setAnswer("/ctrl-int/1/playqueue-contents", 200, autoplay)
+        let queue = try #require(await client(music).queue(current: current))
+        #expect(queue.playlist == PlaylistPlace(name: "Road Trip", count: 5, index: 3))
+    }
+
+    @Test func playsThePlaylistFromTheSongWithTheQuotesAsTheyAre() async throws {
+        let music = Lists.music(upNext: Lists.queue(Lists.aa, [103]))
+        let outcome = await client(music).play("13", in: PlaylistPlace(name: "Road Trip", count: 5, index: 2))
+        #expect(outcome == .played(index: 2))
+        let asked = try #require(music.asked.withLock { $0 }.first { $0.hasPrefix("/ctrl-int/1/playspec") })
+        #expect(asked == "/ctrl-int/1/playspec?database-spec='dmap.itemid:61'&container-spec='dmap.persistentid:0x2a3b4c5d6e7f8091'"
+            + "&container-item-spec='dmap.containeritemid:103'&session-id=850003812")
+        // URLSession leaves the quotes alone: Music answers %27 with 500.
+        let url = try #require(URL(string: "http://127.0.0.1:1\(asked)"))
+        #expect(url.absoluteString.contains("'dmap.itemid:61'"))
+    }
+
+    @Test func findsTheSongNearbyAndSkipsASameNamedPlaylistWithoutIt() async throws {
+        let music = Lists.music(upNext: Data())
+        // Sent as the smaller Road Trip's size, so that one is tried first; it lacks song 14.
+        let outcome = await client(music).play("14", in: PlaylistPlace(name: "Road Trip", count: 2, index: 0))
+        #expect(outcome == .played(index: 3))
+        #expect(music.asked.withLock { $0 }.contains { $0.contains("container-item-spec='dmap.containeritemid:104'") })
+    }
+
+    @Test func notHereWhenNoPlaylistOfThatNameHasTheSong() async throws {
+        let music = Lists.music(upNext: Data())
+        #expect(await client(music).play("99", in: PlaylistPlace(name: "Road Trip", count: 5, index: 0)) == .notHere)
+        #expect(await client(music).play("13", in: PlaylistPlace(name: "Music", count: 3312, index: 0)) == .notHere, "Music's own lists don't count")
+        #expect(await client(music).play("13", in: PlaylistPlace(name: "Elsewhere", count: 5, index: 0)) == .notHere)
+        #expect(music.count("/ctrl-int/1/playspec") == 0)
+    }
+
+    @Test func aRefusalIsAFailure() async throws {
+        let music = Lists.music(upNext: Data())
+        music.setAnswer("/ctrl-int/1/playspec", 500, Data())
+        let outcome = await client(music).play("13", in: PlaylistPlace(name: "Road Trip", count: 5, index: 2))
+        #expect(outcome == .failed("Music answered playspec with 500"))
     }
 }

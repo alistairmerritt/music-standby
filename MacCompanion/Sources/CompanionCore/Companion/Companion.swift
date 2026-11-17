@@ -356,6 +356,7 @@ public final class Companion {
         } else {
             await monitor.waitOutLaunch()
             let outcome: MusicController.CommandOutcome
+            var playedPlaylist: PlaylistPlace?
             switch command.kind {
             case .seek:
                 // Clamped to the track Music had at the last read; Music
@@ -368,7 +369,7 @@ public final class Companion {
             case .selectOutput:
                 outcome = await controller.selectOutput(command.outputID ?? "")
             case .playStation:
-                outcome = await controller.playStation(seededBy: command.catalogID ?? "")
+                (outcome, playedPlaylist) = await playPlaylistOrStation(command)
             case .play, .pause, .next, .previous:
                 outcome = await controller.perform(MusicCommand(command.kind)!)
             }
@@ -389,7 +390,10 @@ public final class Companion {
                     recordHandBack("the iPhone has the music now")
                 }
                 if command.kind == .playStation, let position = command.position, let title = command.title {
-                    seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now())
+                    seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now(),
+                                             shuffle: playedPlaylist.map(\.isShuffled))
+                } else if let playedPlaylist {
+                    _ = await controller.setShuffle(playedPlaylist.isShuffled)
                 }
             }
         }
@@ -485,6 +489,33 @@ public final class Companion {
         return nil
     }
 
+    /// Continue on Mac for a song outside the Mac's queue: the library
+    /// playlist the phone plays it from, from the song, when the phone says
+    /// which and this Mac is connected to Music and has it with the song;
+    /// otherwise the song's station, as before (17 November 2026). Logs
+    /// the song's place, never the playlist's name.
+    private func playPlaylistOrStation(_ command: RemoteCommand) async -> (MusicController.CommandOutcome, PlaylistPlace?) {
+        let catalogID = command.catalogID ?? ""
+        if let place = command.playlist {
+            if !place.isValid {
+                recordHandBack("playStation: the phone's playlist place isn't usable; the station instead")
+            } else if let player = remote as? any MusicRemotePlaying {
+                switch await player.play(catalogID, in: place) {
+                case .played(let index):
+                    recordHandBack("playStation: the phone's playlist, from song \(index + 1) of \(place.count)\(place.isShuffled ? ", shuffled" : "")")
+                    return (.performed, place)
+                case .notHere:
+                    recordHandBack("playStation: no playlist here by that name has the song; the station instead")
+                case .failed(let reason):
+                    recordHandBack("playStation: the playlist didn't play (\(reason)); the station instead")
+                }
+            } else {
+                recordHandBack("playStation: not connected to Music, so no playlist; the station instead")
+            }
+        }
+        return (await controller.playStation(seededBy: catalogID), nil)
+    }
+
     @ObservationIgnored private var stationSeek: Task<Void, Never>?
     /// How long a station may take to start before the seek is given up.
     static let stationStartWait: TimeInterval = 10
@@ -497,7 +528,12 @@ public final class Companion {
     /// plays on. Seeking here rather than from the phone saves the second or
     /// two the phone takes to see the Mac playing (16 November 2026). The
     /// ack has gone already; the relay waits only 1.2 s for it.
-    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date) {
+    ///
+    /// For a playlist (`shuffle` set), Music's shuffle follows the phone's
+    /// once the song plays: on, Music keeps the song and shuffles the rest
+    /// (seen 17 November 2026).
+    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, shuffle: Bool? = nil) {
+        let what = shuffle == nil ? "the station" : "the playlist"
         let before = snapshot?.track?.persistentID ?? snapshot?.track?.title
         stationSeek?.cancel()
         stationSeek = Task { [weak self] in
@@ -507,14 +543,15 @@ public final class Companion {
                 try? await Task.sleep(for: Self.stationPoll)
                 let read = await controller.snapshot()
                 guard read.state == .playing, let track = read.track, (track.persistentID ?? track.title) != before else { continue }
+                if let shuffle { _ = await controller.setShuffle(shuffle) }
                 guard track.title.compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame else {
-                    recordHandBack("playStation: the station starts with another song; no seek")
+                    recordHandBack("playStation: \(what) starts with another song; no seek")
                     return
                 }
                 let target = position + max(0, now().timeIntervalSince(issuedAt)) + 0.2
                 guard track.duration <= 0 || target < track.duration - 2 else { return }
                 _ = await controller.seek(to: target)
-                recordHandBack("playStation: the station starts with the song; seek to \(Int(target)) s")
+                recordHandBack("playStation: \(what) starts with the song; seek to \(Int(target)) s")
                 return
             }
         }
@@ -924,7 +961,7 @@ extension RemoteCommand {
         case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
         case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
         case .selectOutput: "selectOutput \(outputID ?? "-")"
-        case .playStation: "playStation \(catalogID ?? "-")"
+        case .playStation: "playStation \(catalogID ?? "-")\(playlist == nil ? "" : " in a playlist")"
         case .play, .pause, .next, .previous: kind.rawValue + (reason.map { " (\($0))" } ?? "")
         }
     }

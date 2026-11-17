@@ -139,6 +139,12 @@ public actor MusicController {
         perform(script: .setVolume(min(100, max(0, level))))
     }
 
+    /// `set shuffle enabled`: Music's own shuffle, for the playlist a
+    /// Continue on Mac starts.
+    public func setShuffle(_ on: Bool) -> CommandOutcome {
+        perform(script: .setShuffle(on))
+    }
+
     /// Plays to the AirPlay device with this `AudioOutput.id`, and only to it.
     public func selectOutput(_ id: String) -> CommandOutcome {
         perform(script: .selectOutput(id))

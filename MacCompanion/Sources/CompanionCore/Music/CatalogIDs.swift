@@ -1,4 +1,5 @@
 import Foundation
+import StandByProtocol
 
 /// Apple Music catalogue IDs for songs Music's remote protocol gives none
 /// for: those played from Apple Music without being in the library. Seen on
@@ -129,5 +130,15 @@ public struct CatalogFillingRemote: MusicRemoteReading {
         if fillCurrent { queue.catalogID = answers.popFirst() ?? nil }
         for index in missing { queue.upNext[index].catalogID = answers.popFirst() ?? nil }
         return queue
+    }
+}
+
+/// The app's remote is this wrapper, so it passes Continue on Mac's
+/// playlist through to the client it wraps. Without this the companion saw
+/// no way to play a playlist and played the station (17 November 2026).
+extension CatalogFillingRemote: MusicRemotePlaying {
+    public func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome {
+        guard let player = remote as? any MusicRemotePlaying else { return .failed("this remote can't play a playlist") }
+        return await player.play(catalogID, in: place)
     }
 }

@@ -290,6 +290,16 @@ import Testing
         #expect(events.runner().run(.seek(1)) == .failure(code: -10006, message: "Can’t set player position."))
     }
 
+    @Test func setShuffleSetsTheApplicationsShuffleProperty() {
+        let events = Events()
+        events.replies["set pShE of app"] = .result(nil)
+        #expect(events.runner().run(.setShuffle(true)) == .value(.text("ok")))
+        #expect(events.runner().run(.setShuffle(false)) == .value(.text("ok")))
+        #expect(events.sent.map(\.event) == ["core/setd", "core/setd"])
+        #expect(events.paths == ["pShE of app", "pShE of app"])
+        #expect(events.sent.map { $0.data?.booleanValue } == [true, false])
+    }
+
     @Test func selectOutputFindsTheDeviceThenSetsTheCurrentDevices() {
         let events = Events()
         events.replies["pALL of cAPD[all ] of app"] = .result(Self.airPlayDevices())

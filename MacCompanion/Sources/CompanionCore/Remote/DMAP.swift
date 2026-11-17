@@ -12,6 +12,8 @@ public struct DMAPNode: Equatable, Sendable {
     /// Containers DACP answers with, as far as the companion reads them.
     public static let containers: Set<String> = [
         "mlog", "msrv", "cmst", "ceQR", "ceQS", "mlcl", "mlit", "avdb", "adbs", "cmpa", "ceQi",
+        // Playlists, and one playlist's songs (17 November 2026).
+        "aply", "apso",
     ]
 
     public static func parse(_ data: Data, containers: Set<String> = containers) -> [DMAPNode] {
