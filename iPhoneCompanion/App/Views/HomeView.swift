@@ -50,7 +50,7 @@ struct HomeView: View {
                 Text(iPhoneIsPlaying ? "Now Playing on Mac · Paused" : "Now Playing on Mac")
             } footer: {
                 if iPhoneIsPlaying, iPhoneHasMacSong {
-                    Text("This song is playing on your iPhone now.")
+                    Text("This song is playing on your iPhone.")
                 }
             }
 
