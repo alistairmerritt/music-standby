@@ -131,6 +131,13 @@ public final class Companion {
     /// snapshots in between (Up Next lags an edit until the next of those).
     @ObservationIgnored private var remoteRead: (key: String, task: Task<RemoteQueue?, Never>)?
     static let remoteWait: Duration = .milliseconds(400)
+    /// When the current answer was asked for, and whether a re-read is out.
+    @ObservationIgnored private var remoteReadAt: Date?
+    @ObservationIgnored private var rereading = false
+    /// How often the same song's queue is read again, for a change of
+    /// shuffle, repeat or source part-way through it (17 November 2026).
+    /// Tests shorten it.
+    @ObservationIgnored var remoteRereadInterval: TimeInterval = 15
 
     private enum RemoteArtworkEntry {
         case asking(Task<ProcessedArtwork?, Never>)
@@ -355,8 +362,10 @@ public final class Companion {
             ack = reject(command, .noCurrentTrack, "nothing is loaded in Music")
         } else {
             await monitor.waitOutLaunch()
+            // Anything else from the phone ends a wait for its playlist to arrive.
+            if ![.seek, .setVolume, .selectOutput].contains(command.kind) { libraryWait?.cancel() }
             let outcome: MusicController.CommandOutcome
-            var playedPlaylist: PlaylistPlace?
+            var start: HandOverStart?
             switch command.kind {
             case .seek:
                 // Clamped to the track Music had at the last read; Music
@@ -369,7 +378,9 @@ public final class Companion {
             case .selectOutput:
                 outcome = await controller.selectOutput(command.outputID ?? "")
             case .playStation:
-                (outcome, playedPlaylist) = await playPlaylistOrStation(command)
+                let started = await playPlaylistOrStation(command)
+                outcome = started.outcome
+                start = started
             case .play, .pause, .next, .previous:
                 outcome = await controller.perform(MusicCommand(command.kind)!)
             }
@@ -389,12 +400,7 @@ public final class Companion {
                     phoneHasMusic = true
                     recordHandBack("the iPhone has the music now")
                 }
-                if command.kind == .playStation, let position = command.position, let title = command.title {
-                    seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now(),
-                                             shuffle: playedPlaylist.map(\.isShuffled))
-                } else if let playedPlaylist {
-                    _ = await controller.setShuffle(playedPlaylist.isShuffled)
-                }
+                if let start, !start.waiting { await afterStart(command, start) }
             }
         }
         remember(ack)
@@ -469,7 +475,11 @@ public final class Companion {
     private func remoteQueue(for snapshot: MusicSnapshot) async -> RemoteQueue? {
         guard let remote, let track = snapshot.track else { return nil }
         let key = "\(track.trackID)|\(snapshot.state.rawValue)"
+        if remoteRead?.key == key, !rereading, let at = remoteReadAt, now().timeIntervalSince(at) >= remoteRereadInterval {
+            rereadRemote(key: key, track: track, remote: remote)
+        }
         if remoteRead?.key != key {
+            remoteReadAt = now()
             remoteRead = (key, Task {
                 let started = ContinuousClock.now
                 let queue = await remote.queue(current: track)
@@ -489,31 +499,196 @@ public final class Companion {
         return nil
     }
 
-    /// Continue on Mac for a song outside the Mac's queue: the library
-    /// playlist the phone plays it from, from the song, when the phone says
-    /// which and this Mac is connected to Music and has it with the song;
-    /// otherwise the song's station, as before (17 November 2026). Logs
-    /// the song's place, never the playlist's name.
-    private func playPlaylistOrStation(_ command: RemoteCommand) async -> (MusicController.CommandOutcome, PlaylistPlace?) {
+    /// The same song's queue again, in the background: kept, and the phone
+    /// told, only when shuffle, repeat or the source changed. Up Next alone
+    /// changing (a reorder) isn't worth a push.
+    private func rereadRemote(key: String, track: MusicTrack, remote: any MusicRemoteReading) {
+        guard let current = remoteRead?.task else { return }
+        rereading = true
+        remoteReadAt = now()
+        Task { [weak self] in
+            let before = await current.value
+            let fresh = await remote.queue(current: track)
+            guard let self else { return }
+            self.rereading = false
+            guard self.remoteRead?.key == key, let fresh, let before, fresh.context != before.context else { return }
+            self.remoteRead = (key, Task { fresh })
+            Self.queueLog.log("read again: from \(fresh.sourceSummary, privacy: .public); repeat \(fresh.repeatMode?.rawValue ?? "-", privacy: .public)")
+            self.refresh()
+        }
+    }
+
+    /// What Continue on Mac started, for the steps once Music plays it.
+    struct HandOverStart {
+        var outcome: MusicController.CommandOutcome
+        /// Music's shuffle once the song plays; nil leaves it.
+        var shuffle: Bool?
+        /// Music's repeat once the song plays; nil leaves it.
+        var repeatMode: RepeatMode?
+        /// What plays, for the log: never a name.
+        var what: String
+        /// True while waiting for a playlist or album the phone has just
+        /// added to the library: nothing has started yet.
+        var waiting = false
+    }
+
+    /// Continue on Mac for a song outside the Mac's queue (17 November 2026),
+    /// when this Mac is connected to Music and has what the phone says:
+    /// - the library playlist or album the phone plays it from, from the
+    ///   song (an album in order: Music can't shuffle within one);
+    /// - the library, shuffled, from the song;
+    /// - an Apple Music playlist or album the phone has just added to the
+    ///   library: once it arrives here, which can take a few seconds
+    ///   (`librarySyncWait`, `waitForTheLibrary`);
+    /// - the phone's Apple Music station, which starts on another song.
+    /// Otherwise the song's station, as before. Logs places, never names.
+    private func playPlaylistOrStation(_ command: RemoteCommand) async -> HandOverStart {
         let catalogID = command.catalogID ?? ""
+        let player = remote as? any MusicRemotePlaying
+        var waitFor = false
+        if command.playlist == nil, let album = command.album {
+            if !album.isValid {
+                recordHandBack("playStation: the phone's album place isn't usable; the station instead")
+            } else if let player {
+                if let start = await playAlbum(catalogID, in: album, with: player, repeatMode: command.repeatMode) { return start }
+                waitFor = album.addedToLibrary == true
+            } else {
+                recordHandBack("playStation: not connected to Music, so no album; the station instead")
+            }
+        }
         if let place = command.playlist {
             if !place.isValid {
                 recordHandBack("playStation: the phone's playlist place isn't usable; the station instead")
-            } else if let player = remote as? any MusicRemotePlaying {
-                switch await player.play(catalogID, in: place) {
-                case .played(let index):
-                    recordHandBack("playStation: the phone's playlist, from song \(index + 1) of \(place.count)\(place.isShuffled ? ", shuffled" : "")")
-                    return (.performed, place)
-                case .notHere:
-                    recordHandBack("playStation: no playlist here by that name has the song; the station instead")
-                case .failed(let reason):
-                    recordHandBack("playStation: the playlist didn't play (\(reason)); the station instead")
-                }
+            } else if let player {
+                if let start = await playPlaylist(catalogID, in: place, with: player, repeatMode: command.repeatMode) { return start }
+                waitFor = place.addedToLibrary == true
             } else {
                 recordHandBack("playStation: not connected to Music, so no playlist; the station instead")
             }
         }
-        return (await controller.playStation(seededBy: catalogID), nil)
+        if let player, waitFor {
+            waitForTheLibrary(command, with: player)
+            return HandOverStart(outcome: .performed, what: "the phone's new library playlist or album", waiting: true)
+        }
+        if command.shuffledLibrary == true {
+            if let player {
+                let controller = controller
+                // Shuffle off until the song plays, or Music starts on another one.
+                switch await player.playInLibrary(catalogID, beforeStart: { _ = await controller.setShuffle(false) }) {
+                case .played:
+                    recordHandBack("playStation: the song from the library, then the library shuffled")
+                    return HandOverStart(outcome: .performed, shuffle: true, repeatMode: command.repeatMode, what: "the library")
+                case .notHere:
+                    recordHandBack("playStation: the song isn't in the library here; the station instead")
+                case .failed(let reason):
+                    recordHandBack("playStation: the library didn't play (\(reason)); the station instead")
+                }
+            } else {
+                recordHandBack("playStation: not connected to Music, so no library shuffle; the station instead")
+            }
+        }
+        return await playStation(for: command)
+    }
+
+    /// The phone's station when it says which, or else the song's.
+    private func playStation(for command: RemoteCommand) async -> HandOverStart {
+        if let station = command.station {
+            if station.isValid {
+                recordHandBack("playStation: the phone's station, which starts on a song of its own")
+                return HandOverStart(outcome: await controller.playStation(station), what: "the phone's station")
+            }
+            recordHandBack("playStation: the phone's station isn't usable; the song's station instead")
+        }
+        return HandOverStart(outcome: await controller.playStation(seededBy: command.catalogID ?? ""), what: "the station")
+    }
+
+    /// Nil when the album isn't here with the song, or didn't play.
+    private func playAlbum(_ catalogID: String, in album: AlbumPlace, with player: any MusicRemotePlaying,
+                           repeatMode: RepeatMode?, quiet: Bool = false) async -> HandOverStart? {
+        // Shuffle on, Music draws from the whole library after an album's cue.
+        let controller = controller
+        switch await player.playAlbum(catalogID, in: album, beforeStart: { _ = await controller.setShuffle(false) }) {
+        case .played(let index):
+            recordHandBack("playStation: the phone's album, from song \(index + 1) of \(album.count)\(album.isShuffled ? ", in order (Music can't shuffle within an album)" : "")")
+            return HandOverStart(outcome: .performed, shuffle: false, repeatMode: repeatMode, what: "the album")
+        case .notHere:
+            if !quiet { recordHandBack("playStation: no album here has the song\(album.addedToLibrary == true ? " yet" : "; the station instead")") }
+        case .failed(let reason):
+            recordHandBack("playStation: the album didn't play (\(reason)); the station instead")
+        }
+        return nil
+    }
+
+    /// Nil when no playlist here by that name has the song, or it didn't play.
+    private func playPlaylist(_ catalogID: String, in place: PlaylistPlace, with player: any MusicRemotePlaying,
+                              repeatMode: RepeatMode?, quiet: Bool = false) async -> HandOverStart? {
+        switch await player.play(catalogID, in: place) {
+        case .played(let index):
+            recordHandBack("playStation: the phone's playlist, from song \(index + 1) of \(place.count)\(place.isShuffled ? ", shuffled" : "")")
+            return HandOverStart(outcome: .performed, shuffle: place.isShuffled, repeatMode: repeatMode, what: "the playlist")
+        case .notHere:
+            if !quiet { recordHandBack("playStation: no playlist here by that name has the song\(place.addedToLibrary == true ? " yet" : "; the station instead")") }
+        case .failed(let reason):
+            recordHandBack("playStation: the playlist didn't play (\(reason)); the station instead")
+        }
+        return nil
+    }
+
+    @ObservationIgnored private var libraryWait: Task<Void, Never>?
+    /// How often to look for the phone's new playlist or album. Tests shorten it.
+    @ObservationIgnored var libraryPoll: Duration = .seconds(2)
+    /// How long after the phone asked to look. Tests shorten it.
+    @ObservationIgnored var librarySyncWait: TimeInterval = PlaylistPlace.librarySyncWait
+
+    /// The phone added an Apple Music playlist or album to the library just
+    /// before it asked: look for it here every `libraryPoll` until
+    /// `librarySyncWait` after the phone asked, then play it from the song.
+    /// The command has been answered already; the phone plays on meanwhile,
+    /// so the seek still lands where it is. Not here in time: the station.
+    /// It took 4 s to arrive on 17 November 2026.
+    private func waitForTheLibrary(_ command: RemoteCommand, with player: any MusicRemotePlaying) {
+        libraryWait?.cancel()
+        let catalogID = command.catalogID ?? ""
+        let deadline = (command.issuedAt ?? now()).addingTimeInterval(librarySyncWait)
+        recordHandBack("playStation: waiting for the phone's playlist or album to reach this library")
+        libraryWait = Task { [weak self] in
+            guard let self else { return }
+            while now() < deadline {
+                try? await Task.sleep(for: libraryPoll)
+                guard !Task.isCancelled else { return }
+                var start: HandOverStart?
+                if let place = command.playlist, place.isValid {
+                    start = await playPlaylist(catalogID, in: place, with: player, repeatMode: command.repeatMode, quiet: true)
+                } else if let album = command.album, album.isValid {
+                    start = await playAlbum(catalogID, in: album, with: player, repeatMode: command.repeatMode, quiet: true)
+                }
+                guard !Task.isCancelled else { return }
+                if let start {
+                    await afterStart(command, start)
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            recordHandBack("playStation: the phone's playlist or album didn't reach this library in \(Int(librarySyncWait)) s")
+            let start = await playStation(for: command)
+            if case .performed = start.outcome {
+                await afterStart(command, start)
+            } else {
+                recordHandBack("playStation: the station didn't play either")
+            }
+        }
+    }
+
+    /// Once Music has been told: seek to the phone's point when the song
+    /// starts, and set shuffle and repeat to the phone's.
+    private func afterStart(_ command: RemoteCommand, _ start: HandOverStart) async {
+        if let position = command.position, let title = command.title {
+            seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now(), shuffle: start.shuffle,
+                                     repeatMode: start.repeatMode, what: start.what)
+        } else {
+            if let shuffle = start.shuffle { _ = await controller.setShuffle(shuffle) }
+            if let mode = start.repeatMode { _ = await controller.setRepeat(mode) }
+        }
     }
 
     @ObservationIgnored private var stationSeek: Task<Void, Never>?
@@ -532,8 +707,8 @@ public final class Companion {
     /// For a playlist (`shuffle` set), Music's shuffle follows the phone's
     /// once the song plays: on, Music keeps the song and shuffles the rest
     /// (seen 17 November 2026).
-    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, shuffle: Bool? = nil) {
-        let what = shuffle == nil ? "the station" : "the playlist"
+    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, shuffle: Bool? = nil,
+                                          repeatMode: RepeatMode? = nil, what: String = "the station") {
         let before = snapshot?.track?.persistentID ?? snapshot?.track?.title
         stationSeek?.cancel()
         stationSeek = Task { [weak self] in
@@ -543,15 +718,20 @@ public final class Companion {
                 try? await Task.sleep(for: Self.stationPoll)
                 let read = await controller.snapshot()
                 guard read.state == .playing, let track = read.track, (track.persistentID ?? track.title) != before else { continue }
-                if let shuffle { _ = await controller.setShuffle(shuffle) }
-                guard track.title.compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame else {
+                // The seek first: setting shuffle can take Music a second or
+                // more, and the phone seeks itself if the Mac is slow (17
+                // November 2026).
+                if track.title.compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+                    let target = position + max(0, now().timeIntervalSince(issuedAt)) + 0.2
+                    if track.duration <= 0 || target < track.duration - 2 {
+                        _ = await controller.seek(to: target)
+                        recordHandBack("playStation: \(what) starts with the song; seek to \(Int(target)) s")
+                    }
+                } else {
                     recordHandBack("playStation: \(what) starts with another song; no seek")
-                    return
                 }
-                let target = position + max(0, now().timeIntervalSince(issuedAt)) + 0.2
-                guard track.duration <= 0 || target < track.duration - 2 else { return }
-                _ = await controller.seek(to: target)
-                recordHandBack("playStation: \(what) starts with the song; seek to \(Int(target)) s")
+                if let shuffle { _ = await controller.setShuffle(shuffle) }
+                if let repeatMode { _ = await controller.setRepeat(repeatMode) }
                 return
             }
         }
@@ -917,7 +1097,7 @@ public final class Companion {
             return
         }
         let withID = queue.upNext.filter { $0.catalogID != nil }.count
-        queueLog.log("read in \(ms, privacy: .public) ms: song \(queue.catalogID == nil ? "without" : "with", privacy: .public) a catalogue ID; Up Next \(queue.upNext.count, privacy: .public), \(withID, privacy: .public) with one")
+        queueLog.log("read in \(ms, privacy: .public) ms: song \(queue.catalogID == nil ? "without" : "with", privacy: .public) a catalogue ID; Up Next \(queue.upNext.count, privacy: .public), \(withID, privacy: .public) with one; from \(queue.sourceSummary, privacy: .public); repeat \(queue.repeatMode?.rawValue ?? "-", privacy: .public)")
     }
 
     private func recordHandBack(_ text: String) {
@@ -961,7 +1141,8 @@ extension RemoteCommand {
         case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
         case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
         case .selectOutput: "selectOutput \(outputID ?? "-")"
-        case .playStation: "playStation \(catalogID ?? "-")\(playlist == nil ? "" : " in a playlist")"
+        case .playStation:
+            "playStation \(catalogID ?? "-")\(playlist != nil ? " in a playlist" : album != nil ? " in an album" : shuffledLibrary == true ? " in the library, shuffled" : station != nil ? " on a station" : "")\(repeatMode.map { ", repeat \($0)" } ?? "")"
         case .play, .pause, .next, .previous: kind.rawValue + (reason.map { " (\($0))" } ?? "")
         }
     }

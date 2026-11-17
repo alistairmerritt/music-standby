@@ -46,6 +46,13 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         remembered.append(place)
         return playlistHere
     }
+    /// What `albumPlace()` finds here, and how often it was asked.
+    var albumHere: AlbumPlace?
+    private(set) var albumAsks = 0
+    func albumPlace() async -> AlbumPlace? {
+        albumAsks += 1
+        return albumHere
+    }
     /// What `play(_:in:…)` plays: nil when the playlist isn't here.
     var playsPlaylist: PlaylistPlace?
     private(set) var playlistAsked: [(id: String, place: PlaylistPlace, position: TimeInterval)] = []
@@ -54,6 +61,42 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         playlistAsked.append((catalogID, place, position()))
         return playsPlaylist
     }
+
+    // 17 November 2026
+    var playsAlbum: AlbumPlace?
+    private(set) var albumPlayAsked: [(id: String, place: AlbumPlace)] = []
+    func play(_ catalogID: String, inAlbum place: AlbumPlace, position: @escaping @MainActor () -> TimeInterval,
+              timeout: TimeInterval) async -> AlbumPlace? {
+        albumPlayAsked.append((catalogID, place))
+        return playsAlbum
+    }
+    var playsLibrary = false
+    private(set) var libraryAsked: [String] = []
+    func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval) async -> Bool {
+        libraryAsked.append(catalogID)
+        return playsLibrary
+    }
+    var playsFromAppleMusic: AppleMusicSource?
+    private(set) var appleMusicAsked: [(id: String, shuffled: Bool, allowStation: Bool)] = []
+    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
+                            shuffled: Bool, allowStation: Bool) async -> AppleMusicSource? {
+        appleMusicAsked.append((catalogID, shuffled, allowStation))
+        return playsFromAppleMusic
+    }
+    var appleMusicHere: AppleMusicSource?
+    func appleMusicSource() async -> AppleMusicSource? { appleMusicHere }
+    var adds = true
+    private(set) var added: [AppleMusicSource] = []
+    func addToLibrary(_ source: AppleMusicSource) async -> Bool {
+        added.append(source)
+        return adds
+    }
+    var shufflingLibrary = false
+    func isShufflingLibrary() async -> Bool { shufflingLibrary }
+    var repeatHere: RepeatMode?
+    private(set) var repeatsSet: [RepeatMode] = []
+    func repeatMode() -> RepeatMode? { repeatHere }
+    func setRepeat(_ mode: RepeatMode) { repeatsSet.append(mode) }
 }
 
 private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) -> PlaybackMessage {

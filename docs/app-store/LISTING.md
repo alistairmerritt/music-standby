@@ -81,8 +81,8 @@ Press it here. It happens there.
 • Player gone from your Lock Screen or StandBy? An optional reminder brings it back when your Mac starts playing again.
 
 Take your music with you. Then bring it back.
-• Continue on iPhone picks up the song from your Mac in Apple Music on your iPhone, from the same point, with your playlist or Up Next queue.
-• Continue on Mac sends what your iPhone is playing back to your Mac, from the same point. A playlist from your library carries on there too.
+• Continue on iPhone picks up the song from your Mac in Apple Music on your iPhone, from the same point, with your playlist, album, station or Up Next queue, shuffled or not.
+• Continue on Mac sends what your iPhone is playing back to your Mac, from the same point. Your playlist, album or shuffled library carries on there too.
 • Continue Listening works with Shortcuts, so your music can move between devices without you lifting a finger.
 
 Requirements
@@ -146,6 +146,7 @@ What the demo can't show:
 
 Permissions:
 - Apple Music (media library) access is asked for only when the person uses Continue Listening, which plays the song in Apple Music on the iPhone.
+- Continue on Mac adds an Apple Music playlist or album to the person's library only if they turn on "Add to Library for Continue on Mac" (off by default), because the Mac can only play one from the library.
 - Notifications are asked for only when the person turns on the reminder. The reminder, and the alert for Continue from iPhone (asked for at the Mac), are time-sensitive, so they show during a Focus.
 
 Background: the app's remote-notification background mode lets the Mac's "Continue from iPhone" start the hand-over while the app isn't open. Now Playing updates reach the Lock Screen through the Now Playing push type of Apple's remote media session.

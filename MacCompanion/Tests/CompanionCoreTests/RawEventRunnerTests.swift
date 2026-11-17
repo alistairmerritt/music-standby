@@ -290,14 +290,21 @@ import Testing
         #expect(events.runner().run(.seek(1)) == .failure(code: -10006, message: "Can’t set player position."))
     }
 
-    @Test func setShuffleSetsTheApplicationsShuffleProperty() {
+    @Test func setShuffleSetsTheApplicationsShuffleAndChecksItTook() {
+        RawEventRunner.shuffleCheckDelay = 0
         let events = Events()
         events.replies["set pShE of app"] = .result(nil)
-        #expect(events.runner().run(.setShuffle(true)) == .value(.text("ok")))
+        events.replies["pShE of app"] = .result(NSAppleEventDescriptor(boolean: false))
         #expect(events.runner().run(.setShuffle(false)) == .value(.text("ok")))
-        #expect(events.sent.map(\.event) == ["core/setd", "core/setd"])
-        #expect(events.paths == ["pShE of app", "pShE of app"])
-        #expect(events.sent.map { $0.data?.booleanValue } == [true, false])
+        #expect(events.sent.map(\.event) == ["core/setd", "core/getd"])
+        #expect(events.sent.first?.data?.booleanValue == false)
+
+        // Music never agrees: five tries, then a failure.
+        let stuck = Events()
+        stuck.replies["set pShE of app"] = .result(nil)
+        stuck.replies["pShE of app"] = .result(NSAppleEventDescriptor(boolean: true))
+        #expect(stuck.runner().run(.setShuffle(false)) == .failure(code: -1, message: "Music's shuffle stayed on"))
+        #expect(stuck.sent.count == 10)
     }
 
     @Test func selectOutputFindsTheDeviceThenSetsTheCurrentDevices() {

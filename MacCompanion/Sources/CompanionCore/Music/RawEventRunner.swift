@@ -80,7 +80,9 @@ public struct RawEventRunner: MusicScriptRunning {
         case .command(let command): music.command(command)
         case .seek(let seconds): music.set(.property(Code.playerPosition), to: NSAppleEventDescriptor(double: seconds))
         case .setVolume(let level): music.set(.property(Code.soundVolume), to: NSAppleEventDescriptor(int32: Int32(level)))
-        case .setShuffle(let on): music.set(.property(Code.shuffleEnabled), to: NSAppleEventDescriptor(boolean: on))
+        case .setShuffle(let on): setShuffle(music, on)
+        case .setRepeat(let mode):
+            music.set(.property(Code.songRepeat), to: NSAppleEventDescriptor(enumCode: mode == .one ? Code.repeatOne : mode == .all ? Code.repeatAll : Code.repeatOff))
         case .selectOutput(let id): selectOutput(music, id: id)
         case .openLocation(let url): music.openLocation(url)
         }
@@ -308,6 +310,27 @@ public struct RawEventRunner: MusicScriptRunning {
         }
     }
 
+    /// How long to give Music before reading shuffle back. Tests shorten it.
+    nonisolated(unsafe) static var shuffleCheckDelay: TimeInterval = 0.3
+
+    /// `set shuffle enabled`, read back until Music agrees, up to five
+    /// times. Music can take a moment to change it, and once didn't on the
+    /// first try while paused, which left a later album shuffling through
+    /// the whole library (17 November 2026).
+    private func setShuffle(_ music: Target, _ on: Bool) -> ScriptOutput {
+        for _ in 0..<5 {
+            switch music.set(.property(Code.shuffleEnabled), to: NSAppleEventDescriptor(boolean: on)) {
+            case .failure(let code, let message): return .failure(code: code, message: message)
+            default: break
+            }
+            Thread.sleep(forTimeInterval: Self.shuffleCheckDelay)
+            if case .result(let value) = music.get(.property(Code.shuffleEnabled), timeout: 3), value?.booleanValue == on {
+                return .value(.text("ok"))
+            }
+        }
+        return .failure(code: -1, message: "Music's shuffle stayed \(on ? "off" : "on")")
+    }
+
     /// Music, as one process.
     struct Target {
         let pid: pid_t
@@ -449,6 +472,10 @@ enum Code {
     static let properties = fcc("pALL")
     static let soundVolume = fcc("pVol")
     static let shuffleEnabled = fcc("pShE")
+    static let songRepeat = fcc("pRpt")
+    static let repeatOff = fcc("kRpO")
+    static let repeatOne = fcc("kRp1")
+    static let repeatAll = fcc("kAll")
     static let currentAirPlayDevices = fcc("pAPD")
 
     // AirPlay devices

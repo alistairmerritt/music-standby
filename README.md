@@ -12,12 +12,21 @@ the old name.
 
 - **Now Playing on the iPhone** for Music on the Mac: song, artwork, progress, play, pause,
   skip, seek, and Music's own volume (never the Mac's system volume).
-- **Continue on iPhone:** the Mac's song carries on in Apple Music on the phone, with the
-  Mac's Up Next after it, and the Mac pauses. When the Mac has little queued, as on a
-  station, a station made from the song follows. Run again with nothing new on the Mac (say
-  from a CarPlay automation), it carries on with the phone's own music instead.
-- **Continue on Mac:** the phone's song carries on in Music on the Mac. A song the Mac's queue
-  doesn't have goes as its station.
+- **Continue on iPhone:** the Mac's song carries on in Apple Music on the phone from the same
+  point, and the Mac pauses. What it plays from comes too, shuffled or not:
+  - a library playlist or album;
+  - the whole library shuffled;
+  - an Apple Music playlist, album or station (from recently played).
+  Otherwise the Mac's Up Next comes, then a station made from the song. Run again with nothing
+  new on the Mac (say from a CarPlay automation), it carries on with the phone's own music
+  instead.
+- **Continue on Mac:** the phone's song carries on in Music on the Mac, with its library
+  playlist, album or shuffled library. An Apple Music playlist or album comes only if the
+  phone may add it to the library (a setting, off by default). The phone's station goes as
+  that station, starting on another song. Anything else goes as the song's station.
+- **Both ways:** repeat comes along. The exact shuffle order and songs added with Play Next
+  don't: Apple gives apps no way to read the phone's queue or to set the Mac's. See
+  `docs/ios/STATUS.md`.
 - **Continue from iPhone:** the same from the Mac's side, as a menu button or a Shortcuts
   action. The phone is woken in the background, or shown a notification with a Continue on
   Mac button, which Apple Watch shows too.

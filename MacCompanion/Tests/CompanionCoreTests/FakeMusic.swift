@@ -35,6 +35,8 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
     private var _volume = 100
     private var _shuffle = false
     var shuffle: Bool { lock.withLock { _shuffle } }
+    private var _repeatMode: RepeatMode = .off
+    var repeatMode: RepeatMode { lock.withLock { _repeatMode } }
     /// Music's AirPlay devices: name, kind text, selected, available, network address.
     private var _outputs: [(name: String, kind: String, selected: Bool, available: Bool, address: String?)] = [
         ("Test Mac", "computer", true, true, nil),
@@ -139,6 +141,9 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
                 return .value(.text("ok"))
             case .setShuffle(let on):
                 _shuffle = on
+                return .value(.text("ok"))
+            case .setRepeat(let mode):
+                _repeatMode = mode
                 return .value(.text("ok"))
             case .selectOutput(let id):
                 guard let index = _outputs.firstIndex(where: { AudioOutput.makeID(networkAddress: $0.address, name: $0.name) == id }) else {

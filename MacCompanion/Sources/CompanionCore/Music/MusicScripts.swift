@@ -1,4 +1,5 @@
 import Foundation
+import StandByProtocol
 
 /// A playback command Music.app understands. A superset of the wire's
 /// `CommandKind`: the menu also offers a play/pause toggle.
@@ -41,6 +42,9 @@ public enum MusicScript: Hashable, Sendable {
     /// song for Continue on Mac, Music keeps that song and shuffles the
     /// rest when it's on (seen 17 November 2026). Added 17 November 2026.
     case setShuffle(Bool)
+    /// `set song repeat to off|one|all`, for a hand-over to keep the
+    /// phone's repeat. Added 17 November 2026.
+    case setRepeat(RepeatMode)
 
     /// Guard 2 of 2. Music may quit between the process check and the Apple
     /// Event, and `tell application "Music"` would relaunch it. `is running`
@@ -80,6 +84,14 @@ public enum MusicScript: Hashable, Sendable {
             \(Self.guardLine)
             with timeout of 3 seconds
             \ttell application "Music" to set shuffle enabled to \(on ? "true" : "false")
+            end timeout
+            return "ok"
+            """
+        case .setRepeat(let mode):
+            """
+            \(Self.guardLine)
+            with timeout of 3 seconds
+            \ttell application "Music" to set song repeat to \(mode == .one ? "one" : mode == .all ? "all" : "off")
             end timeout
             return "ok"
             """

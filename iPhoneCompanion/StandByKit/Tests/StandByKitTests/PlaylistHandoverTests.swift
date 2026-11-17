@@ -54,6 +54,17 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.playlistAsked.count == 1)
         #expect(phone.asked.first?.ids == ["1102360418", "1102359994", "1102359746", "1102359555", "1102359444"])
         #expect(HandoverMemory.defaults(h.defaults).loadPlaylist() == nil, "an old playlist isn't kept")
+        #expect(HandoverMemory.defaults(h.defaults).loadQueued() == phone.asked.first?.ids, "the queued songs are kept for the way back")
+    }
+
+    @Test func playingTheMacsPlaylistForgetsTheQueuedSongs() async {
+        let (h, task) = await ready(playingFromAA())
+        defer { task.cancel() }
+        HandoverMemory.defaults(h.defaults).saveQueued(["1"])
+        let phone = FakePhoneMusic()
+        phone.playsPlaylist = aaHere
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(HandoverMemory.defaults(h.defaults).loadQueued() == nil)
     }
 
     @Test func aStationFollowsThePlaylistsLastSongs() async {
@@ -66,16 +77,113 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.stationSeeds == ["1102360418"], "one song left, then the song's station")
     }
 
-    @Test func aShuffledOrUnusablePlaceIsIgnored() async {
-        for place in [PlaylistPlace(name: "Road Trip", count: 123, index: 39, shuffled: true), PlaylistPlace(name: "Road Trip", count: 3, index: 9)] {
-            let (h, task) = await ready(playingFromAA(at: place))
-            let phone = FakePhoneMusic()
-            phone.playsPlaylist = aaHere
-            #expect(await h.model.continueOnPhone(with: phone) == .continued)
-            #expect(phone.playlistAsked.isEmpty)
-            #expect(phone.asked.count == 1)
-            task.cancel()
-        }
+    @Test func anUnusablePlaceIsIgnored() async {
+        let (h, task) = await ready(playingFromAA(at: PlaylistPlace(name: "Road Trip", count: 3, index: 9)))
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsPlaylist = aaHere
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.playlistAsked.isEmpty)
+        #expect(phone.asked.count == 1)
+    }
+
+    // MARK: Shuffled, albums, the library, Apple Music, repeat (17 November 2026)
+
+    @Test func aShuffledPlaylistPlaysShuffledHereWithTheMacsRepeat() async {
+        let shuffled = PlaylistPlace(name: "Road Trip", count: 123, index: 121, shuffled: true)
+        var m = playingFromAA(at: shuffled)
+        m.repeatMode = .all
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsPlaylist = shuffled
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.playlistAsked.first?.place == shuffled)
+        #expect(phone.asked.isEmpty)
+        #expect(phone.stationSeeds.isEmpty, "shuffled, the whole playlist is still to come")
+        #expect(phone.repeatsSet == [.all])
+    }
+
+    @Test func theMacsAlbumPlaysHere() async {
+        let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 10, index: 2)
+        var m = playingFromAA()
+        m.playlist = nil
+        m.album = album
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsAlbum = album
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.albumPlayAsked.map(\.id) == ["1102360418"])
+        #expect(phone.asked.isEmpty && phone.playlistAsked.isEmpty)
+        #expect(phone.repeatsSet.isEmpty, "the Mac sent no repeat")
+        // Not here: the Mac's next songs.
+        let (h2, task2) = await ready(m)
+        defer { task2.cancel() }
+        let missing = FakePhoneMusic()
+        #expect(await h2.model.continueOnPhone(with: missing) == .continued)
+        #expect(missing.asked.count == 1)
+    }
+
+    @Test func theMacsLibraryShuffledPlaysTheSongThenTheLibraryHere() async {
+        var m = playingFromAA()
+        m.playlist = nil
+        m.shuffledLibrary = true
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsLibrary = true
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.libraryAsked == ["1102360418"])
+        #expect(phone.asked.isEmpty)
+        #expect(phone.stationSeeds.isEmpty)
+    }
+
+    @Test func appleMusicOnTheMacIsLookedUpInRecentlyPlayed() async {
+        var m = playingFromAA()
+        m.playlist = nil
+        m.fromAppleMusic = true
+        m.shuffled = true
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsFromAppleMusic = .playlist(PlaylistPlace(name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5, shuffled: true))
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.appleMusicAsked.count == 1)
+        #expect(phone.appleMusicAsked.first?.shuffled == true)
+        #expect(phone.appleMusicAsked.first?.allowStation == false, "four songs ahead on the Mac: not a station")
+        #expect(phone.asked.isEmpty)
+    }
+
+    @Test func aStationOnTheMacFollowsTheSongHereAndRecentlyPlayedLaggingFallsBack() async {
+        var m = playingFromAA()
+        m.playlist = nil
+        m.fromAppleMusic = true
+        m.upNext = Array(m.upNext!.prefix(1))   // a station lists one song ahead
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsFromAppleMusic = .station(StationPlace(id: "ra.985484166", name: "Made-Up Radio"))
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.appleMusicAsked.first?.allowStation == true)
+        #expect(phone.stationSeeds.isEmpty, "the Mac's station follows, not the song's")
+
+        // Started on the Mac under a minute ago: recently played may still name the one before.
+        var fresh = m
+        fresh.appleMusicSince = Date().addingTimeInterval(-10)
+        let (h3, task3) = await ready(fresh)
+        defer { task3.cancel() }
+        let early = FakePhoneMusic()
+        early.playsFromAppleMusic = .station(StationPlace(id: "ra.985484166", name: "Made-Up Radio"))
+        _ = await h3.model.continueOnPhone(with: early)
+        #expect(early.appleMusicAsked.first?.allowStation == false)
+
+        let (h2, task2) = await ready(m)
+        defer { task2.cancel() }
+        let lagging = FakePhoneMusic()
+        #expect(await h2.model.continueOnPhone(with: lagging) == .continued)
+        #expect(lagging.asked.first?.ids == ["1102360418", "1102359994"], "the Mac's next songs")
+        #expect(lagging.stationSeeds == ["1102360418"], "then the song's station")
     }
 }
 
@@ -158,6 +266,155 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         let sent = await relay.sent.map(\.command)
         #expect(sent.map(\.kind) == [.playStation])
         #expect(sent.first?.playlist == sunday)
+    }
+
+    // MARK: Albums (17 November 2026)
+
+    private static let album = AlbumPlace(title: "Album", artist: "Artist", count: 12, index: 5)
+
+    @Test func withoutAPlaylistTheSongGoesWithItsAlbum() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: nil)
+        phone.albumHere = Self.album
+        #expect(try await handBack(relay, phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.map(\.kind) == [.playStation])
+        #expect(sent.first?.album == Self.album)
+        #expect(sent.first?.playlist == nil)
+    }
+
+    @Test func aPlaylistMeansTheAlbumIsntLookedUp() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: aaHere)
+        phone.albumHere = Self.album
+        #expect(try await handBack(relay, phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.first?.playlist == aaHere && sent.first?.album == nil)
+        #expect(phone.albumAsks == 0)
+    }
+
+    /// The Mac played the album, the phone took its next songs: coming back
+    /// a song on, the Mac skips ahead in its own queue, which is the album.
+    @Test func anAlbumRoundTripSkipsAheadInTheMacsQueue() async throws {
+        var albumOnTheMac = playingFromAA(state: .paused)
+        albumOnTheMac.playlist = nil
+        let relay = FakeRelay(mac(albumOnTheMac))
+        var next = macPlays("1102359994", title: "Lady Divine")
+        next.playback?.track?.album = "Album"
+        await relay.setNext(next)
+        let phone = phone("1102359994", playlist: nil)
+        phone.current?.title = "Lady Divine"
+        phone.albumHere = Self.album
+        #expect(try await handBack(relay, phone) == .sentBack)
+        #expect(await relay.sent.map(\.command.kind) == [.next, .seek, .play], "the Mac's queue is the album")
+    }
+
+    // MARK: Apple Music, stations, the library and repeat (17 November 2026)
+
+    private func handBack(_ relay: FakeRelay, _ phone: FakePhoneMusic, addsToLibrary: Bool) async throws -> SendBackOutcome {
+        let clock = MutableClock()
+        let memory = HandoverMemory(load: { nil }, save: { _ in }, addsToLibrary: { addsToLibrary })
+        let remote = MacRemote(client: relay, now: { clock.now }, sleep: { clock.advance($0) }, memory: memory)
+        try await remote.read()
+        return await remote.handover().sendBackToMac(with: phone)
+    }
+
+    private static let online = PlaylistPlace(name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5)
+
+    @Test func anAppleMusicPlaylistIsAddedToTheLibraryForTheMac() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: nil)
+        phone.appleMusicHere = .playlist(Self.online)
+        phone.repeatHere = .one
+        #expect(try await handBack(relay, phone, addsToLibrary: true) == .sentBack)
+        #expect(phone.added == [.playlist(Self.online)])
+        let sent = await relay.sent.map(\.command)
+        var expected = Self.online
+        expected.addedToLibrary = true
+        #expect(sent.first?.playlist == expected)
+        #expect(sent.first?.repeatMode == .one)
+    }
+
+    @Test func addToLibraryIsOffUntilTurnedOn() {
+        let defaults = UserDefaults(suiteName: "addsToLibrary-\(UUID().uuidString)")!
+        #expect(HandoverMemory.defaults(defaults).addsToLibrary() == false, "nothing stored: off")
+        defaults.set(true, forKey: HandoverMemory.addsToLibraryKey)
+        #expect(HandoverMemory.defaults(defaults).addsToLibrary() == true)
+        #expect(HandoverMemory.none.addsToLibrary() == false)
+    }
+
+    @Test func withTheSettingOffAnAppleMusicPlaylistIsTheSongsStation() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: nil)
+        phone.appleMusicHere = .album(AlbumPlace(title: "Made-Up Album", count: 10, index: 2), id: "1440000000")
+        #expect(try await handBack(relay, phone, addsToLibrary: false) == .sentBack)
+        #expect(phone.added.isEmpty)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.first?.playlist == nil && sent.first?.album == nil && sent.first?.station == nil)
+    }
+
+    @Test func thePhonesStationGoesToTheMac() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("555", title: "Another Song"))   // the station starts on its own song
+        let phone = phone("270246724", playlist: nil)
+        let radio = StationPlace(id: "ra.985484166", name: "Made-Up Radio")
+        phone.appleMusicHere = .station(radio)
+        #expect(try await handBack(relay, phone, addsToLibrary: true) == .sentAsStation)
+        #expect(await relay.sent.map(\.command).first?.station == radio)
+        #expect(phone.added.isEmpty)
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func aShuffledLibrarySongGoesAsTheLibraryShuffled() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: nil)
+        phone.shufflingLibrary = true
+        #expect(try await handBack(relay, phone, addsToLibrary: true) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.first?.shuffledLibrary == true)
+        #expect(sent.first?.playlist == nil && sent.first?.album == nil)
+    }
+
+    /// The Mac played an Apple Music playlist, the phone took it: coming
+    /// back a song on, the Mac skips ahead in its own queue; nothing is added.
+    @Test func anAppleMusicRoundTripSkipsAheadAndAddsNothing() async throws {
+        var onTheMac = playingFromAA(state: .paused)
+        onTheMac.playlist = nil
+        onTheMac.fromAppleMusic = true
+        let relay = FakeRelay(mac(onTheMac))
+        await relay.setNext(macPlays("1102359994", title: "Lady Divine"))
+        let phone = phone("1102359994", playlist: nil)
+        phone.current?.title = "Lady Divine"
+        phone.appleMusicHere = .playlist(Self.online)
+        #expect(try await handBack(relay, phone, addsToLibrary: true) == .sentBack)
+        #expect(await relay.sent.map(\.command.kind) == [.next, .seek, .play])
+        #expect(phone.added.isEmpty)
+    }
+
+    /// 17 November 2026: Apple Music's recently played is account-wide, and
+    /// an old station there looked current for a song Continue on iPhone had
+    /// queued from the Mac's Up Next.
+    @Test func aSongQueuedFromTheMacsUpNextIsNeverTakenForAnOldStation() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("555", title: "Song Five"))
+        let phone = phone("555", playlist: aaHere)
+        phone.current?.title = "Song Five"
+        phone.appleMusicHere = .station(StationPlace(id: "ra.985484166", name: "Made-Up Radio"))
+        phone.shufflingLibrary = true
+        let clock = MutableClock()
+        let memory = HandoverMemory(load: { nil }, save: { _ in }, loadQueued: { ["1102360418", "555"] })
+        let remote = MacRemote(client: relay, now: { clock.now }, sleep: { clock.advance($0) }, memory: memory)
+        try await remote.read()
+        #expect(await remote.handover().sendBackToMac(with: phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.map(\.kind) == [.playStation])
+        #expect(sent.first?.station == nil && sent.first?.playlist == nil && sent.first?.shuffledLibrary == nil, "the song's station")
+        #expect(phone.remembered.isEmpty && phone.albumAsks == 0, "nothing looked up")
     }
 
     @Test func withoutAPlaylistItsTheStationOrSkipsAsBefore() async throws {

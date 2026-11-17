@@ -64,12 +64,27 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     /// when the Mac's library doesn't have the playlist with the song, the
     /// station as before. Added 17 November 2026; an older Mac ignores it.
     public var playlist: PlaylistPlace?
+    /// For `playStation`, when `playlist` is nil: the library album the phone
+    /// plays the song from. A Mac connected to Music that has the song plays
+    /// the album on from it, in album order; otherwise the station. Added 17
+    /// November 2026; an older Mac ignores it.
+    public var album: AlbumPlace?
+    /// For `playStation`: the Apple Music station the phone plays. The Mac
+    /// plays that station, which starts on another song, rather than a
+    /// station made from the song (17 November 2026).
+    public var station: StationPlace?
+    /// For `playStation`: the phone shuffles its whole library (a guess:
+    /// iOS doesn't say). The Mac plays the song, then shuffles its library.
+    public var shuffledLibrary: Bool?
+    /// For `playStation`: the phone's repeat setting, for Music to follow.
+    public var repeatMode: RepeatMode?
 
     public static let maximumAge: TimeInterval = 10
 
     public init(id: UUID = UUID(), kind: CommandKind, issuedAt: Date? = nil,
                 position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil,
-                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil, playlist: PlaylistPlace? = nil) {
+                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil, playlist: PlaylistPlace? = nil,
+                album: AlbumPlace? = nil, station: StationPlace? = nil, shuffledLibrary: Bool? = nil, repeatMode: RepeatMode? = nil) {
         self.id = id
         self.kind = kind
         self.issuedAt = issuedAt
@@ -80,6 +95,10 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
         self.title = title
         self.reason = reason
         self.playlist = playlist
+        self.album = album
+        self.station = station
+        self.shuffledLibrary = shuffledLibrary
+        self.repeatMode = repeatMode
     }
 
     public static func seek(to position: TimeInterval, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
@@ -99,9 +118,11 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     /// play (16 November 2026). With `playlist`, a Mac that has it plays the
     /// playlist from the song instead (17 November 2026).
     public static func playStation(seededBy catalogID: String, position: TimeInterval? = nil, title: String? = nil,
-                                   playlist: PlaylistPlace? = nil, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
+                                   playlist: PlaylistPlace? = nil, album: AlbumPlace? = nil, station: StationPlace? = nil,
+                                   shuffledLibrary: Bool? = nil, repeatMode: RepeatMode? = nil,
+                                   id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
         RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, position: position, catalogID: catalogID, title: title,
-                      playlist: playlist)
+                      playlist: playlist, album: album, station: station, shuffledLibrary: shuffledLibrary, repeatMode: repeatMode)
     }
 
     /// False when `issuedAt` is missing: the temporary contract never sent it.
