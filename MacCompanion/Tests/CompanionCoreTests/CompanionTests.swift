@@ -318,6 +318,88 @@ import StandByProtocol
         #expect(r.music.position < 5)
     }
 
+    // MARK: Continue on Mac with a playlist (17 November 2026)
+
+    private static let place = PlaylistPlace(name: "Road Trip", cloudID: "pl.u-Zx9yW8vU7tS6r", count: 123, index: 59)
+
+    /// Music's remote protocol as Continue on Mac uses it: records what it
+    /// was asked to play, and starts Music's next song when it "plays".
+    private final class PlaylistRemote: MusicRemoteReading, MusicRemotePlaying, @unchecked Sendable {
+        let outcome: PlaylistPlayOutcome
+        let music: FakeMusic
+        private let lock = NSLock()
+        private var _asked: [(String, PlaylistPlace)] = []
+        var asked: [(String, PlaylistPlace)] { lock.withLock { _asked } }
+        init(_ outcome: PlaylistPlayOutcome, music: FakeMusic) {
+            self.outcome = outcome
+            self.music = music
+        }
+        func queue(current track: MusicTrack?) async -> RemoteQueue? { nil }
+        func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome {
+            lock.withLock { _asked.append((catalogID, place)) }
+            if case .played = outcome { music.startNextSong() }
+            return outcome
+        }
+    }
+
+    @Test func aPlaylistFromThePhonePlaysFromTheSongInsteadOfTheStation() async throws {
+        let r = await rig(state: "paused")   // on "Losing My Edge"; the playlist starts with "Idontknow"
+        let remote = PlaylistRemote(.played(index: 59), music: r.music)
+        r.companion.remote = remote
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: Self.place,
+                                                     issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(remote.asked.map(\.0) == ["1730817069"])
+        #expect(remote.asked.first?.1 == Self.place)
+        #expect(r.music.openedLocations.isEmpty, "no station")
+        #expect(await eventually { r.music.position > 60 }, "seeked to where the phone is")
+        #expect(!r.music.shuffle)
+        #expect(!r.companion.events.contains { $0.text.contains("Road Trip") }, "the playlist's name stays out of the log")
+    }
+
+    @Test func aShuffledPlaylistShufflesOnceTheSongPlays() async throws {
+        let r = await rig(state: "paused")
+        r.companion.remote = PlaylistRemote(.played(index: 59), music: r.music)
+        var shuffled = Self.place
+        shuffled.shuffled = true
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: shuffled,
+                                                     issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(await eventually { r.music.shuffle })
+        #expect(await eventually { r.music.position > 60 })
+    }
+
+    @Test func theStationWhenTheMacHasNoSuchPlaylistOrCantPlayIt() async throws {
+        for outcome in [PlaylistPlayOutcome.notHere, .failed("Music's remote protocol didn't answer")] {
+            let r = await rig(state: "paused")
+            let remote = PlaylistRemote(outcome, music: r.music)
+            r.companion.remote = remote
+            let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: Self.place,
+                                                         issuedAt: Date()))
+            await eventually { await r.relay.ack(for: id) != nil }
+            #expect(await r.relay.ack(for: id)?.accepted == true)
+            #expect(remote.asked.count == 1)
+            #expect(r.music.openedLocations.first?.hasSuffix("/station/ra.1730817069") == true)
+        }
+    }
+
+    @Test func theStationWhenNotConnectedToMusicOrThePlaceIsUnusable() async throws {
+        let r = await rig(state: "paused")
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", playlist: Self.place, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(r.music.openedLocations.count == 1)
+        #expect(r.companion.events.contains { $0.text.contains("not connected to Music") })
+
+        let remote = PlaylistRemote(.played(index: 0), music: r.music)
+        r.companion.remote = remote
+        let broken = PlaylistPlace(name: "Road Trip", count: 3, index: 7)
+        let second = await r.relay.simulate(.playStation(seededBy: "1730817069", playlist: broken, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: second)?.accepted == true }
+        #expect(remote.asked.isEmpty)
+        #expect(r.music.openedLocations.count == 2)
+    }
+
     @Test func aValueCommandWithoutItsValueIsInvalidAndNeverReachesMusic() async throws {
         let r = await rig()
         let before = r.music.scripts.count

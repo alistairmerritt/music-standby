@@ -80,6 +80,7 @@ public struct RawEventRunner: MusicScriptRunning {
         case .command(let command): music.command(command)
         case .seek(let seconds): music.set(.property(Code.playerPosition), to: NSAppleEventDescriptor(double: seconds))
         case .setVolume(let level): music.set(.property(Code.soundVolume), to: NSAppleEventDescriptor(int32: Int32(level)))
+        case .setShuffle(let on): music.set(.property(Code.shuffleEnabled), to: NSAppleEventDescriptor(boolean: on))
         case .selectOutput(let id): selectOutput(music, id: id)
         case .openLocation(let url): music.openLocation(url)
         }
@@ -447,6 +448,7 @@ enum Code {
     static let currentTrack = fcc("pTrk")
     static let properties = fcc("pALL")
     static let soundVolume = fcc("pVol")
+    static let shuffleEnabled = fcc("pShE")
     static let currentAirPlayDevices = fcc("pAPD")
 
     // AirPlay devices

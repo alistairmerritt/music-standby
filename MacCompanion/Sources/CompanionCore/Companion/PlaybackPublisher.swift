@@ -57,6 +57,7 @@ public struct PlaybackPublisher: Sendable {
             capturedAt: StandByWire.wirePrecision(snapshot.capturedAt), track: track, canGoNext: canSkip, canGoPrevious: canSkip,
             listeningSessionID: session, detail: snapshot.detail,
             volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs,
-            upNext: track == nil ? nil : queue?.upNext, musicConnection: musicConnection)
+            upNext: track == nil ? nil : queue?.upNext, musicConnection: musicConnection,
+            playlist: track == nil ? nil : queue?.playlist)
     }
 }

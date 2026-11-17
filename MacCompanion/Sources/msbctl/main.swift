@@ -367,6 +367,15 @@ case "remote":
             return 2
         }
         let client = MusicRemoteClient(pairing: MusicRemotePairing(guid: options[0], serviceName: options[1]))
+        if options.count == 6, options[2] == "play", let index = Int(options[4]) {
+            // Plays a library playlist from a song, as Continue on Mac does:
+            // msbctl remote GUID SERVICE play NAME SONG-NUMBER CATALOGUE-ID
+            let place = PlaylistPlace(name: options[3], count: max(index, 1), index: max(index - 1, 0))
+            let started = Date()
+            let outcome = await client.play(options[5], in: place)
+            print("play \(options[3]) from song \(index): \(outcome) in \(ms(since: started)) ms")
+            return outcome == .notHere || { if case .failed = outcome { true } else { false } }() ? 1 : 0
+        }
         let reader = options.contains("--no-catalog") ? client as any MusicRemoteReading
             : CatalogFillingRemote(remote: client, lookup: ITunesCatalogIDs())
         let snapshot = await MusicController().snapshot()
@@ -376,6 +385,7 @@ case "remote":
         print("remote: \(await client.status) in \(ms(since: started)) ms")
         guard let queue else { return 1 }
         print("catalogue ID: \(queue.catalogID ?? "-")")
+        print("playlist: \(queue.playlist.map { "\($0.name), song \($0.index + 1) of \($0.count)" } ?? "-")")
         print("Up Next: \(queue.upNext.count)")
         print("  with a catalogue ID: \(queue.upNext.filter { $0.catalogID != nil }.count)")
         for (index, entry) in queue.upNext.prefix(5).enumerated() {

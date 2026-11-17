@@ -17,15 +17,34 @@ public struct MusicRemotePairing: Codable, Equatable, Sendable {
 }
 
 /// What Music's remote protocol adds to AppleScript: the current song's Apple
-/// Music catalogue ID, and Up Next.
+/// Music catalogue ID, Up Next, and the library playlist the song plays from
+/// when Up Next is the rest of it in order (17 November 2026).
 public struct RemoteQueue: Equatable, Sendable {
     public var catalogID: String?
     public var upNext: [QueuedTrack]
+    public var playlist: PlaylistPlace?
 
-    public init(catalogID: String?, upNext: [QueuedTrack]) {
+    public init(catalogID: String?, upNext: [QueuedTrack], playlist: PlaylistPlace? = nil) {
         self.catalogID = catalogID
         self.upNext = upNext
+        self.playlist = playlist
     }
+}
+
+/// Continue on Mac's other half: Music plays a library playlist from one of
+/// its songs, as Apple's Remote app does, so a playlist started on the
+/// iPhone carries on here instead of becoming the song's station.
+public protocol MusicRemotePlaying: Sendable {
+    func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome
+}
+
+public enum PlaylistPlayOutcome: Equatable, Sendable {
+    /// Music plays the playlist from the song, which is at this place (from 0).
+    case played(index: Int)
+    /// No playlist of that name in this library has the song.
+    case notHere
+    /// Music couldn't be reached, or refused.
+    case failed(String)
 }
 
 public protocol MusicRemoteReading: Sendable {
@@ -74,12 +93,15 @@ public struct URLSessionLocalHTTP: LocalHTTP {
     }
 }
 
-/// Reads Music's Up Next and catalogue IDs over DACP. Only reads: it never
-/// plays, skips or changes volume. Verified against Music on macOS 27 on
-/// 12 November 2026 with a test remote: every one of 12,679 library songs
-/// carried a catalogue ID (`aeSI`, `com.apple.itunes.itms-songid`) that
-/// Apple's lookup confirmed, and `mper` equals AppleScript's persistent ID.
-public actor MusicRemoteClient: MusicRemoteReading {
+/// Reads Music's Up Next and catalogue IDs over DACP. Verified against Music
+/// on macOS 27 on 12 November 2026 with a test remote: every one of 12,679
+/// library songs carried a catalogue ID (`aeSI`, `com.apple.itunes.itms-songid`)
+/// that Apple's lookup confirmed, and `mper` equals AppleScript's persistent ID.
+///
+/// Its one action, from 17 November 2026: `play(_:in:)` starts a library
+/// playlist from a song (`playspec`), for Continue on Mac. Everything else
+/// only reads: it never skips or changes volume.
+public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
     public static let libraryRefreshInterval: TimeInterval = 60
 
     private let pairing: MusicRemotePairing
@@ -91,6 +113,11 @@ public actor MusicRemoteClient: MusicRemoteReading {
     private var catalogByPersistentID: [String: String] = [:]
     private var catalogByItemID: [UInt64: String] = [:]
     private var libraryReadAt: Date?
+    /// The library's `miid`: `playspec` names the database by it.
+    private var databaseID: UInt64?
+    private var playlists: [UInt64: RemotePlaylist] = [:]
+    private var playlistsReadAt: Date?
+    private var songsByPlaylist: [UInt64: PlaylistSongs] = [:]
     public private(set) var status: MusicRemoteStatus = .unknown
     public var isForgottenByMusic: Bool { status == .unpaired }
 
@@ -113,7 +140,10 @@ public actor MusicRemoteClient: MusicRemoteReading {
             }
             let body = try await get("/ctrl-int/1/playqueue-contents?span=\(PlaybackMessage.upNextLimit)")
             status = .connected
-            return RemoteQueue(catalogID: persistentID.flatMap { catalogByPersistentID[$0] }, upNext: upNext(from: body))
+            let catalogID = persistentID.flatMap { catalogByPersistentID[$0] }
+            // Best effort: without it, Continue on iPhone takes Up Next's songs.
+            let playlist = try? await playlistPlace(current: catalogID, upNext: queueSpecs(from: body))
+            return RemoteQueue(catalogID: catalogID, upNext: upNext(from: body), playlist: playlist)
         } catch Failure.unpaired {
             status = .unpaired
         } catch {
@@ -151,6 +181,7 @@ public actor MusicRemoteClient: MusicRemoteReading {
         libraryReadAt = now()
         let databases = DMAPNode.parse(try await get("/databases"))
         guard let database = databases.first("mlcl")?.first("miid")?.integer else { throw Failure.unreachable }
+        databaseID = database
         let meta = "dmap.itemid,dmap.persistentid,com.apple.itunes.itms-songid"
         let items = DMAPNode.parse(try await get("/databases/\(database)/items?type=music&meta=\(meta)"))
         var byPersistentID: [String: String] = [:]
@@ -164,6 +195,152 @@ public actor MusicRemoteClient: MusicRemoteReading {
         }
         catalogByPersistentID = byPersistentID
         catalogByItemID = byItemID
+    }
+
+    /// Where each Up Next song comes from, in order: its playlist and its
+    /// place there (`ceQs`, as `upNext(from:)` reads it).
+    func queueSpecs(from body: Data) -> [QueueSpec] {
+        (DMAPNode.parse(body).first("mlcl")?.all("mlit") ?? []).compactMap { entry in
+            guard let spec = entry.all("ceQs").first?.value, spec.count == 16 else { return nil }
+            func word(_ i: Int) -> UInt64 { spec.dropFirst(i * 4).prefix(4).reduce(UInt64(0)) { $0 << 8 | UInt64($1) } }
+            return QueueSpec(playlist: word(1), playlistItem: word(2), item: word(3))
+        }
+    }
+
+    // MARK: Playlists (17 November 2026)
+
+    /// How long a read of the playlists, or of one playlist's songs, is
+    /// trusted. Either read takes a few milliseconds (5 ms for 102
+    /// playlists, 1 ms for 123 songs, on 17 November 2026).
+    static let playlistRefreshInterval: TimeInterval = 30
+
+    /// The playlist `current` plays from, when Up Next is the rest of it in
+    /// order. Music doesn't say which playlist the current song comes from
+    /// (`canp` names none), but each Up Next song carries its playlist and
+    /// place, so: the first Up Next song's playlist, when the song before it
+    /// there is `current` and the next few follow in order. Shuffled, or
+    /// with songs added by Play Next, they don't, and it's nil.
+    func playlistPlace(current catalogID: String?, upNext specs: [QueueSpec]) async throws -> PlaylistPlace? {
+        guard let catalogID, let first = specs.first, first.playlist != 0 else { return nil }
+        guard let playlist = try await knownPlaylist(first.playlist), playlist.isOwn else { return nil }
+        var songs = try await readSongs(in: playlist, maxAge: Self.playlistRefreshInterval)
+        if !songs.playlistItems.contains(first.playlistItem) { songs = try await readSongs(in: playlist, maxAge: 0) }
+        guard let next = songs.playlistItems.firstIndex(of: first.playlistItem), next >= 1,
+              songs.catalogIDs[next - 1] == catalogID else { return nil }
+        for (offset, spec) in specs.prefix(Self.inOrderCheck).enumerated() {
+            let place = next + offset
+            // Past the playlist's end, Autoplay's songs follow (a six-song playlist, 17 November 2026).
+            guard place < songs.playlistItems.count else { break }
+            guard spec.playlist == playlist.id, songs.playlistItems[place] == spec.playlistItem else { return nil }
+        }
+        return PlaylistPlace(name: playlist.name, count: songs.playlistItems.count, index: next - 1)
+    }
+
+    /// How many Up Next songs must follow the playlist's order.
+    static let inOrderCheck = 3
+
+    /// Plays `place`'s playlist from the song: the playlist here with that
+    /// name (the same size first) that has the song, at `place.index` or
+    /// else the closest place. Music then plays the playlist on from it.
+    /// The quotes in `playspec` must go as they are: Music answers `%27`
+    /// with 500 (17 November 2026).
+    public func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome {
+        guard place.isValid else { return .notHere }
+        do {
+            let database = try await libraryDatabase()
+            var candidates = try await playlists(named: place.name, maxAge: Self.playlistRefreshInterval)
+            if candidates.isEmpty { candidates = try await playlists(named: place.name, maxAge: 0) }
+            for playlist in candidates.sorted(by: { abs($0.count - place.count) < abs($1.count - place.count) }) {
+                var songs = try await readSongs(in: playlist, maxAge: Self.playlistRefreshInterval)
+                var index = place.locate(catalogID, in: songs.catalogIDs)
+                if index == nil, now().timeIntervalSince(songs.readAt) > 1 {
+                    songs = try await readSongs(in: playlist, maxAge: 0)
+                    index = place.locate(catalogID, in: songs.catalogIDs)
+                }
+                guard let index else { continue }
+                let answer = try await control("/ctrl-int/1/playspec?database-spec='dmap.itemid:\(database)'"
+                    + "&container-spec='dmap.persistentid:0x\(String(playlist.persistentID, radix: 16))'"
+                    + "&container-item-spec='dmap.containeritemid:\(songs.playlistItems[index])'")
+                status = .connected
+                guard answer == 200 || answer == 204 else { return .failed("Music answered playspec with \(answer)") }
+                return .played(index: index)
+            }
+            return .notHere
+        } catch Failure.unpaired {
+            status = .unpaired
+            return .failed("Music has forgotten this remote")
+        } catch {
+            status = .unreachable
+            port = nil
+            session = nil
+            return .failed("Music's remote protocol didn't answer")
+        }
+    }
+
+    private func libraryDatabase() async throws -> UInt64 {
+        if let databaseID { return databaseID }
+        let databases = DMAPNode.parse(try await get("/databases"))
+        guard let id = databases.first("mlcl")?.first("miid")?.integer else { throw Failure.unreachable }
+        databaseID = id
+        return id
+    }
+
+    private func refreshPlaylists(maxAge: TimeInterval) async throws {
+        if let readAt = playlistsReadAt, now().timeIntervalSince(readAt) <= maxAge, maxAge > 0 { return }
+        let database = try await libraryDatabase()
+        let meta = "dmap.itemid,dmap.itemname,dmap.persistentid,dmap.itemcount,daap.baseplaylist,com.apple.itunes.special-playlist"
+        let list = DMAPNode.parse(try await get("/databases/\(database)/containers?meta=\(meta)"))
+        var found: [UInt64: RemotePlaylist] = [:]
+        for item in list.first("mlcl")?.all("mlit") ?? [] {
+            guard let id = item.all("miid").first?.integer, let persistentID = item.all("mper").first?.integer else { continue }
+            // The library itself (`abpl`) and Music's own lists (`aePS`, such as "Music") aren't playlists here.
+            let isOwn = (item.all("abpl").first?.integer ?? 0) == 0 && (item.all("aePS").first?.integer ?? 0) == 0
+            found[id] = RemotePlaylist(id: id, persistentID: persistentID, name: item.all("minm").first?.string ?? "",
+                                       count: Int(item.all("mimc").first?.integer ?? 0), isOwn: isOwn)
+        }
+        playlists = found
+        playlistsReadAt = now()
+    }
+
+    private func knownPlaylist(_ id: UInt64) async throws -> RemotePlaylist? {
+        try await refreshPlaylists(maxAge: Self.playlistRefreshInterval)
+        if playlists[id] == nil { try await refreshPlaylists(maxAge: 0) }
+        return playlists[id]
+    }
+
+    /// The library's playlists with this name: exactly, or else ignoring case and accents.
+    private func playlists(named name: String, maxAge: TimeInterval) async throws -> [RemotePlaylist] {
+        try await refreshPlaylists(maxAge: maxAge)
+        let own = playlists.values.filter(\.isOwn)
+        let exact = own.filter { $0.name == name }
+        if !exact.isEmpty { return exact }
+        return own.filter { $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+    }
+
+    private func readSongs(in playlist: RemotePlaylist, maxAge: TimeInterval) async throws -> PlaylistSongs {
+        if let cached = songsByPlaylist[playlist.id], maxAge > 0, now().timeIntervalSince(cached.readAt) <= maxAge { return cached }
+        let database = try await libraryDatabase()
+        let meta = "dmap.containeritemid,com.apple.itunes.itms-songid"
+        let list = DMAPNode.parse(try await get("/databases/\(database)/containers/\(playlist.id)/items?type=music&meta=\(meta)"))
+        var songs = PlaylistSongs(playlistItems: [], catalogIDs: [], readAt: now())
+        for item in list.first("mlcl")?.all("mlit") ?? [] {
+            guard let playlistItem = item.all("mcti").first?.integer else { continue }
+            songs.playlistItems.append(playlistItem)
+            songs.catalogIDs.append(item.all("aeSI").first?.integer.flatMap { $0 == 0 ? nil : String($0) })
+        }
+        songsByPlaylist[playlist.id] = songs
+        return songs
+    }
+
+    /// A command: Music answers 204 with nothing when it's done.
+    private func control(_ path: String) async throws -> Int {
+        for attempt in 0..<2 {
+            let session = try await login()
+            let (status, _) = try await raw("\(path)&session-id=\(session)")
+            if status == 401, attempt == 0 { self.session = nil; continue }
+            return status
+        }
+        throw Failure.unreachable
     }
 
     /// Up Next from `playqueue-contents`: its `mlit`s that name a song (a
@@ -215,6 +392,31 @@ public actor MusicRemoteClient: MusicRemoteReading {
             throw Failure.unreachable
         }
     }
+}
+
+/// Where one Up Next song comes from: its playlist (`miid`; 0 for none),
+/// its place there (`mcti`), and the song (`miid`).
+struct QueueSpec: Equatable, Sendable {
+    var playlist: UInt64
+    var playlistItem: UInt64
+    var item: UInt64
+}
+
+/// A playlist in Music's library, as its remote protocol lists it.
+struct RemotePlaylist: Equatable, Sendable {
+    var id: UInt64
+    var persistentID: UInt64
+    var name: String
+    var count: Int
+    /// A playlist of the person's own, not the library or one of Music's lists.
+    var isOwn: Bool
+}
+
+/// One playlist's songs in order: each one's place (`mcti`) and catalogue ID.
+struct PlaylistSongs: Equatable, Sendable {
+    var playlistItems: [UInt64]
+    var catalogIDs: [String?]
+    var readAt: Date
 }
 
 /// Finds Music's DACP port. Music advertises `_touch-able._tcp` once it has a

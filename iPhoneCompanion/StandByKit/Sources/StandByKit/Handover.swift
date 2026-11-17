@@ -63,11 +63,28 @@ public struct Handover {
             record("Continue on iPhone: no access to Apple Music")
             return .notAllowed
         }
-        let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
-        let started = await player.play(catalogIDs: queue, position: { [latest, now] in
+        let position: @MainActor () -> TimeInterval = { [latest, now] in
             guard let current = latest(), current.track?.catalogID == catalogID else { return message.elapsed(at: Date()) }
             return current.elapsed(at: now())
-        }, timeout: timeout)
+        }
+        // The Mac's playlist itself when Up Next is the rest of it, rather
+        // than the next 25 of its songs (17 November 2026).
+        if let place = message.playlist, place.isValid, !place.isShuffled {
+            if let played = await player.play(catalogID, in: place, position: position, timeout: min(timeout, Self.playlistStartWait)) {
+                memory.savePlaylist(played)
+                let songsAfter = played.count - played.index - 1
+                record("Continue on iPhone: the Mac's playlist plays here, from song \(played.index + 1) of \(played.count)")
+                let outcome = await pauseMac(for: catalogID, songsAfter: songsAfter)
+                if songsAfter < Self.stationBelow {
+                    await followWithStation(seededBy: catalogID, songsAfter: songsAfter, from: "the playlist", with: player)
+                }
+                return outcome
+            }
+            record("Continue on iPhone: the Mac's playlist isn't here with the song; its next songs instead")
+        }
+        memory.savePlaylist(nil)
+        let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
+        let started = await player.play(catalogIDs: queue, position: position, timeout: timeout)
         guard started else {
             record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")
             return .didNotStart
@@ -93,6 +110,11 @@ public struct Handover {
         return found?.id
     }
 
+    /// How long the Mac's playlist may take to start here before Continue on
+    /// iPhone takes the Mac's next songs instead. It started in 0.16 s on
+    /// 17 November 2026.
+    static let playlistStartWait: TimeInterval = 6
+
     /// With fewer songs than this to come on the Mac, a station made from
     /// the song follows them here. A station on the Mac lists only its next
     /// song, so the phone stopped after it (seen 15 November 2026, from a
@@ -101,10 +123,11 @@ public struct Handover {
     /// protocol names it), so this is Apple Music's station for the song.
     static let stationBelow = 3
 
-    private func followWithStation(seededBy catalogID: String, songsAfter: Int, with player: any PhoneMusicPlaying) async {
+    private func followWithStation(seededBy catalogID: String, songsAfter: Int, from source: String = "the Mac",
+                                   with player: any PhoneMusicPlaying) async {
         let result = await player.appendStation(seededBy: catalogID)
         switch result {
-        case .added: record("Continue on iPhone: \(songsAfter) song\(songsAfter == 1 ? "" : "s") from the Mac, then a station from the song")
+        case .added: record("Continue on iPhone: \(songsAfter) song\(songsAfter == 1 ? "" : "s") from \(source), then a station from the song")
         case .noStation: record("Continue on iPhone: Apple Music has no station for the song")
         case .failed(let reason): record("Continue on iPhone: couldn't add a station (\(reason))")
         }
@@ -165,12 +188,36 @@ public struct Handover {
     /// Music here pauses. Only existing commands, so it works for songs
     /// outside the Mac's library too: it's Music's own queue. Any other
     /// song goes over as its station (`sendAsStation`).
+    ///
+    /// From 17 November 2026, a song goes with the library playlist the
+    /// phone plays it from, when the phone can tell, unless it's at most
+    /// `skipsAtMost` songs into the Mac's queue and that queue is the same
+    /// playlist: the Mac plays the playlist from the song, which is quicker
+    /// than many skips and carries on after the 25 songs it sent.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
         // Playing or paused here: a paused song is still the phone's to hand on.
         guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
-        guard let ahead = macQueuePosition(of: catalogID) else {
-            return await sendAsStation(here, catalogID: catalogID, with: player, timeout: timeout + Self.stationStartAllowance)
+        let ahead = macQueuePosition(of: catalogID)
+        let place = await player.playlistPlace(remembered: memory.loadPlaylist())
+        // The Mac's own queue when it's the phone's playlist (the round
+        // trip) or the phone has none; else the phone's playlist, even for a
+        // song the Mac has, as when the Mac plays the song's station.
+        if let ahead, place == nil || (ahead <= Self.skipsAtMost && latest()?.playlist?.name == place?.name) {
+            return await skipMacAhead(ahead, to: catalogID, here: here, with: player, timeout: timeout)
         }
+        if let place {
+            record("Send back to Mac: the phone's playlist, from song \(place.index + 1) of \(place.count)\(place.isShuffled ? ", shuffled" : "")")
+        }
+        return await sendAsStation(here, catalogID: catalogID, playlist: place, with: player, timeout: timeout + Self.stationStartAllowance)
+    }
+
+    /// Songs the Mac may skip through to reach the phone's song, rather than
+    /// start the phone's playlist from it.
+    static let skipsAtMost = 2
+
+    /// The round trip: the Mac skips ahead in its own queue to the phone's song.
+    private func skipMacAhead(_ ahead: Int, to catalogID: String, here: PhoneNowPlaying, with player: any PhoneMusicPlaying,
+                              timeout: TimeInterval) async -> SendBackOutcome {
         for _ in 0..<ahead {
             guard await step(RemoteCommand(kind: .next, issuedAt: now())) else { return .macRefused }
         }
@@ -206,12 +253,19 @@ public struct Handover {
     /// usually starts with the song (2 of 3 tried). Then the Mac seeks to
     /// where the phone is; otherwise it plays on from the station's first
     /// song. Either way Apple Music here pauses once the Mac plays.
-    private func sendAsStation(_ here: PhoneNowPlaying, catalogID: String, with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> SendBackOutcome {
+    ///
+    /// With `playlist`, a Mac connected to Music that has it plays the
+    /// playlist from the song instead, which starts with the song every
+    /// time; an older Mac, or one without the playlist, plays the station.
+    private func sendAsStation(_ here: PhoneNowPlaying, catalogID: String, playlist: PlaylistPlace? = nil, with player: any PhoneMusicPlaying,
+                               timeout: TimeInterval) async -> SendBackOutcome {
         let before = latest()
         // Where the phone is and the song's title, so the Mac can seek itself
         // the moment Music starts the song (16 November 2026).
         let position = player.nowPlaying()?.position ?? here.position
-        guard await step(.playStation(seededBy: catalogID, position: position, title: here.title, issuedAt: now())) else { return .macRefused }
+        guard await step(.playStation(seededBy: catalogID, position: position, title: here.title, playlist: playlist, issuedAt: now())) else {
+            return .macRefused
+        }
         let deadline = now().addingTimeInterval(timeout)
         while now() < deadline {
             await refresh()
@@ -222,8 +276,9 @@ public struct Handover {
                 if sameSong { await seekIfTheMacMissedIt(player: player, here: here) }
                 if player.nowPlaying()?.isPlaying == true { player.pause() }
                 memory.save(nil)
-                record(sameSong ? "Send back to Mac: the song's station plays on the Mac from the same point; Apple Music here is paused"
-                                : "Send back to Mac: the song's station plays on the Mac, from another song; Apple Music here is paused")
+                let what = playlist == nil ? "the song's station" : "the song's playlist (or its station)"
+                record(sameSong ? "Send back to Mac: \(what) plays on the Mac from the same point; Apple Music here is paused"
+                                : "Send back to Mac: \(what) plays on the Mac, from another song; Apple Music here is paused")
                 return sameSong ? .sentBack : .sentAsStation
             }
             try? await sleep(0.5)

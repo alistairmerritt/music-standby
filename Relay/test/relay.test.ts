@@ -355,6 +355,19 @@ describe("commands", () => {
     expect(r.status).toBe(400);
   });
 
+  it("forwards Continue on Mac's playlist as the phone sent it (17 November 2026)", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const id = newCommandID();
+    const command = {
+      id, kind: "playStation", issuedAt: new Date().toISOString(), position: 61.5, catalogID: "270246724", title: "Song Sixty",
+      playlist: { name: "Road Trip", cloudID: "pl.u-Zx9yW8vU7tS6r", count: 123, index: 59, shuffled: true },
+    };
+    const pending = call("POST", "/v1/commands", { token: phoneToken, body: { command, sessionID }, headers: { "Idempotency-Key": id } });
+    expect((await mac.next("command")).command).toEqual(command);
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 44 } });
+    expect((await pending).status).toBe(200);
+  });
+
   it("passes the Mac's rejection through", async () => {
     const { mac, phoneToken, sessionID } = await playingSetup();
     const { id, body } = commandBody(sessionID, "play");
@@ -463,16 +476,19 @@ describe("catalogue ID and Up Next", () => {
         { catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312.3 },
         { title: "Uploaded demo", artist: "Me", duration: 0 },
       ],
+      playlist: { name: "Road Trip", count: 123, index: 39 },
     });
     mac.send({ type: "state", message: state });
     const s = await waitForRevision(phoneToken, state.revision);
     expect(s.playback.track.catalogID).toBe("1102360418");
     expect(s.playback.upNext).toEqual(state.upNext);
+    expect(s.playback.playlist).toEqual(state.playlist);
     const sent = (await pushes(phoneToken)).slice(before);
     expect(sent.length).toBeGreaterThan(0);
     for (const push of sent) {
       expect(push.payload.aps.attributes.track.catalogID).toBeUndefined();
       expect(push.payload.aps.attributes.upNext).toBeUndefined();
+      expect(push.payload.aps.attributes.playlist).toBeUndefined();
       expect(JSON.stringify(push.payload).length).toBeLessThan(4096);
     }
   });

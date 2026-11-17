@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         reminders.refresh()
         #if DEBUG
         StationProbe.runIfAsked(model: model)
+        HandoverProbe.runIfAsked()
+        HandoverProbe.runHandoverIfAsked(model: model)
         ScreenshotMode.start(model: model)
         #endif
         return true

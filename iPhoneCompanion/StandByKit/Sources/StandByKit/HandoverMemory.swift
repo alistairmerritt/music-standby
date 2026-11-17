@@ -31,16 +31,26 @@ public struct HandoverMark: Codable, Equatable, Sendable {
     }
 }
 
-/// Keeps the last `HandoverMark`. The app's button and the Shortcuts actions
-/// share one, in the App Group's defaults.
+/// Keeps the last `HandoverMark`, and the playlist Continue on iPhone last
+/// started here. The app's button and the Shortcuts actions share them, in
+/// the App Group's defaults.
 @MainActor
 public struct HandoverMemory {
     public var load: @MainActor () -> HandoverMark?
     public var save: @MainActor (HandoverMark?) -> Void
+    /// The library playlist Continue on iPhone last played here, for the way
+    /// back: Apple Music lists it as recently played only after about a
+    /// minute (17 November 2026). Checked against Music's queue before use.
+    public var loadPlaylist: @MainActor () -> PlaylistPlace?
+    public var savePlaylist: @MainActor (PlaylistPlace?) -> Void
 
-    public init(load: @escaping @MainActor () -> HandoverMark?, save: @escaping @MainActor (HandoverMark?) -> Void) {
+    public init(load: @escaping @MainActor () -> HandoverMark?, save: @escaping @MainActor (HandoverMark?) -> Void,
+                loadPlaylist: @escaping @MainActor () -> PlaylistPlace? = { nil },
+                savePlaylist: @escaping @MainActor (PlaylistPlace?) -> Void = { _ in }) {
         self.load = load
         self.save = save
+        self.loadPlaylist = loadPlaylist
+        self.savePlaylist = savePlaylist
     }
 
     /// Remembers nothing: every Continue on iPhone takes the Mac's song.
@@ -49,18 +59,21 @@ public struct HandoverMemory {
     }
 
     static let key = "continueOnPhoneMark"
+    static let playlistKey = "continueOnPhonePlaylist"
 
     public static func defaults(_ defaults: UserDefaults) -> HandoverMemory {
-        HandoverMemory(
-            load: { defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(HandoverMark.self, from: $0) } },
-            save: { mark in
-                if let mark, let data = try? JSONEncoder().encode(mark) {
-                    defaults.set(data, forKey: key)
-                } else {
-                    defaults.removeObject(forKey: key)
-                }
+        func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        }
+        func save<T: Encodable>(_ value: T?, _ key: String) {
+            if let value, let data = try? JSONEncoder().encode(value) {
+                defaults.set(data, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
             }
-        )
+        }
+        return HandoverMemory(load: { load(HandoverMark.self, key) }, save: { save($0, key) },
+                              loadPlaylist: { load(PlaylistPlace.self, playlistKey) }, savePlaylist: { save($0, playlistKey) })
     }
 
     /// The app's own, shared by the app and its Shortcuts actions.

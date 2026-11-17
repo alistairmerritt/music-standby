@@ -81,8 +81,8 @@ Press it here. It happens there.
 • Swiped the player away? An optional reminder brings it back when the music starts again.
 
 Take your music with you. Then bring it back.
-• Continue on iPhone picks up the song from your Mac in Apple Music on your iPhone, from the same point, with your Up Next queue.
-• Continue on Mac sends what your iPhone is playing back to your Mac.
+• Continue on iPhone picks up the song from your Mac in Apple Music on your iPhone, from the same point, with your playlist or Up Next queue.
+• Continue on Mac sends what your iPhone is playing back to your Mac, from the same point. A playlist from your library carries on there too.
 • Continue Listening works with Shortcuts, so your music can move between devices without you lifting a finger.
 
 Requirements

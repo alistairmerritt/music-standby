@@ -195,6 +195,14 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   answers `invalid_request` when one is missing. `playback.volume` and `playback.outputs` in
   `GET /v1/session`, and `attributes.volume` in pushes, carry the results. All optional, so an
   older Mac or relay leaves them out.
+- **Playlists (17 November 2026).** `playStation` may carry `playlist`, a `PlaylistPlace`
+  (`name`, `count`, `index` from 0, and optionally `cloudID` and `shuffled`): the library
+  playlist the phone plays the song from. A Mac connected to Music plays that playlist from
+  the song instead of the station, and shuffles the rest when `shuffled`; without the
+  playlist it plays the station, as an older Mac does. The Mac's `playback.playlist` in
+  `GET /v1/session` names the playlist its song plays from when Up Next is the rest of it in
+  order, so Continue on iPhone plays the playlist rather than 25 of its songs. Both pass
+  through the relay untouched, and `playlist` is never pushed.
 - **`sessionID` names the session the command came from.** One that names a session must name
   the current one (`409 no_session` or `session_mismatch` otherwise), so a stale Lock Screen
   can't act on a newer session; the extension always sends it. Since 16 November 2026 it may be
