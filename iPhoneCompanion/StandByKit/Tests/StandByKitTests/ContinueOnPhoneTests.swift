@@ -39,6 +39,21 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         stationSeeds.append(catalogID)
         return station
     }
+    /// What `playlistPlace` finds here, and the remembered places it was given.
+    var playlistHere: PlaylistPlace?
+    private(set) var remembered: [PlaylistPlace?] = []
+    func playlistPlace(remembered place: PlaylistPlace?) async -> PlaylistPlace? {
+        remembered.append(place)
+        return playlistHere
+    }
+    /// What `play(_:in:…)` plays: nil when the playlist isn't here.
+    var playsPlaylist: PlaylistPlace?
+    private(set) var playlistAsked: [(id: String, place: PlaylistPlace, position: TimeInterval)] = []
+    func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
+              timeout: TimeInterval) async -> PlaylistPlace? {
+        playlistAsked.append((catalogID, place, position()))
+        return playsPlaylist
+    }
 }
 
 private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) -> PlaybackMessage {

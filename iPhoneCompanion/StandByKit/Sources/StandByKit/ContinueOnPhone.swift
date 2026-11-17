@@ -24,6 +24,29 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// Apple Music catalogue songs like this one, for a song the Mac has no
     /// catalogue ID for. Empty when none, or Apple Music can't be asked.
     func searchCatalog(title: String, artist: String) async -> [CatalogCandidate]
+    /// The library playlist Apple Music here plays its current song from,
+    /// and the song's place in it, for Continue on Mac: a playlist Apple
+    /// Music lists as recently played, or else `remembered` (the one
+    /// Continue on iPhone last started here), that has the song, at the
+    /// place Music's queue says unless shuffling; or else, unshuffled, the
+    /// library playlist with the song at that place, as recently played
+    /// lags a playlist started here by about a minute. Nil when it can't be
+    /// told.
+    func playlistPlace(remembered: PlaylistPlace?) async -> PlaylistPlace?
+    /// Plays a library playlist here like `place` from the song
+    /// `catalogID`: the one with that name (Apple Music's ID first, then
+    /// the same size first) that has the song, at `place.index` or else the
+    /// closest place, from `position()`. Returns the place it played, with
+    /// this phone's ID for the playlist, once Music plays the song; nil when
+    /// no playlist here has it or Music didn't start it in `timeout`.
+    func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
+              timeout: TimeInterval) async -> PlaylistPlace?
+}
+
+extension PhoneMusicPlaying {
+    public func playlistPlace(remembered: PlaylistPlace?) async -> PlaylistPlace? { nil }
+    public func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
+                     timeout: TimeInterval) async -> PlaylistPlace? { nil }
 }
 
 /// One song from an Apple Music catalogue search.
