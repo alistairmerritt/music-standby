@@ -50,7 +50,7 @@ struct HomeView: View {
                 Text(iPhoneIsPlaying ? "Now Playing on Mac · Paused" : "Now Playing on Mac")
             } footer: {
                 if iPhoneIsPlaying, iPhoneHasMacSong {
-                    Text("This song is playing on your iPhone.")
+                    Text("This song is now playing on your iPhone.")
                 }
             }
 
@@ -350,7 +350,6 @@ private struct SeekBar: View {
 /// while the music is already on that side; with both paused, both work.
 private struct HandoffSection: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
     let player: SystemMusicPhonePlayer
     @Binding var here: PhoneNowPlaying?
     /// Whether Continue Listening can work, and what to do if not. Nil when
@@ -423,8 +422,9 @@ private struct HandoffSection: View {
         case .notAllowed: return "Allow access to Apple Music in Settings to continue listening on your iPhone."
         case .didNotStart: return "Couldn’t start playback on your iPhone. Music is still playing on your Mac."
         case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere:
-            // The song is Apple Music's now: show it there.
-            openURL(SystemMusicPhonePlayer.appURL)
+            // Stays here (17 November 2026): Home greys out the Mac's section
+            // and says the song is on the iPhone, and Continue on Mac is at
+            // hand. The Shortcuts action still opens Music unless told not to.
             return nil
         }
     }
