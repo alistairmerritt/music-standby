@@ -21,8 +21,8 @@ import UIKit
 enum ScreenshotMode {
     static var isOn: Bool { ProcessInfo.processInfo.arguments.contains("-screenshotDemo") }
 
-    /// `-screenshotNowPlaying showing|other`: Home's Lock Screen section as if
-    /// the player were showing, or another app were.
+    /// `-screenshotNowPlaying on`: Home's Lock Screen section as if the
+    /// player had a session (the simulator can't start one).
     static var nowPlayingState: String? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let at = arguments.firstIndex(of: "-screenshotNowPlaying"), arguments.count > at + 1 else { return nil }

@@ -404,7 +404,7 @@ iPhone 15 Pro, iOS 27.2, free Personal Team, mock transport, connected by USB. "
 
 Once, on an older build, neither app appeared when audio started. That wasn't reproduced with the newer build.
 
-**System Primary** read No once while the session was on screen. A later check reported no errors, but the value wasn't recorded. It hasn't affected StandBy or the Lock Screen.
+**System Primary** read No once while the session was on screen. A later check reported no errors, but the value wasn't recorded. It hasn't affected StandBy or the Lock Screen. On 17 November 2026 it read false again for the app's only session, for 10 s after the app opened and asked (no error), with Second Chair on the Lock Screen. So Home no longer shows a Status ("Showing" / "Another app is showing") for the Lock Screen; Diagnostics keeps the raw value.
 
 **Installing over a live session leaves a broken extension.** iOS relaunched the extension from the outgoing copy of the app at the moment of install. That process had its file writes denied, failed every command, and survived ending and restarting the session. Separately, a launch 5 s after an install failed, while one about 50 s later worked. Could affect real app updates. Not yet tested whether a phone restart clears it. Seen again on 11 November: an extension launched 3 s before an install finished kept the old code (its debug dylib had the old build's UUID), and crashed on the new app's attributes. Once it had crashed, the next launch ran the new code.
 

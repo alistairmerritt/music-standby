@@ -1,6 +1,7 @@
 #if DEBUG
 import MediaPlayer
 import MusicKit
+import NowPlaying
 import UIKit
 import AVFoundation
 import StandByKit
@@ -29,6 +30,22 @@ enum HandoverProbe {
     /// `-continueOnPhone`, `-continueOnMac`.
     static func runHandoverIfAsked(model: AppModel) {
         let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-primaryProbe") {
+            // What the Lock Screen status reads: the app's session and every
+            // session iOS has, each with isSystemPrimary, over a few seconds after
+            // opening as normal.
+            Task {
+                let controller = model.sessionController as? RemoteSessionController
+                for second in [1, 3, 6, 10] {
+                    try? await Task.sleep(for: .seconds(second == 1 ? 1 : second == 3 ? 2 : second == 6 ? 3 : 4))
+                    let sessions = (try? await RemoteMediaSession<MacPlaybackAttributes>.sessions()) ?? []
+                    let all = sessions.map { "\($0.id.prefix(8)) primary \($0.isSystemPrimary)" }.joined(separator: "; ")
+                    say("+\(second) s: app's session \(controller?.sessionID?.prefix(8) ?? "none") primary \(controller?.isSystemPrimary ?? false), error \(controller?.lastPrimaryError ?? "none"); iOS has \(sessions.count): \(all)")
+                }
+                finish()
+            }
+            return
+        }
         let toPhone = arguments.contains("-continueOnPhone"), toMac = arguments.contains("-continueOnMac")
         guard toPhone || toMac else { return }
         Task {

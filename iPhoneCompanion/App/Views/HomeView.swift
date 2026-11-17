@@ -94,20 +94,22 @@ struct HomeView: View {
         }
     }
 
-    /// The session's state, or in a development build's screenshots the one
-    /// `-screenshotNowPlaying showing|other` asks for (the simulator has none).
-    private var sessionShown: (isActive: Bool, isPrimary: Bool) {
+    /// Whether there's a session, or in a development build's screenshots
+    /// what `-screenshotNowPlaying` asks for (the simulator has none).
+    private var sessionIsActive: Bool {
         #if DEBUG
-        if let forced = ScreenshotMode.nowPlayingState { return (true, forced == "showing") }
+        if ScreenshotMode.nowPlayingState != nil { return true }
         #endif
-        return (model.sessionController.isActive, model.sessionController.isSystemPrimary)
+        return model.sessionController.isActive
     }
 
     private var nowPlayingSection: some View {
         Section {
-            if sessionShown.isActive {
-                // The system's own words were "primary session"; this says what it means.
-                LabeledContent("Status", value: sessionShown.isPrimary ? "Showing" : "Another app is showing")
+            // No status row: iOS's `isSystemPrimary` read false while Second
+            // Chair was on the Lock Screen (8 and 17 November 2026), so
+            // "Another app is showing" was wrong, and nothing else tells which
+            // player shows. Diagnostics keeps the raw value.
+            if sessionIsActive {
                 Button("Refresh Now Playing") {
                     Task { await model.activateNowPlaying() }
                 }
