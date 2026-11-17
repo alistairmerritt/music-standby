@@ -19,7 +19,7 @@ final class RemoteSessionController: RemoteSessionControlling {
 
     /// Reuses a session that survived an app restart, otherwise starts one.
     /// Must run while the app is in the foreground for the primary request to count.
-    func activate(with attributes: MacPlaybackAttributes) async {
+    func activate(with attributes: MacPlaybackAttributes, requestingPrimary: Bool) async {
         do {
             let current: Session
             if let existing = try await Session.sessions().first(where: { $0.id == attributes.id }) {
@@ -34,7 +34,7 @@ final class RemoteSessionController: RemoteSessionControlling {
             lastError = String(describing: error)
             return
         }
-        await requestPrimary()
+        if requestingPrimary { await requestPrimary() }
     }
 
     /// The system keeps a session after the app quits. A Shortcuts action

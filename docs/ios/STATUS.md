@@ -230,7 +230,12 @@ Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Sho
 
 **Play To was removed on 12 November (evening)**, from the Shortcuts actions and from the app (the picker under the volume slider). Music on the Mac can't switch to some speakers at all: tried with AppleScript alone, with no Second Chair code involved, the switch to the Bedroom HomePod timed out after 20 s and the MacBook stayed selected, and Music refuses the Kitchen HomePod with -15014. Alistair found Play To to the Bedroom HomePod failed every time. The protocol (`selectOutput`, `playback.outputs`), the Mac and the relay keep their support, and so does `AppModel.selectOutput`; nothing on the phone sends it now. Its free App Shortcut slot went to Stop Showing.
 
-**Since 17 November 2026 the app's button stays in Second Chair:** Home greys out the Mac's section and says "This song is now playing on your iPhone." The Shortcuts action still opens Music unless its Open Music option is off. Not yet checked: whether reopening Second Chair while the iPhone plays puts the Mac's paused song back on the Lock Screen (the app asks to be primary each time it opens).
+**Since 17 November 2026 the app's button stays in Second Chair:** Home greys out the Mac's section and says "This song is now playing on your iPhone." The Shortcuts action still opens Music unless its Open Music option is off. Seen on TestFlight 202611172127 with the iPhone playing:
+- **With Second Chair open:** the Mac's paused Now Playing took the system player, because the app asked to be primary on opening.
+- **StandBy:** kept the phone's Apple Music.
+- **The Lock Screen:** showed both.
+
+So since then, opening Second Chair doesn't ask to be primary while the iPhone plays and the Mac doesn't (`AppModel.phonePlaysMusic`). It still asks with the iPhone paused, which is how it takes StandBy back from Apple Music after 8 minutes.
 
 **Continue on iPhone opens the Music app (12 November, 20:40).** The app's button opens `music://` once the song plays here, and so does the action, through `OpenURLIntent`. The action has an **Open Music** option, on by default, to turn off for an automation that shouldn't bring an app to the screen (the car). On the iPhone (development build, silent as above), Music came to the front about 2.5 s after the tile and about 3 s after the app's button, with the Mac paused each time. Seen on the way: for "Chewing Gum" (Blood Orange) the Mac's state had no catalogue ID even minutes into the song, so Continue on iPhone said there was nothing to continue. A Mac-side lookup gap, not this change.
 

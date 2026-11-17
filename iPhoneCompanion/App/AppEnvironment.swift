@@ -60,7 +60,7 @@ enum AppEnvironment {
             #endif
             registrar = MockPushTokenRegistrar(container: container)
         }
-        return AppModel(
+        let model = AppModel(
             // Any build can run the demo, for App Review.
             transport: DemoCapableTransport(real: transport, startsInDemo: inDemo),
             sessionController: RemoteSessionController(),
@@ -68,6 +68,9 @@ enum AppEnvironment {
             defaults: defaults,
             registrar: registrar
         )
+        let phoneMusic = SystemMusicPhonePlayer()
+        model.phonePlaysMusic = { phoneMusic.nowPlaying()?.isPlaying == true }
+        return model
     }
 
     /// The opt-in reminder. Its token goes to the current pairing's relay.
