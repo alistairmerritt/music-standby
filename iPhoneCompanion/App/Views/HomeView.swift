@@ -381,7 +381,7 @@ private struct HandoffSection: View {
             Section {
                 Toggle("Automatically Add to Library", isOn: $addsToLibrary)
             } footer: {
-                Text("Automatically add playlists and albums to your Apple Music library when needed. They’ll stay there until you remove them. When off, your Mac plays the song’s station instead.")
+                Text("To keep your playlist or album going when you Continue Listening from iPhone to Mac, Second Chair can add it to your Apple Music library automatically. It stays there until you remove it. With this off, your Mac plays the song’s station instead.")
             }
         }
     }
