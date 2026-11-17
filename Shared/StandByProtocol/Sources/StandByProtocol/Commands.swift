@@ -58,12 +58,18 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     /// Why the phone sent it, when that matters to the Mac. Added 12 November
     /// 2026; an older Mac ignores it.
     public var reason: CommandReason?
+    /// For `playStation`: the library playlist the phone plays the song from.
+    /// A Mac connected to Music plays that playlist from the song instead of
+    /// the station, and shuffles the rest when `shuffled`; without it, or
+    /// when the Mac's library doesn't have the playlist with the song, the
+    /// station as before. Added 17 November 2026; an older Mac ignores it.
+    public var playlist: PlaylistPlace?
 
     public static let maximumAge: TimeInterval = 10
 
     public init(id: UUID = UUID(), kind: CommandKind, issuedAt: Date? = nil,
                 position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil,
-                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil) {
+                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil, playlist: PlaylistPlace? = nil) {
         self.id = id
         self.kind = kind
         self.issuedAt = issuedAt
@@ -73,6 +79,7 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
         self.catalogID = catalogID
         self.title = title
         self.reason = reason
+        self.playlist = playlist
     }
 
     public static func seek(to position: TimeInterval, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
@@ -89,10 +96,12 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
 
     /// With `position` and `title`, the Mac seeks there itself once the
     /// station starts with that song, rather than after the phone sees it
-    /// play (16 November 2026).
+    /// play (16 November 2026). With `playlist`, a Mac that has it plays the
+    /// playlist from the song instead (17 November 2026).
     public static func playStation(seededBy catalogID: String, position: TimeInterval? = nil, title: String? = nil,
-                                   id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
-        RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, position: position, catalogID: catalogID, title: title)
+                                   playlist: PlaylistPlace? = nil, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
+        RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, position: position, catalogID: catalogID, title: title,
+                      playlist: playlist)
     }
 
     /// False when `issuedAt` is missing: the temporary contract never sent it.

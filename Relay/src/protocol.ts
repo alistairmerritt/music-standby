@@ -38,6 +38,15 @@ export interface QueuedTrack {
   duration: number;
 }
 
+/** A song's place in a library playlist (Shared/StandByProtocol/Playlist.swift). Added 17 November 2026. Passed through. */
+export interface PlaylistPlace {
+  name: string;
+  cloudID?: string;
+  count: number;
+  index: number;
+  shuffled?: boolean;
+}
+
 /** One place Music can play to (Shared/StandByProtocol/Output.swift). */
 export interface AudioOutput {
   id: string;
@@ -65,6 +74,8 @@ export interface PlaybackMessage {
   upNext?: QueuedTrack[];
   /** Whether the Mac is connected to Music as a remote, for Continue Listening. Passed through. */
   musicConnection?: string;
+  /** The library playlist the song plays from, when Up Next is the rest of it. Reaches the phone in GET /v1/session; never pushed. */
+  playlist?: PlaylistPlace;
 }
 
 export interface ProtocolError {
@@ -85,6 +96,8 @@ export interface RemoteCommand {
   outputID?: string;
   /** Why the phone sent it; `continue_on_phone` on Continue on iPhone's pause. Passed through. */
   reason?: string;
+  /** For `playStation`: the phone's playlist, which a Mac connected to Music plays from the song. Passed through. */
+  playlist?: PlaylistPlace;
 }
 
 export interface CommandAck {

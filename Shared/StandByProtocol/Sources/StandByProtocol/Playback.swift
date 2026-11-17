@@ -69,6 +69,12 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
     /// no catalogue IDs or Up Next. The iPhone app shows it beside the Mac's
     /// status. Nil from a Mac before 16 November 2026.
     public var musicConnection: MusicConnection?
+    /// The library playlist `track` plays from, when Up Next is the rest of
+    /// it in order: not shuffled, and nothing added with Play Next ahead of
+    /// it. Continue on iPhone then plays the playlist itself rather than the
+    /// 25 songs of `upNext`. Nil otherwise, and from a Mac before 17 November
+    /// 2026. Read with `upNext`, so it lags as `upNext` does.
+    public var playlist: PlaylistPlace?
 
     /// The most `upNext` entries a Mac sends.
     public static let upNextLimit = 25
@@ -80,7 +86,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
     public init(revision: UInt64, state: PlaybackState, elapsedTime: TimeInterval, capturedAt: Date, track: TrackMetadata?,
                 canGoNext: Bool, canGoPrevious: Bool, listeningSessionID: UUID? = nil, detail: String? = nil,
                 volume: Double? = nil, outputs: [AudioOutput]? = nil, upNext: [QueuedTrack]? = nil,
-                musicConnection: MusicConnection? = nil) {
+                musicConnection: MusicConnection? = nil, playlist: PlaylistPlace? = nil) {
         self.revision = revision
         self.state = state
         self.elapsedTime = elapsedTime
@@ -94,6 +100,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         self.outputs = outputs
         self.upNext = upNext
         self.musicConnection = musicConnection
+        self.playlist = playlist
     }
 
     /// The temporary contract's initialiser. A non-playing message with a
@@ -111,7 +118,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case revision, state, isPlaying, elapsedTime, capturedAt, track, canGoNext, canGoPrevious, listeningSessionID, detail, volume, outputs,
-             upNext, musicConnection
+             upNext, musicConnection, playlist
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +135,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         outputs = try c.decodeIfPresent([AudioOutput].self, forKey: .outputs)
         upNext = try c.decodeIfPresent([QueuedTrack].self, forKey: .upNext)
         musicConnection = try c.decodeIfPresent(MusicConnection.self, forKey: .musicConnection)
+        playlist = try c.decodeIfPresent(PlaylistPlace.self, forKey: .playlist)
         // `state` wins when present. Without it this is the temporary contract.
         if let state = try c.decodeIfPresent(PlaybackState.self, forKey: .state) {
             self.state = state
@@ -152,6 +160,7 @@ public struct PlaybackMessage: Codable, Equatable, Sendable {
         try c.encodeIfPresent(outputs, forKey: .outputs)
         try c.encodeIfPresent(upNext, forKey: .upNext)
         try c.encodeIfPresent(musicConnection, forKey: .musicConnection)
+        try c.encodeIfPresent(playlist, forKey: .playlist)
     }
 }
 
