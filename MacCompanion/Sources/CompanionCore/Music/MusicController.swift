@@ -145,6 +145,21 @@ public actor MusicController {
         perform(script: .setShuffle(on))
     }
 
+    /// `set song repeat`, for a hand-over to keep the phone's repeat. A mode
+    /// Music doesn't know is left alone.
+    public func setRepeat(_ mode: RepeatMode) -> CommandOutcome {
+        guard [RepeatMode.off, .one, .all].contains(mode) else { return .performed }
+        return perform(script: .setRepeat(mode))
+    }
+
+    /// Plays Apple Music's station with this ID (`ra.…`), as the phone was
+    /// playing it, for Continue on Mac. Music starts it on a song of its own
+    /// choosing: a station is made as it plays (17 November 2026).
+    public func playStation(_ station: StationPlace) -> CommandOutcome {
+        guard station.isValid, let url = Self.stationURL(id: station.id) else { return .failed("not a station ID") }
+        return perform(script: .openLocation(url))
+    }
+
     /// Plays to the AirPlay device with this `AudioOutput.id`, and only to it.
     public func selectOutput(_ id: String) -> CommandOutcome {
         perform(script: .selectOutput(id))
@@ -163,8 +178,13 @@ public actor MusicController {
     /// Mac's region as the storefront. Nil unless the ID is all digits.
     static func stationURL(seededBy catalogID: String, region: String? = Locale.current.region?.identifier) -> String? {
         guard !catalogID.isEmpty, catalogID.count <= 20, catalogID.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return stationURL(id: "ra.\(catalogID)", region: region)
+    }
+
+    static func stationURL(id: String, region: String? = Locale.current.region?.identifier) -> String? {
+        guard StationPlace(id: id, name: "-").isValid else { return nil }
         let storefront = (region ?? "us").lowercased().filter { $0.isASCII && $0.isLetter }
-        return "music://music.apple.com/\(storefront.count == 2 ? storefront : "us")/station/ra.\(catalogID)"
+        return "music://music.apple.com/\(storefront.count == 2 ? storefront : "us")/station/\(id)"
     }
 
     private func perform(script: MusicScript) -> CommandOutcome {

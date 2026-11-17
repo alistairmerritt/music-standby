@@ -1,10 +1,55 @@
 # iOS status
 
-Last updated 15 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
+Last updated 17 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
 
 **Renamed to Second Chair on 11 November 2026.** Only the names people see changed (Home Screen, screens, notifications); bundle identifiers, App IDs, the push topic and the Keychain group keep `MusicStandBy`. Entries below that predate the rename use the old name.
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
+
+## Every source carries over (17 November 2026, Mac 0.3.3)
+
+Continue Listening carries what the music plays from, not just the song.
+
+**Continue on iPhone**, besides a library playlist in order:
+- a shuffled library playlist (shuffled here once the song plays);
+- a library album, in order or shuffled;
+- the whole library shuffled;
+- an Apple Music playlist, album or station outside the library:
+  - found in Apple Music's recently played, which is account-wide;
+  - a playlist or album only when it has the song;
+  - a station only when the Mac lists one song ahead and has played from Apple Music for a minute;
+  - for a station, the song plays here, then the Mac's station;
+- repeat.
+
+**Continue on Mac**, besides a library playlist:
+- a library album, in order (Music can't shuffle within one);
+- an Apple Music playlist or album, added to the library first, only with the setting **Add to Library for Continue on Mac** (off by default, so adding never changes the library unasked). The Mac waits up to 25 s for it to arrive.
+- the phone's station, which starts on another song on the Mac;
+- the whole library shuffled (a guess: the phone shuffles a library song from no playlist or album it can find);
+- repeat.
+
+A song that Continue on iPhone queued from the Mac's Up Next is never taken for a playlist, album or station: recently played once named an old station for one.
+
+**Seen on this iPhone and Mac on 17 November 2026,** muted throughout:
+- album, Mac to iPhone, from song 3 of 10;
+- library shuffle, Mac to iPhone;
+- repeat;
+- shuffled playlist, Mac to iPhone, then the round trip back;
+- station, Mac to iPhone: the song, then the Mac's own station, once recently played listed it after 25–40 s;
+- library shuffle, iPhone to Mac;
+- station, iPhone to Mac.
+
+**Apple facts learned:**
+- **Music, read over DACP:**
+  - a cue'd album plays from Music's "Music" list (`aePS` 6), not the library's container 62;
+  - `cue` resets repeat to off;
+  - shuffle and repeat read back late after a set.
+- **iPhone, MediaPlayer and MusicKit:**
+  - MediaPlayer's `repeatMode` is right where MusicKit's `state.repeatMode` isn't;
+  - a station and a library song look alike to both MediaPlayer and MusicKit, apart from shuffle;
+  - `prepareToPlay` takes 0.2–2.2 s, while the library lookups take about 30 ms.
+
+**Not tried on a device:** Continue on Mac adding a new Apple Music playlist to the library. It would change the library. The add itself took 5.4 s on 17 November, and the Mac saw the playlist 4.3 s later.
 
 ## Continue on iPhone for songs the Mac can't find (16 November 2026)
 

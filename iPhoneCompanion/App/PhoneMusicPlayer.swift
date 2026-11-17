@@ -12,6 +12,10 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     nonisolated static let appURL = URL(string: "music://")!
 
     private let player = MPMusicPlayerController.systemMusicPlayer
+    /// The Apple Music playlist or album `appleMusicSource()` found last,
+    /// for `addToLibrary`.
+    private var lastFound: FoundContainer?
+    private enum FoundContainer { case playlist(Playlist), album(Album) }
 
     func requestAccess() async -> Bool {
         switch MPMediaLibrary.authorizationStatus() {
@@ -278,6 +282,326 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
             return .added
         } catch {
             return .failed("queue: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: Albums, the library, Apple Music and repeat (17 November 2026)
+
+extension SystemMusicPhonePlayer {
+    /// A library song by catalogue ID. MediaPlayer can't filter by it, so the
+    /// library's songs are scanned: 3,312 of them, in milliseconds.
+    private static func librarySong(_ catalogID: String) -> MPMediaItem? {
+        (MPMediaQuery.songs().items ?? []).first { $0.playbackStoreID == catalogID }
+    }
+
+    /// The library's songs from `item`'s album, by disc, then track, as Music on the Mac counts.
+    private static func albumSongs(of item: MPMediaItem) -> [MPMediaItem] {
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: item.albumPersistentID),
+                                                          forProperty: MPMediaItemPropertyAlbumPersistentID))
+        return (query.items ?? []).sorted {
+            ($0.discNumber, $0.albumTrackNumber, $0.title ?? "") < ($1.discNumber, $1.albumTrackNumber, $1.title ?? "")
+        }
+    }
+
+    /// Starts `item` in the queue already set, from `position()`, and waits
+    /// for it to play; then shuffles the rest if asked. Shuffle set before the
+    /// start makes Music start anywhere (seen 17 November 2026).
+    private func start(_ item: MPMediaItem, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
+                       shuffle: Bool) async -> Bool {
+        player.nowPlayingItem = item
+        let prepared = await withCheckedContinuation { continuation in
+            player.prepareToPlay { continuation.resume(returning: $0 == nil) }
+        }
+        guard prepared else { return false }
+        player.currentPlaybackTime = position()
+        player.play()
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if player.playbackState == .playing, player.nowPlayingItem?.persistentID == item.persistentID {
+                let target = position()
+                if abs(player.currentPlaybackTime - target) > 1.5 { player.currentPlaybackTime = target }
+                if shuffle { player.shuffleMode = .songs }
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return false
+    }
+
+    func play(_ catalogID: String, inAlbum place: AlbumPlace, position: @escaping @MainActor () -> TimeInterval,
+              timeout: TimeInterval) async -> AlbumPlace? {
+        guard access == .allowed, let item = Self.librarySong(catalogID), item.albumPersistentID != 0 else { return nil }
+        let songs = Self.albumSongs(of: item)
+        let ids = songs.map(Self.catalogID)
+        guard let index = ids.indices.filter({ ids[$0] == catalogID }).min(by: { abs($0 - place.index) < abs($1 - place.index) }) else {
+            return nil
+        }
+        player.shuffleMode = .off
+        player.setQueue(with: MPMediaItemCollection(items: songs))
+        guard await start(songs[index], position: position, timeout: timeout, shuffle: place.isShuffled) else { return nil }
+        return AlbumPlace(title: item.albumTitle ?? place.title, artist: item.albumArtist ?? item.artist, count: songs.count, index: index,
+                          shuffled: place.shuffled)
+    }
+
+    /// Seen on this iPhone on 17 November 2026 (`HandoverProbe`): the whole
+    /// library queued, started on a song, then shuffled, kept the song and
+    /// went on to other artists' songs.
+    func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval) async -> Bool {
+        guard access == .allowed, let item = Self.librarySong(catalogID) else { return false }
+        player.shuffleMode = .off
+        player.setQueue(with: MPMediaQuery.songs())
+        return await start(item, position: position, timeout: timeout, shuffle: true)
+    }
+
+    func isShufflingLibrary() async -> Bool {
+        guard access == .allowed, player.shuffleMode != .off, let item = player.nowPlayingItem else { return false }
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: item.persistentID), forProperty: MPMediaItemPropertyPersistentID))
+        return !(query.items ?? []).isEmpty
+    }
+
+    // MARK: Apple Music outside the library
+
+    /// The newest `limit` things Apple Music lists as recently played, as
+    /// MusicKit gives them, within `recentlyPlayedWait`.
+    private func recentContainers(_ limit: Int) async -> [RecentlyPlayedMusicItem] {
+        guard MusicAuthorization.currentStatus == .authorized else { return [] }
+        return await withTaskGroup(of: [RecentlyPlayedMusicItem]?.self) { group in
+            group.addTask {
+                var request = MusicRecentlyPlayedContainerRequest()
+                request.limit = limit
+                guard let items = try? await request.response().items else { return [] }
+                return Array(items.prefix(limit))
+            }
+            group.addTask {
+                try? await Task.sleep(for: Self.recentlyPlayedWait)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? []
+        }
+    }
+
+    /// A playlist with its songs: up to 1,000, in batches of 100.
+    private static func withEntries(_ playlist: Playlist) async -> (Playlist, [Playlist.Entry])? {
+        guard let loaded = try? await playlist.with([.entries]), var batch = loaded.entries else { return nil }
+        var all = Array(batch)
+        for _ in 0..<9 where batch.hasNextBatch {
+            guard let next = try? await batch.nextBatch() else { break }
+            all += next
+            batch = next
+        }
+        return (loaded, all)
+    }
+
+    /// An album with its songs, by disc, then track.
+    private static func withTracks(_ album: Album) async -> (Album, [Track])? {
+        guard let loaded = try? await album.with([.tracks]), let tracks = loaded.tracks else { return nil }
+        let sorted = tracks.sorted { ($0.discNumber ?? 0, $0.trackNumber ?? 0, $0.title) < ($1.discNumber ?? 0, $1.trackNumber ?? 0, $1.title) }
+        return (loaded, sorted)
+    }
+
+    private static func songID(_ entry: Playlist.Entry) -> String? {
+        switch entry.item {
+        case .song(let song)?: song.id.rawValue
+        case .musicVideo(let video)?: video.id.rawValue
+        default: nil
+        }
+    }
+
+    /// The same song: by catalogue ID, or else by title and artist, as a
+    /// library list's songs carry library IDs.
+    private static func isSong(id: String?, title: String, artist: String?, _ catalogID: String?, _ item: MPMediaItem?) -> Bool {
+        if let id, let catalogID, id == catalogID { return true }
+        guard let item, let itemTitle = item.title else { return false }
+        return CatalogCandidate.fold(title) == CatalogCandidate.fold(itemTitle)
+            && CatalogCandidate.fold(artist ?? "") == CatalogCandidate.fold(item.artist ?? "")
+    }
+
+    func appleMusicSource() async -> AppleMusicSource? {
+        guard access == .allowed, let item = player.nowPlayingItem else { return nil }
+        let catalogID = Self.catalogID(of: item)
+        let shuffled = player.shuffleMode != .off
+        let queueIndex = player.indexOfNowPlayingItem
+        // Shuffling, Music's queue can't confirm a list, so only the latest is trusted.
+        for (n, container) in await recentContainers(shuffled ? 1 : 2).enumerated() {
+            switch container {
+            case .playlist(let playlist):
+                guard let (loaded, entries) = await Self.withEntries(playlist) else { continue }
+                let places = entries.indices.filter {
+                    Self.isSong(id: Self.songID(entries[$0]), title: entries[$0].title, artist: entries[$0].artistName, catalogID, item)
+                }
+                guard let first = places.first else { continue }
+                lastFound = .playlist(loaded)
+                return .playlist(PlaylistPlace(name: loaded.name, cloudID: loaded.id.rawValue, count: entries.count,
+                                               index: !shuffled && places.contains(queueIndex) ? queueIndex : first,
+                                               shuffled: shuffled ? true : nil))
+            case .album(let album):
+                guard let (loaded, tracks) = await Self.withTracks(album),
+                      let index = tracks.firstIndex(where: { Self.isSong(id: $0.id.rawValue, title: $0.title, artist: $0.artistName, catalogID, item) })
+                else { continue }
+                lastFound = .album(loaded)
+                return .album(AlbumPlace(title: loaded.title, artist: loaded.artistName, count: tracks.count, index: index,
+                                         shuffled: shuffled ? true : nil), id: loaded.id.rawValue)
+            case .station(let station):
+                // Only the latest, and only unshuffled: a station's songs can't be
+                // checked, and a station can't shuffle. Seen 17 November 2026: the
+                // library shuffled here, with an old station still latest.
+                guard n == 0, !shuffled else { continue }
+                return .station(StationPlace(id: station.id.rawValue, name: station.name))
+            @unknown default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    /// Seen on this iPhone on 17 November 2026 (`HandoverProbe`): an Apple
+    /// Music playlist added in 5.4 s, and on the Mac 4.3 s later. A library
+    /// list (`pl.u-…`, `l.…`) is there already.
+    func addToLibrary(_ source: AppleMusicSource) async -> Bool {
+        do {
+            switch (source, lastFound) {
+            case (.playlist(let place), .playlist(let playlist)?) where playlist.id.rawValue == place.cloudID:
+                if playlist.id.rawValue.hasPrefix("pl.u-") { return true }
+                do {
+                    try await MusicLibrary.shared.add(playlist)
+                } catch {
+                    // Recently played's copy may not be addable: the catalogue's is.
+                    let request = MusicCatalogResourceRequest<Playlist>(matching: \.id, equalTo: playlist.id)
+                    guard let catalog = try await request.response().items.first else { throw error }
+                    try await MusicLibrary.shared.add(catalog)
+                }
+            case (.album(_, let id), .album(let album)?) where album.id.rawValue == id:
+                if id.hasPrefix("l.") { return true }
+                do {
+                    try await MusicLibrary.shared.add(album)
+                } catch {
+                    let request = MusicCatalogResourceRequest<Album>(matching: \.id, equalTo: album.id)
+                    guard let catalog = try await request.response().items.first else { throw error }
+                    try await MusicLibrary.shared.add(catalog)
+                }
+            default:
+                return false
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// What the Mac plays from, in Apple Music's recently played: the
+    /// newest two playlists or albums with this song, or, with
+    /// `allowStation`, the newest item when it's a station.
+    enum RecentFind {
+        case playlist(Playlist, [Playlist.Entry], index: Int)
+        case album(Album, [Track], index: Int)
+        case station(Station)
+    }
+
+    func findInRecentlyPlayed(_ catalogID: String, allowStation: Bool) async -> RecentFind? {
+        guard access == .allowed else { return nil }
+        for (n, container) in await recentContainers(2).enumerated() {
+            switch container {
+            case .playlist(let playlist):
+                guard let (loaded, entries) = await Self.withEntries(playlist),
+                      let index = entries.firstIndex(where: { Self.songID($0) == catalogID }) else { continue }
+                return .playlist(loaded, entries, index: index)
+            case .album(let album):
+                guard let (loaded, tracks) = await Self.withTracks(album),
+                      let index = tracks.firstIndex(where: { $0.id.rawValue == catalogID }) else { continue }
+                return .album(loaded, tracks, index: index)
+            case .station(let station):
+                guard n == 0, allowStation else { continue }
+                return .station(station)
+            @unknown default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
+                            shuffled: Bool, allowStation: Bool) async -> AppleMusicSource? {
+        let started = Date()
+        guard let found = await findInRecentlyPlayed(catalogID, allowStation: allowStation) else { return nil }
+        let left = max(1, timeout - Date().timeIntervalSince(started))
+        switch found {
+        case .playlist(let playlist, let entries, let index):
+            player.shuffleMode = .off
+            SystemMusicPlayer.shared.queue = SystemMusicPlayer.Queue(playlist: playlist, startingAt: entries[index])
+            guard await startAppleMusic(catalogID, position: position, timeout: left, shuffle: shuffled) else { return nil }
+            return .playlist(PlaylistPlace(name: playlist.name, cloudID: playlist.id.rawValue, count: entries.count, index: index,
+                                           shuffled: shuffled ? true : nil))
+        case .album(let album, let tracks, let index):
+            player.shuffleMode = .off
+            SystemMusicPlayer.shared.queue = SystemMusicPlayer.Queue(album: album, startingAt: tracks[index])
+            guard await startAppleMusic(catalogID, position: position, timeout: left, shuffle: shuffled) else { return nil }
+            return .album(AlbumPlace(title: album.title, artist: album.artistName, count: tracks.count, index: index,
+                                     shuffled: shuffled ? true : nil), id: album.id.rawValue)
+        case .station(let station):
+            // The song first, then the station: a station started here
+            // would begin on a song of its own.
+            guard await play(catalogIDs: [catalogID], position: position, timeout: left) else { return nil }
+            do {
+                try await SystemMusicPlayer.shared.queue.insert(station, position: .tail)
+            } catch {
+                return nil
+            }
+            return .station(StationPlace(id: station.id.rawValue, name: station.name))
+        }
+    }
+
+    /// Plays the MusicKit queue just set and waits for the song, at `position()`.
+    private func startAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
+                                 shuffle: Bool) async -> Bool {
+        do {
+            try await SystemMusicPlayer.shared.prepareToPlay()
+            try await SystemMusicPlayer.shared.play()
+        } catch {
+            return false
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if player.playbackState == .playing, player.nowPlayingItem?.playbackStoreID == catalogID {
+                player.currentPlaybackTime = position()
+                if shuffle { player.shuffleMode = .songs }
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return false
+    }
+
+    // MARK: Repeat
+
+    /// MediaPlayer's: on 17 November 2026 it read "one" after Continue on
+    /// iPhone set it, while MusicKit's `state.repeatMode` still said none.
+    /// MusicKit's only when MediaPlayer leaves it to the Music app.
+    func repeatMode() -> RepeatMode? {
+        switch player.repeatMode {
+        case .none: return .off
+        case .one: return .one
+        case .all: return .all
+        default:
+            switch SystemMusicPlayer.shared.state.repeatMode {
+            case .none?: return .off
+            case .one?: return .one
+            case .all?: return .all
+            default: return nil
+            }
+        }
+    }
+
+    func setRepeat(_ mode: RepeatMode) {
+        switch mode {
+        case .off: player.repeatMode = .none
+        case .one: player.repeatMode = .one
+        case .all: player.repeatMode = .all
+        default: break
         }
     }
 }

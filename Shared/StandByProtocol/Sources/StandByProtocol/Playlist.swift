@@ -24,14 +24,22 @@ public struct PlaylistPlace: Codable, Equatable, Sendable {
     /// True when the sender was shuffling the playlist: the receiver starts
     /// with the song and shuffles the rest. Nil means not shuffled.
     public var shuffled: Bool?
+    /// True when the phone added this Apple Music playlist to the library
+    /// just now, for Continue on Mac: the Mac waits up to `librarySyncWait`
+    /// for it to arrive. It took 4 s on 17 November 2026.
+    public var addedToLibrary: Bool?
 
-    public init(name: String, cloudID: String? = nil, count: Int, index: Int, shuffled: Bool? = nil) {
+    /// How long a Mac waits for a playlist or album the phone has just added.
+    public static let librarySyncWait: TimeInterval = 25
+
+    public init(name: String, cloudID: String? = nil, count: Int, index: Int, shuffled: Bool? = nil, addedToLibrary: Bool? = nil) {
         self.name = name
         // iOS gives "" for a playlist without one (a six-song playlist, 17 November 2026).
         self.cloudID = cloudID?.isEmpty == false ? cloudID : nil
         self.count = count
         self.index = index
         self.shuffled = shuffled
+        self.addedToLibrary = addedToLibrary
     }
 
     public static let maximumNameLength = 256

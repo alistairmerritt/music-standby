@@ -17,17 +17,47 @@ public struct MusicRemotePairing: Codable, Equatable, Sendable {
 }
 
 /// What Music's remote protocol adds to AppleScript: the current song's Apple
-/// Music catalogue ID, Up Next, and the library playlist the song plays from
-/// when Up Next is the rest of it in order (17 November 2026).
+/// Music catalogue ID, Up Next, and where the song plays from (17 November
+/// 2026): a library playlist or album, in order or shuffled, the whole
+/// library shuffled, or Apple Music outside the library. At most one of
+/// `playlist`, `album`, `shuffledLibrary` and `fromAppleMusic` is set.
 public struct RemoteQueue: Equatable, Sendable {
     public var catalogID: String?
     public var upNext: [QueuedTrack]
     public var playlist: PlaylistPlace?
+    public var album: AlbumPlace?
+    public var shuffledLibrary: Bool?
+    public var fromAppleMusic: Bool?
+    public var repeatMode: RepeatMode?
+    /// Music's shuffle, sent with `fromAppleMusic`.
+    public var shuffled: Bool?
 
-    public init(catalogID: String?, upNext: [QueuedTrack], playlist: PlaylistPlace? = nil) {
+    public init(catalogID: String?, upNext: [QueuedTrack], playlist: PlaylistPlace? = nil, album: AlbumPlace? = nil,
+                shuffledLibrary: Bool? = nil, fromAppleMusic: Bool? = nil, repeatMode: RepeatMode? = nil, shuffled: Bool? = nil) {
         self.catalogID = catalogID
         self.upNext = upNext
         self.playlist = playlist
+        self.album = album
+        self.shuffledLibrary = shuffledLibrary
+        self.fromAppleMusic = fromAppleMusic
+        self.repeatMode = repeatMode
+        self.shuffled = shuffled
+    }
+
+    /// What a hand-over carries apart from the songs: where they come from,
+    /// shuffle and repeat.
+    public var context: [String] {
+        [playlist.map { "\($0.name)|\($0.isShuffled)" } ?? "-", album.map { "\($0.title)|\($0.isShuffled)" } ?? "-",
+         "\(shuffledLibrary == true)", "\(fromAppleMusic == true)", repeatMode?.rawValue ?? "-", "\(shuffled == true)"]
+    }
+
+    /// Where the song plays from, for the queue log: never a name.
+    public var sourceSummary: String {
+        if let playlist { return "a playlist\(playlist.isShuffled ? ", shuffled" : ""), song \(playlist.index + 1) of \(playlist.count)" }
+        if let album { return "an album\(album.isShuffled ? ", shuffled" : ""), song \(album.index + 1) of \(album.count)" }
+        if shuffledLibrary == true { return "the library, shuffled" }
+        if fromAppleMusic == true { return "Apple Music, outside the library" }
+        return "nothing named"
     }
 }
 
@@ -40,11 +70,21 @@ public protocol MusicRemotePlaying: Sendable {
     /// order. `beforeStart` runs just before Music is told, only once the
     /// album is found: the companion turns shuffle off there.
     func playAlbum(_ catalogID: String, in place: AlbumPlace, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome
+    /// Plays this library song with the library around it, so that turning
+    /// shuffle on afterwards shuffles the whole library and keeps the song:
+    /// Music's `cue` over the song's album, from the song, plays in the
+    /// library's context ("Library" is then the current playlist, seen 17
+    /// November 2026). `beforeStart` turns shuffle off first, or Music
+    /// would start on another song. `.notHere` when the library hasn't the song.
+    func playInLibrary(_ catalogID: String, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome
 }
 
 extension MusicRemotePlaying {
     public func playAlbum(_ catalogID: String, in place: AlbumPlace, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
         .failed("this remote can't play an album")
+    }
+    public func playInLibrary(_ catalogID: String, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+        .failed("this remote can't play from the library")
     }
 }
 
@@ -108,8 +148,9 @@ public struct URLSessionLocalHTTP: LocalHTTP {
 /// library songs carried a catalogue ID (`aeSI`, `com.apple.itunes.itms-songid`)
 /// that Apple's lookup confirmed, and `mper` equals AppleScript's persistent ID.
 ///
-/// Its one action, from 17 November 2026: `play(_:in:)` starts a library
-/// playlist from a song (`playspec`), for Continue on Mac. Everything else
+/// Its actions, from 17 November 2026, are for Continue on Mac: `play(_:in:)`
+/// starts a library playlist from a song (`playspec`), and `playAlbum` and
+/// `playInLibrary` start a library album from one (`cue`). Everything else
 /// only reads: it never skips or changes volume.
 public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
     public static let libraryRefreshInterval: TimeInterval = 60
@@ -130,6 +171,7 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
     private var playlists: [UInt64: RemotePlaylist] = [:]
     private var playlistsReadAt: Date?
     private var songsByPlaylist: [UInt64: PlaylistSongs] = [:]
+    private var songsByAlbum: [UInt64: AlbumSongs] = [:]
     public private(set) var status: MusicRemoteStatus = .unknown
     public var isForgottenByMusic: Bool { status == .unpaired }
 
@@ -153,9 +195,22 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
             let body = try await get("/ctrl-int/1/playqueue-contents?span=\(PlaybackMessage.upNextLimit)")
             status = .connected
             let catalogID = persistentID.flatMap { catalogByPersistentID[$0] }
-            // Best effort: without it, Continue on iPhone takes Up Next's songs.
-            let playlist = try? await playlistPlace(current: catalogID, upNext: queueSpecs(from: body))
-            return RemoteQueue(catalogID: catalogID, upNext: upNext(from: body), playlist: playlist)
+            let upNext = upNext(from: body)
+            var queue = RemoteQueue(catalogID: catalogID, upNext: upNext)
+            // Best effort: without these, Continue on iPhone takes Up Next's songs.
+            let modes = try? await playModes()
+            queue.repeatMode = modes?.repeatMode
+            switch try? await source(current: catalogID, artist: track?.artist, upNext: queueSpecs(from: body), entries: upNext,
+                                     shuffled: modes?.shuffled ?? false) {
+            case .playlist(let place)?: queue.playlist = place
+            case .album(let place)?: queue.album = place
+            case .shuffledLibrary?: queue.shuffledLibrary = true
+            case .appleMusic?:
+                queue.fromAppleMusic = true
+                queue.shuffled = modes.map { $0.shuffled ? true : false }
+            case .unknown?, nil: break
+            }
+            return queue
         } catch Failure.unpaired {
             status = .unpaired
         } catch {
@@ -220,6 +275,117 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
             func word(_ i: Int) -> UInt64 { spec.dropFirst(i * 4).prefix(4).reduce(UInt64(0)) { $0 << 8 | UInt64($1) } }
             return QueueSpec(playlist: word(1), playlistItem: word(2), item: word(3))
         }
+    }
+
+    // MARK: Where the song plays from (17 November 2026)
+
+    enum QueueSource: Equatable {
+        case playlist(PlaylistPlace), album(AlbumPlace), shuffledLibrary, appleMusic, unknown
+    }
+
+    /// Music's shuffle (`cash`) and repeat (`carp`: 0 off, 1 one, 2 all).
+    private func playModes() async throws -> (shuffled: Bool, repeatMode: RepeatMode?) {
+        let status = DMAPNode.parse(try await get("/ctrl-int/1/playstatusupdate?revision-number=1"))
+        let repeatMode: RepeatMode? = switch status.first("carp")?.integer {
+        case 0?: .off
+        case 1?: .one
+        case 2?: .all
+        default: nil
+        }
+        return ((status.first("cash")?.integer ?? 0) != 0, repeatMode)
+    }
+
+    /// Where the current song plays from. Music doesn't say (`canp` names
+    /// no playlist), but each Up Next song carries its playlist (seen 17
+    /// November 2026):
+    /// - a library playlist names itself, in order or shuffled;
+    /// - an album played from the library, and the whole library shuffled,
+    ///   both name the library itself (62) or Music's "Music" list, so the
+    ///   songs tell them apart;
+    /// - an Apple Music playlist or album outside the library, and a
+    ///   station, name none (0).
+    /// Songs added with Play Next can make it `.unknown`, which is safe:
+    /// Continue on iPhone then takes Up Next's songs, as before.
+    func source(current catalogID: String?, artist: String?, upNext specs: [QueueSpec], entries: [QueuedTrack],
+                shuffled: Bool) async throws -> QueueSource {
+        guard let first = specs.first else { return .unknown }
+        if specs.allSatisfy({ $0.playlist == 0 }) { return .appleMusic }
+        guard let catalogID, first.playlist != 0, let container = try await knownPlaylist(first.playlist) else { return .unknown }
+        if container.isOwn {
+            if !shuffled { return try await playlistPlace(current: catalogID, upNext: specs).map(QueueSource.playlist) ?? .unknown }
+            return try await shuffledPlaylistPlace(current: catalogID, in: container, upNext: specs).map(QueueSource.playlist) ?? .unknown
+        }
+        guard container.isLibrary, specs.prefix(Self.inOrderCheck).allSatisfy({ $0.playlist == container.id }) else { return .unknown }
+        if let album = try await albumPlace(current: catalogID, upNext: specs, shuffled: shuffled) { return .album(album) }
+        guard shuffled else { return .unknown }   // the library in order, as Songs lists it: Up Next covers it
+        // An artist or genre shuffled from the library looks the same to
+        // Music; the whole library won't give one artist several times running.
+        func fold(_ text: String) -> String { text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        let artists = entries.prefix(Self.inOrderCheck).map { fold($0.artist) }
+        if artists.count >= 2, let artist, artists.allSatisfy({ $0 == fold(artist) }) { return .unknown }
+        return .shuffledLibrary
+    }
+
+    /// A library playlist played shuffled: Up Next's first songs all come
+    /// from it, in no order, and it has the current song.
+    private func shuffledPlaylistPlace(current catalogID: String, in playlist: RemotePlaylist,
+                                       upNext specs: [QueueSpec]) async throws -> PlaylistPlace? {
+        guard specs.prefix(Self.inOrderCheck).allSatisfy({ $0.playlist == playlist.id }) else { return nil }
+        let songs = try await readSongs(in: playlist, maxAge: Self.playlistRefreshInterval)
+        guard let index = songs.catalogIDs.firstIndex(of: catalogID) else { return nil }
+        return PlaylistPlace(name: playlist.name, count: songs.playlistItems.count, index: index, shuffled: true)
+    }
+
+    /// The library album the song plays from: Up Next is the rest of it by
+    /// disc and track (in order), or its first songs are all from it
+    /// (shuffled). Nil for the library in order or shuffled.
+    private func albumPlace(current catalogID: String, upNext specs: [QueueSpec], shuffled: Bool) async throws -> AlbumPlace? {
+        guard let album = albumByCatalog[catalogID] else { return nil }
+        let songs = try await albumSongs(album)
+        guard let index = songs.catalogIDs.firstIndex(of: catalogID) else { return nil }
+        let checked = Array(specs.prefix(Self.inOrderCheck))
+        if shuffled {
+            // Two songs running from one album of a whole library is no accident.
+            guard checked.count >= min(2, songs.items.count - 1), checked.count >= 1,
+                  checked.allSatisfy({ songs.items.contains($0.item) }) else { return nil }
+        } else {
+            var matched = 0
+            for (offset, spec) in checked.enumerated() {
+                let place = index + 1 + offset
+                guard place < songs.items.count else { break }   // past the album's end
+                guard songs.items[place] == spec.item else { return nil }
+                matched += 1
+            }
+            guard matched >= 1 else { return nil }
+        }
+        return AlbumPlace(title: songs.title, artist: songs.artist, count: songs.items.count, index: index,
+                          shuffled: shuffled ? true : nil)
+    }
+
+    /// One album's library songs, by disc, then track, as `cue` counts them.
+    private func albumSongs(_ album: UInt64) async throws -> AlbumSongs {
+        if let cached = songsByAlbum[album], now().timeIntervalSince(cached.readAt) <= Self.playlistRefreshInterval { return cached }
+        let database = try await libraryDatabase()
+        let meta = "dmap.itemid,dmap.itemname,daap.songalbum,daap.songartist,daap.songalbumartist,daap.songdiscnumber,daap.songtracknumber,com.apple.itunes.itms-songid"
+        let list = DMAPNode.parse(try await get("/databases/\(database)/items?type=music&query='daap.songalbumid:\(album)'&meta=\(meta)"))
+        struct Row {
+            var disc: UInt64, track: UInt64, name: String, item: UInt64, album: String, artist: String?, catalogID: String?
+        }
+        var rows: [Row] = []
+        for item in list.first("mlcl")?.all("mlit") ?? [] {
+            let albumArtist = item.all("asaa").first?.string ?? ""
+            let catalog = item.all("aeSI").first?.integer ?? 0
+            rows.append(Row(disc: item.all("asdn").first?.integer ?? 0, track: item.all("astn").first?.integer ?? 0,
+                            name: item.all("minm").first?.string ?? "", item: item.all("miid").first?.integer ?? 0,
+                            album: item.all("asal").first?.string ?? "",
+                            artist: albumArtist.isEmpty ? item.all("asar").first?.string : albumArtist,
+                            catalogID: catalog == 0 ? nil : String(catalog)))
+        }
+        rows.sort { ($0.disc, $0.track, $0.name) < ($1.disc, $1.track, $1.name) }
+        let songs = AlbumSongs(items: rows.map { $0.item }, catalogIDs: rows.map { $0.catalogID }, title: rows.first?.album ?? "",
+                               artist: rows.first?.artist, readAt: now())
+        songsByAlbum[album] = songs
+        return songs
     }
 
     // MARK: Playlists (17 November 2026)
@@ -310,24 +476,12 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
                 try await refreshLibrary()
             }
             guard let album = albumByCatalog[catalogID] else { return .notHere }
-            let database = try await libraryDatabase()
-            let meta = "dmap.itemid,dmap.itemname,daap.songdiscnumber,daap.songtracknumber,com.apple.itunes.itms-songid"
-            let list = DMAPNode.parse(try await get("/databases/\(database)/items?type=music&query='daap.songalbumid:\(album)'&meta=\(meta)"))
-            let songs = (list.first("mlcl")?.all("mlit") ?? []).map { item in
-                (disc: item.all("asdn").first?.integer ?? 0, track: item.all("astn").first?.integer ?? 0,
-                 name: item.all("minm").first?.string ?? "",
-                 catalogID: item.all("aeSI").first?.integer.flatMap { $0 == 0 ? nil : String($0) })
-            }.sorted { ($0.disc, $0.track, $0.name) < ($1.disc, $1.track, $1.name) }
-            let ids = songs.map(\.catalogID)
+            songsByAlbum[album] = nil   // songs may have been added with the album
+            let ids = try await albumSongs(album).catalogIDs
             guard let index = ids.indices.filter({ ids[$0] == catalogID }).min(by: { abs($0 - place.index) < abs($1 - place.index) }) else {
                 return .notHere
             }
-            await beforeStart()
-            _ = try await control("/ctrl-int/1/cue?command=clear")
-            let answer = try await control("/ctrl-int/1/cue?command=play&query='daap.songalbumid:\(album)'&index=\(index)&sort=album")
-            status = .connected
-            guard answer == 200 || answer == 204 else { return .failed("Music answered cue with \(answer)") }
-            return .played(index: index)
+            return try await cue(album: album, at: index, beforeStart: beforeStart)
         } catch Failure.unpaired {
             status = .unpaired
             return .failed("Music has forgotten this remote")
@@ -337,6 +491,37 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
             session = nil
             return .failed("Music's remote protocol didn't answer")
         }
+    }
+
+    public func playInLibrary(_ catalogID: String, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+        guard !catalogID.isEmpty else { return .notHere }
+        do {
+            if albumByCatalog[catalogID] == nil {
+                libraryReadAt = nil
+                try await refreshLibrary()
+            }
+            guard let album = albumByCatalog[catalogID], let index = try await albumSongs(album).catalogIDs.firstIndex(of: catalogID) else {
+                return .notHere
+            }
+            return try await cue(album: album, at: index, beforeStart: beforeStart)
+        } catch Failure.unpaired {
+            status = .unpaired
+            return .failed("Music has forgotten this remote")
+        } catch {
+            status = .unreachable
+            port = nil
+            session = nil
+            return .failed("Music's remote protocol didn't answer")
+        }
+    }
+
+    private func cue(album: UInt64, at index: Int, beforeStart: @escaping @Sendable () async -> Void) async throws -> PlaylistPlayOutcome {
+        await beforeStart()
+        _ = try await control("/ctrl-int/1/cue?command=clear")
+        let answer = try await control("/ctrl-int/1/cue?command=play&query='daap.songalbumid:\(album)'&index=\(index)&sort=album")
+        status = .connected
+        guard answer == 200 || answer == 204 else { return .failed("Music answered cue with \(answer)") }
+        return .played(index: index)
     }
 
     private func libraryDatabase() async throws -> UInt64 {
@@ -356,13 +541,19 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
         for item in list.first("mlcl")?.all("mlit") ?? [] {
             guard let id = item.all("miid").first?.integer, let persistentID = item.all("mper").first?.integer else { continue }
             // The library itself (`abpl`) and Music's own lists (`aePS`, such as "Music") aren't playlists here.
-            let isOwn = (item.all("abpl").first?.integer ?? 0) == 0 && (item.all("aePS").first?.integer ?? 0) == 0
+            // An album plays from the "Music" list (`aePS` 6), and the whole library from either (17 November 2026).
+            let special = item.all("aePS").first?.integer ?? 0
+            let isLibrary = (item.all("abpl").first?.integer ?? 0) != 0 || special == Self.musicList
+            let isOwn = !isLibrary && special == 0
             found[id] = RemotePlaylist(id: id, persistentID: persistentID, name: item.all("minm").first?.string ?? "",
-                                       count: Int(item.all("mimc").first?.integer ?? 0), isOwn: isOwn)
+                                       count: Int(item.all("mimc").first?.integer ?? 0), isOwn: isOwn, isLibrary: isLibrary)
         }
         playlists = found
         playlistsReadAt = now()
     }
+
+    /// Music's own "Music" list (`aePS`): all the library's music.
+    static let musicList: UInt64 = 6
 
     private func knownPlaylist(_ id: UInt64) async throws -> RemotePlaylist? {
         try await refreshPlaylists(maxAge: Self.playlistRefreshInterval)
@@ -472,6 +663,19 @@ struct RemotePlaylist: Equatable, Sendable {
     var count: Int
     /// A playlist of the person's own, not the library or one of Music's lists.
     var isOwn: Bool
+    /// The library itself (`abpl`) or Music's "Music" list: what an album,
+    /// or the whole library, plays from.
+    var isLibrary: Bool = false
+}
+
+/// One album's library songs by disc, then track: each one's item (`miid`)
+/// and catalogue ID, with the album's title and artist.
+struct AlbumSongs: Equatable, Sendable {
+    var items: [UInt64]
+    var catalogIDs: [String?]
+    var title: String
+    var artist: String?
+    var readAt: Date
 }
 
 /// One playlist's songs in order: each one's place (`mcti`) and catalogue ID.

@@ -19,13 +19,17 @@ public struct AlbumPlace: Codable, Equatable, Sendable {
     public var index: Int
     /// True when the sender was shuffling the album. Nil means not shuffled.
     public var shuffled: Bool?
+    /// As `PlaylistPlace.addedToLibrary`: an Apple Music album the phone
+    /// added to the library just now, for the Mac to wait for.
+    public var addedToLibrary: Bool?
 
-    public init(title: String, artist: String? = nil, count: Int, index: Int, shuffled: Bool? = nil) {
+    public init(title: String, artist: String? = nil, count: Int, index: Int, shuffled: Bool? = nil, addedToLibrary: Bool? = nil) {
         self.title = title
         self.artist = artist
         self.count = count
         self.index = index
         self.shuffled = shuffled
+        self.addedToLibrary = addedToLibrary
     }
 
     /// False for a place that can't be in any album: a receiver ignores it.

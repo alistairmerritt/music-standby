@@ -48,6 +48,7 @@ struct HomeView: View {
                 }
             } else {
                 HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic)
+                addToLibrarySection
             }
             nowPlayingSection
             // The reminder comes from the relay, which the demo doesn't use.
@@ -105,6 +106,18 @@ struct HomeView: View {
             // iOS shows a session only once the app has asked while open, so a
             // dismissed player stays hidden until the next launch re-requests it.
             Text("If you dismiss the player, it stays hidden until you next open Second Chair.")
+        }
+    }
+
+    /// Off unless turned on (17 November 2026), as adding changes the
+    /// library: the Mac can only play a playlist or album that's in it.
+    @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
+
+    private var addToLibrarySection: some View {
+        Section {
+            Toggle("Add to Library for Continue on Mac", isOn: $addsToLibrary)
+        } footer: {
+            Text("Your Mac can only play a playlist or album from your library. Turn this on and, when you continue an Apple Music playlist or album that isn’t in your library, Second Chair adds it first, and your Mac plays it from the same song a few seconds later. With it off, your Mac plays the song’s station instead.")
         }
     }
 
@@ -335,14 +348,14 @@ private struct HandoffSection: View {
                     row("Continue on iPhone", symbol: "iphone",
                         detail: model.macSongHasNoCatalogID
                             ? "Your iPhone will look this song up in Apple Music, then continue it here with your Up Next queue. Playback on your Mac will pause."
-                            : "Continue listening on your iPhone, with your playlist or Up Next queue. Playback on your Mac will pause.",
+                            : "Continue listening on your iPhone, with your playlist, album or Up Next queue. Playback on your Mac will pause.",
                         enabled: !(phonePlaying && !macPlaying)) { await continueHere() }
                 }
                 if showsContinueOnMac {
                     row("Continue on Mac", symbol: "laptopcomputer",
                         detail: phoneSongInMacQueue
                             ? "Continue listening on your Mac from the same point. Playback on your iPhone will pause."
-                            : "Play this song’s station on your Mac, from the same point when the station starts with it. Playback on your iPhone will pause.",
+                            : "Continue listening on your Mac from the same point, with your playlist or album when your Mac can play it, or else this song’s station. Playback on your iPhone will pause.",
                         enabled: phoneHasAppleMusicSong && !(macPlaying && !phonePlaying)) { await sendBack() }
                 }
             } header: {
@@ -371,7 +384,7 @@ private struct HandoffSection: View {
         // Say only what's true now: headphones moving over can pause Apple Music here by themselves.
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
         switch outcome {
-        case .sentAsStation: return "Your Mac is playing this song’s station, which started with another song."
+        case .sentAsStation: return "Your Mac is playing the station, which started with another song."
         case .macRefused: return "Couldn’t start playback on your Mac." + stillHere
         case .macDidNotStart: return "Your Mac didn’t respond. Try again." + stillHere
         case .sentBack, .nothingPlayingHere: return nil

@@ -45,9 +45,61 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// the song's place in it by disc, then track: for Continue on Mac when
     /// the song isn't from a playlist. Nil when it can't be told.
     func albumPlace() async -> AlbumPlace?
+
+    // MARK: Added 17 November 2026
+
+    /// Plays this library song's album here from the song (the one nearest
+    /// `place.index` when the album has it twice), shuffled after the song
+    /// starts if `place` is. Returns the place it played once Music plays the
+    /// song; nil when the library here hasn't the song or it didn't start.
+    func play(_ catalogID: String, inAlbum place: AlbumPlace, position: @escaping @MainActor () -> TimeInterval,
+              timeout: TimeInterval) async -> AlbumPlace?
+    /// Plays this library song with the whole library after it, shuffled once
+    /// the song plays. False when the library here hasn't the song.
+    func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval) async -> Bool
+    /// Plays the song from the Apple Music playlist or album that Apple
+    /// Music's recently played lists and that has it, or, with
+    /// `allowStation`, the song followed by the station listed last. For a
+    /// Mac playing from outside its library (`fromAppleMusic`). Returns what
+    /// it played; nil when recently played has nothing with the song yet
+    /// (it lags about a minute) or Music didn't start it.
+    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
+                            shuffled: Bool, allowStation: Bool) async -> AppleMusicSource?
+    /// Where Apple Music here plays its current song from when it's not a
+    /// library playlist or album: an Apple Music playlist or album that
+    /// recently played lists and has the song, or the station listed last.
+    func appleMusicSource() async -> AppleMusicSource?
+    /// Adds an Apple Music playlist or album to the library, so a Mac can
+    /// play it. True once added.
+    func addToLibrary(_ source: AppleMusicSource) async -> Bool
+    /// A guess, as iOS doesn't say: Apple Music here shuffles a song from the
+    /// library, and it isn't from a playlist or album found already.
+    func isShufflingLibrary() async -> Bool
+    /// Apple Music's repeat here; nil when it follows the Music app's own.
+    func repeatMode() -> RepeatMode?
+    func setRepeat(_ mode: RepeatMode)
+}
+
+/// What Apple Music here plays from outside the library (17 November 2026).
+public enum AppleMusicSource: Equatable, Sendable {
+    /// `cloudID` is Apple Music's ID for it.
+    case playlist(PlaylistPlace)
+    case album(AlbumPlace, id: String)
+    case station(StationPlace)
 }
 
 extension PhoneMusicPlaying {
+    public func play(_ catalogID: String, inAlbum place: AlbumPlace, position: @escaping @MainActor () -> TimeInterval,
+                     timeout: TimeInterval) async -> AlbumPlace? { nil }
+    public func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval,
+                                    timeout: TimeInterval) async -> Bool { false }
+    public func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
+                                   shuffled: Bool, allowStation: Bool) async -> AppleMusicSource? { nil }
+    public func appleMusicSource() async -> AppleMusicSource? { nil }
+    public func addToLibrary(_ source: AppleMusicSource) async -> Bool { false }
+    public func isShufflingLibrary() async -> Bool { false }
+    public func repeatMode() -> RepeatMode? { nil }
+    public func setRepeat(_ mode: RepeatMode) {}
     public func albumPlace() async -> AlbumPlace? { nil }
     public func playlistPlace(remembered: PlaylistPlace?) async -> PlaylistPlace? { nil }
     public func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
@@ -84,7 +136,7 @@ public struct CatalogCandidate: Equatable, Sendable {
 
     public static let durationTolerance: TimeInterval = 5
 
-    static func fold(_ text: String) -> String {
+    public static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -45,6 +45,14 @@ export interface PlaylistPlace {
   count: number;
   index: number;
   shuffled?: boolean;
+  /** True when the phone has just added this Apple Music playlist to the library for the Mac. */
+  addedToLibrary?: boolean;
+}
+
+/** An Apple Music station (Shared/StandByProtocol/Sources.swift). Added 17 November 2026. Passed through. */
+export interface StationPlace {
+  id: string;
+  name: string;
 }
 
 /** A song's place in a library album (Shared/StandByProtocol/Album.swift). Added 17 November 2026. Passed through. */
@@ -54,6 +62,7 @@ export interface AlbumPlace {
   count: number;
   index: number;
   shuffled?: boolean;
+  addedToLibrary?: boolean;
 }
 
 /** One place Music can play to (Shared/StandByProtocol/Output.swift). */
@@ -85,6 +94,16 @@ export interface PlaybackMessage {
   musicConnection?: string;
   /** The library playlist the song plays from, when Up Next is the rest of it. Reaches the phone in GET /v1/session; never pushed. */
   playlist?: PlaylistPlace;
+  /** Added 17 November 2026, like `playlist`: the library album the song plays from. */
+  album?: AlbumPlace;
+  /** Added 17 November 2026: the Mac shuffles its whole library. */
+  shuffledLibrary?: boolean;
+  /** Added 17 November 2026: Up Next comes from Apple Music outside the library. */
+  fromAppleMusic?: boolean;
+  /** Added 17 November 2026: Music's repeat, "off", "one" or "all". */
+  repeatMode?: string;
+  /** Added 17 November 2026: Music's shuffle, with `fromAppleMusic`. */
+  shuffled?: boolean;
 }
 
 export interface ProtocolError {
@@ -109,6 +128,12 @@ export interface RemoteCommand {
   playlist?: PlaylistPlace;
   /** For `playStation` without a playlist: the phone's library album, which the Mac plays on from the song in album order. Passed through. */
   album?: AlbumPlace;
+  /** For `playStation`, added 17 November 2026: the phone's Apple Music station, which the Mac plays instead of the song's. Passed through. */
+  station?: StationPlace;
+  /** For `playStation`, added 17 November 2026: the phone shuffles its whole library. Passed through. */
+  shuffledLibrary?: boolean;
+  /** For `playStation`, added 17 November 2026: the phone's repeat. Passed through. */
+  repeatMode?: string;
 }
 
 export interface CommandAck {

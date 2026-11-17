@@ -147,4 +147,9 @@ extension CatalogFillingRemote: MusicRemotePlaying {
         guard let player = remote as? any MusicRemotePlaying else { return .failed("this remote can't play an album") }
         return await player.playAlbum(catalogID, in: place, beforeStart: beforeStart)
     }
+
+    public func playInLibrary(_ catalogID: String, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+        guard let player = remote as? any MusicRemotePlaying else { return .failed("this remote can't play from the library") }
+        return await player.playInLibrary(catalogID, beforeStart: beforeStart)
+    }
 }

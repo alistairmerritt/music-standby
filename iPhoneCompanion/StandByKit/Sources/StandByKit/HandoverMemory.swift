@@ -43,15 +43,35 @@ public struct HandoverMemory {
     /// minute (17 November 2026). Checked against Music's queue before use.
     public var loadPlaylist: @MainActor () -> PlaylistPlace?
     public var savePlaylist: @MainActor (PlaylistPlace?) -> Void
+    /// The setting "Add to Library for Continue on Mac" (17 November 2026):
+    /// Continue on Mac adds an Apple Music playlist or album that isn't in
+    /// the library, so the Mac can play it. Off unless turned on: adding
+    /// changes the person's library.
+    public var addsToLibrary: @MainActor () -> Bool
+    /// The catalogue IDs Continue on iPhone last queued here from the Mac's
+    /// Up Next (17 November 2026). A song from them isn't from any playlist,
+    /// album or station Apple Music lists as recently played, which is
+    /// account-wide: an old station there once looked current.
+    public var loadQueued: @MainActor () -> [String]?
+    public var saveQueued: @MainActor ([String]?) -> Void
 
     public init(load: @escaping @MainActor () -> HandoverMark?, save: @escaping @MainActor (HandoverMark?) -> Void,
                 loadPlaylist: @escaping @MainActor () -> PlaylistPlace? = { nil },
-                savePlaylist: @escaping @MainActor (PlaylistPlace?) -> Void = { _ in }) {
+                savePlaylist: @escaping @MainActor (PlaylistPlace?) -> Void = { _ in },
+                addsToLibrary: @escaping @MainActor () -> Bool = { false },
+                loadQueued: @escaping @MainActor () -> [String]? = { nil },
+                saveQueued: @escaping @MainActor ([String]?) -> Void = { _ in }) {
         self.load = load
         self.save = save
         self.loadPlaylist = loadPlaylist
         self.savePlaylist = savePlaylist
+        self.addsToLibrary = addsToLibrary
+        self.loadQueued = loadQueued
+        self.saveQueued = saveQueued
     }
+
+    /// The App Group key for `addsToLibrary`; missing means off.
+    public static let addsToLibraryKey = "continueOnMacAddsToLibrary"
 
     /// Remembers nothing: every Continue on iPhone takes the Mac's song.
     public static var none: HandoverMemory {
@@ -60,6 +80,7 @@ public struct HandoverMemory {
 
     static let key = "continueOnPhoneMark"
     static let playlistKey = "continueOnPhonePlaylist"
+    static let queuedKey = "continueOnPhoneQueued"
 
     public static func defaults(_ defaults: UserDefaults) -> HandoverMemory {
         func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
@@ -73,7 +94,9 @@ public struct HandoverMemory {
             }
         }
         return HandoverMemory(load: { load(HandoverMark.self, key) }, save: { save($0, key) },
-                              loadPlaylist: { load(PlaylistPlace.self, playlistKey) }, savePlaylist: { save($0, playlistKey) })
+                              loadPlaylist: { load(PlaylistPlace.self, playlistKey) }, savePlaylist: { save($0, playlistKey) },
+                              addsToLibrary: { defaults.object(forKey: addsToLibraryKey) as? Bool ?? false },
+                              loadQueued: { load([String].self, queuedKey) }, saveQueued: { save($0, queuedKey) })
     }
 
     /// The app's own, shared by the app and its Shortcuts actions.

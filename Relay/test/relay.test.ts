@@ -381,6 +381,23 @@ describe("commands", () => {
     expect((await pending).status).toBe(200);
   });
 
+  it("forwards Continue on Mac's station, library shuffle, repeat and new library playlist as the phone sent them (17 November 2026)", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const commands = [
+      { station: { id: "ra.985484166", name: "Made-Up Radio" }, repeatMode: "all" },
+      { shuffledLibrary: true, repeatMode: "one" },
+      { playlist: { name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5, addedToLibrary: true } },
+    ];
+    for (const [n, extra] of commands.entries()) {
+      const id = newCommandID();
+      const command = { id, kind: "playStation", issuedAt: new Date().toISOString(), position: 12, catalogID: "1234567890", title: "Song", ...extra };
+      const pending = call("POST", "/v1/commands", { token: phoneToken, body: { command, sessionID }, headers: { "Idempotency-Key": id } });
+      expect((await mac.next("command")).command).toEqual(command);
+      mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 46 + n } });
+      expect((await pending).status).toBe(200);
+    }
+  });
+
   it("passes the Mac's rejection through", async () => {
     const { mac, phoneToken, sessionID } = await playingSetup();
     const { id, body } = commandBody(sessionID, "play");
@@ -490,18 +507,28 @@ describe("catalogue ID and Up Next", () => {
         { title: "Uploaded demo", artist: "Me", duration: 0 },
       ],
       playlist: { name: "Road Trip", count: 123, index: 39 },
+      album: { title: "Late Night Tales", artist: "Jon Hopkins", count: 20, index: 3, shuffled: true },
+      shuffledLibrary: true,
+      fromAppleMusic: true,
+      repeatMode: "all",
+      shuffled: true,
     });
     mac.send({ type: "state", message: state });
     const s = await waitForRevision(phoneToken, state.revision);
     expect(s.playback.track.catalogID).toBe("1102360418");
     expect(s.playback.upNext).toEqual(state.upNext);
     expect(s.playback.playlist).toEqual(state.playlist);
+    for (const key of ["album", "shuffledLibrary", "fromAppleMusic", "repeatMode", "shuffled"] as const) {
+      expect(s.playback[key]).toEqual(state[key]);
+    }
     const sent = (await pushes(phoneToken)).slice(before);
     expect(sent.length).toBeGreaterThan(0);
     for (const push of sent) {
       expect(push.payload.aps.attributes.track.catalogID).toBeUndefined();
       expect(push.payload.aps.attributes.upNext).toBeUndefined();
       expect(push.payload.aps.attributes.playlist).toBeUndefined();
+      expect(push.payload.aps.attributes.album).toBeUndefined();
+      expect(push.payload.aps.attributes.repeatMode).toBeUndefined();
       expect(JSON.stringify(push.payload).length).toBeLessThan(4096);
     }
   });

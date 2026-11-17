@@ -209,6 +209,29 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   has the song plays the album on from it in album order (Music's remote protocol `cue`), with
   Music's shuffle off, since shuffling there draws from the whole library; otherwise the
   station. Passed through untouched.
+- **Every source (17 November 2026, Mac 0.3.3).** All optional and passed through untouched;
+  none is ever pushed.
+  - `playStation` may also carry:
+    - `station` (`id` `ra.…`, `name`): the phone's Apple Music station, which the Mac plays
+      instead of the song's. It starts on a song Apple chooses.
+    - `shuffledLibrary`: the phone shuffles its whole library (a guess). The Mac plays the
+      song, then shuffles its library.
+    - `repeatMode` (`off`, `one`, `all`): Music's repeat once the song plays.
+    - `addedToLibrary` on `playlist` or `album`: the phone has just added that Apple Music
+      playlist or album to the library (the iPhone setting Add to Library for Continue on Mac,
+      off by default). The Mac acks at once, then looks for it every 2 s for up to 25 s after
+      `issuedAt`, then plays the station.
+  - `playback` may also carry:
+    - `album` (an `AlbumPlace`, maybe `shuffled`);
+    - `playlist.shuffled`;
+    - `shuffledLibrary`;
+    - `fromAppleMusic`: Up Next comes from outside the library, so the phone looks in Apple
+      Music's recently played, with `shuffled` for Music's shuffle and `appleMusicSince` for
+      when that began. Recently played took 25–40 s to list a station the Mac had started, so
+      the phone takes no station from it for the first minute.
+    - `repeatMode`.
+  - The Mac reads these again every 15 s while a song plays, and sends a state when shuffle,
+    repeat or the source changed.
 - **`sessionID` names the session the command came from.** One that names a session must name
   the current one (`409 no_session` or `session_mismatch` otherwise), so a stale Lock Screen
   can't act on a newer session; the extension always sends it. Since 16 November 2026 it may be
