@@ -29,6 +29,10 @@ enum ScreenshotMode {
         return arguments[at + 1]
     }
 
+    /// `-screenshotOnIPhone`: Home as if Apple Music here played the Mac's
+    /// song, as after Continue on iPhone. Use with `-screenshotPaused`.
+    static var iPhonePlaying: Bool { ProcessInfo.processInfo.arguments.contains("-screenshotOnIPhone") }
+
     /// `-screenshotScroll ID`: Home scrolls to that section (`continueListening`, `lockScreen`).
     static var scrollTarget: String? {
         let arguments = ProcessInfo.processInfo.arguments
