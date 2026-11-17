@@ -102,7 +102,7 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
         let queueIndex = player.indexOfNowPlayingItem
         // Shuffling, Music's queue can't confirm the playlist, so only the
         // latest one Apple Music lists is trusted.
-        var candidates = await recentlyPlayedPlaylists(considering: shuffled ? 1 : 3)
+        var candidates = await recentlyPlayed(considering: shuffled ? 1 : 3).filter { $0.kind == .playlist }.map { (name: $0.name, cloudID: $0.id) }
         if let remembered { candidates.append((remembered.name, remembered.knownCloudID)) }
         let library = Self.libraryPlaylists()
         for candidate in candidates {
@@ -188,21 +188,24 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
         return id.isEmpty || id == "0" ? nil : id
     }
 
-    /// The playlists among the latest `considering` things Apple Music lists
-    /// as recently played, newest first: name and ID. It's account-wide, so
-    /// the Mac's listening counts too, and a playlist started here shows
-    /// after about a minute. Apple's servers answer it, so a hand-over waits
-    /// at most `recentlyPlayedWait` for them.
-    private func recentlyPlayedPlaylists(considering limit: Int) async -> [(name: String, cloudID: String?)] {
+    /// The latest `considering` things Apple Music lists as recently
+    /// played, newest first: playlists and albums, by name and ID. It's
+    /// account-wide, so the Mac's listening counts too, and something started
+    /// here shows after about a minute. Apple's servers answer it, so a
+    /// hand-over waits at most `recentlyPlayedWait` for them.
+    private func recentlyPlayed(considering limit: Int) async -> [RecentlyPlayed] {
         guard MusicAuthorization.currentStatus == .authorized else { return [] }
-        return await withTaskGroup(of: [(name: String, cloudID: String?)]?.self) { group in
+        return await withTaskGroup(of: [RecentlyPlayed]?.self) { group in
             group.addTask {
                 var request = MusicRecentlyPlayedContainerRequest()
                 request.limit = limit
                 guard let items = try? await request.response().items else { return [] }
-                return items.prefix(limit).compactMap { item -> (name: String, cloudID: String?)? in
-                    guard case .playlist(let playlist) = item else { return nil }
-                    return (playlist.name, playlist.id.rawValue)
+                return items.prefix(limit).map { item -> RecentlyPlayed in
+                    switch item {
+                    case .playlist(let playlist): RecentlyPlayed(kind: .playlist, name: playlist.name, id: playlist.id.rawValue)
+                    case .album(let album): RecentlyPlayed(kind: .album, name: album.title, id: album.id.rawValue)
+                    default: RecentlyPlayed(kind: .other, name: "", id: nil)
+                    }
                 }
             }
             group.addTask {
@@ -216,6 +219,42 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     }
 
     nonisolated static let recentlyPlayedWait: Duration = .seconds(3)
+
+    struct RecentlyPlayed: Sendable {
+        enum Kind: Sendable { case playlist, album, other }
+        var kind: Kind
+        var name: String
+        var id: String?
+    }
+
+    /// The library album Apple Music here plays its current song from, for
+    /// Continue on Mac when it isn't from a playlist (17 November 2026): the
+    /// song's album in this library, with the song's place counted by disc,
+    /// then track, as Music on the Mac counts. Unshuffled, Music's queue
+    /// place must be that place, which shows the queue is the album.
+    /// Shuffled, it must be the album Apple Music last lists as recently
+    /// played. The Mac plays it in order either way: it can't shuffle within
+    /// an album.
+    func albumPlace() async -> AlbumPlace? {
+        guard access == .allowed, let item = player.nowPlayingItem, item.albumPersistentID != 0 else { return nil }
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: item.albumPersistentID),
+                                                          forProperty: MPMediaItemPropertyAlbumPersistentID))
+        let songs = (query.items ?? []).sorted {
+            ($0.discNumber, $0.albumTrackNumber, $0.title ?? "") < ($1.discNumber, $1.albumTrackNumber, $1.title ?? "")
+        }
+        guard let index = songs.firstIndex(where: { $0.persistentID == item.persistentID }) else { return nil }
+        let title = item.albumTitle ?? ""
+        let shuffled = player.shuffleMode != .off
+        if shuffled {
+            guard let latest = await recentlyPlayed(considering: 1).first, latest.kind == .album,
+                  latest.name.compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame else { return nil }
+        } else {
+            guard player.indexOfNowPlayingItem == index else { return nil }
+        }
+        return AlbumPlace(title: title, artist: item.albumArtist ?? item.artist, count: songs.count, index: index,
+                          shuffled: shuffled ? true : nil)
+    }
 
     /// Apple Music's station for the song (MusicKit's `Song.station`, the
     /// catalogue's Create Station), after the queue, through MusicKit's

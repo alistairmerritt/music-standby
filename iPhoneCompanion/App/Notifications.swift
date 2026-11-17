@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #if DEBUG
         StationProbe.runIfAsked(model: model)
         HandoverProbe.runIfAsked()
+        HandoverProbe.runAlbumIfAsked()
+        HandoverProbe.runQueueProbesIfAsked()
         HandoverProbe.runHandoverIfAsked(model: model)
         ScreenshotMode.start(model: model)
         #endif

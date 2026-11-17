@@ -447,3 +447,58 @@ private enum Lists {
         #expect(outcome == .failed("Music answered playspec with 500"))
     }
 }
+
+// MARK: Albums (17 November 2026)
+
+/// A library with a two-disc album. Music lists the album out of order, as
+/// it did on 17 November 2026; `cue` counts by disc, then track.
+private enum Albums {
+    static let album: UInt64 = 4_242_424_242_424_242_424
+    static let library = Fake.node("adbs", Fake.u32("mstt", 200), Fake.node("mlcl",
+        Fake.node("mlit", Fake.u32("miid", 501), Fake.u64("mper", 0x0A), Fake.u32("aeSI", 21), Fake.u64("asai", album)),
+        Fake.node("mlit", Fake.u32("miid", 502), Fake.u64("mper", 0x0B), Fake.u32("aeSI", 77))))   // no album
+    /// (disc, track, catalogue) in the order Music lists them.
+    static let listed: [(UInt32, UInt32, UInt32)] = [(2, 2, 22), (1, 3, 13), (2, 1, 21), (1, 1, 11), (1, 2, 12)]
+    static let songs = Fake.node("adbs", Fake.u32("mstt", 200), Fake.node("mlcl", listed.map { disc, track, catalog in
+        Fake.node("mlit", Fake.u32("asdn", disc), Fake.u32("astn", track), Fake.text("minm", "Song \(catalog)"), Fake.u32("aeSI", catalog))
+    }.reduce(Data(), +)))
+    static func music(cue status: Int = 204) -> FakeDACP {
+        FakeDACP([("/login", 200, Fake.login),
+                  ("/databases/61/items?type=music&query=", 200, songs),
+                  ("/databases/61/items", 200, library), ("/databases", 200, Fake.databases),
+                  ("/ctrl-int/1/cue", status, Data())])
+    }
+}
+
+private actor Calls {
+    private(set) var count = 0
+    func add() { count += 1 }
+}
+
+@Suite struct MusicRemoteAlbumTests {
+    @Test func playsTheAlbumFromTheSongCountingByDiscThenTrack() async throws {
+        let music = Albums.music()
+        let calls = Calls()
+        let outcome = await client(music).playAlbum("21", in: AlbumPlace(title: "A", count: 5, index: 3), beforeStart: { await calls.add() })
+        #expect(outcome == .played(index: 3), "disc 2 track 1 comes after disc 1's three")
+        #expect(await calls.count == 1, "shuffle goes off before Music is told")
+        let asked = music.asked.withLock { $0 }.filter { $0.hasPrefix("/ctrl-int/1/cue") }
+        #expect(asked == ["/ctrl-int/1/cue?command=clear&session-id=850003812",
+                          "/ctrl-int/1/cue?command=play&query='daap.songalbumid:\(Albums.album)'&index=3&sort=album&session-id=850003812"])
+        #expect(music.asked.withLock { $0 }.contains { $0.contains("query='daap.songalbumid:\(Albums.album)'&meta=") })
+    }
+
+    @Test func aSongNotOnALibraryAlbumIsNotHereAndNothingChanges() async throws {
+        let music = Albums.music()
+        let calls = Calls()
+        #expect(await client(music).playAlbum("77", in: AlbumPlace(title: "A", count: 5, index: 0), beforeStart: { await calls.add() }) == .notHere)
+        #expect(await client(music).playAlbum("999", in: AlbumPlace(title: "A", count: 5, index: 0), beforeStart: { await calls.add() }) == .notHere)
+        #expect(await calls.count == 0, "shuffle left alone")
+        #expect(music.count("/ctrl-int/1/cue") == 0)
+    }
+
+    @Test func aRefusalIsAFailure() async throws {
+        let outcome = await client(Albums.music(cue: 500)).playAlbum("21", in: AlbumPlace(title: "A", count: 5, index: 3), beforeStart: {})
+        #expect(outcome == .failed("Music answered cue with 500"))
+    }
+}

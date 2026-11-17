@@ -41,9 +41,14 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// no playlist here has it or Music didn't start it in `timeout`.
     func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
               timeout: TimeInterval) async -> PlaylistPlace?
+    /// The library album Apple Music here plays its current song from, and
+    /// the song's place in it by disc, then track: for Continue on Mac when
+    /// the song isn't from a playlist. Nil when it can't be told.
+    func albumPlace() async -> AlbumPlace?
 }
 
 extension PhoneMusicPlaying {
+    public func albumPlace() async -> AlbumPlace? { nil }
     public func playlistPlace(remembered: PlaylistPlace?) async -> PlaylistPlace? { nil }
     public func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
                      timeout: TimeInterval) async -> PlaylistPlace? { nil }

@@ -203,6 +203,12 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   `GET /v1/session` names the playlist its song plays from when Up Next is the rest of it in
   order, so Continue on iPhone plays the playlist rather than 25 of its songs. Both pass
   through the relay untouched, and `playlist` is never pushed.
+- **Albums (17 November 2026).** Without a `playlist`, `playStation` may carry `album`, an
+  `AlbumPlace` (`title`, `count`, `index` from 0 by disc then track, and optionally `artist` and
+  `shuffled`): the library album the phone plays the song from. A Mac connected to Music that
+  has the song plays the album on from it in album order (Music's remote protocol `cue`), with
+  Music's shuffle off, since shuffling there draws from the whole library; otherwise the
+  station. Passed through untouched.
 - **`sessionID` names the session the command came from.** One that names a session must name
   the current one (`409 no_session` or `session_mismatch` otherwise), so a stale Lock Screen
   can't act on a newer session; the extension always sends it. Since 16 November 2026 it may be

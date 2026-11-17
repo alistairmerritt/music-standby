@@ -199,16 +199,29 @@ public struct Handover {
         guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
         let ahead = macQueuePosition(of: catalogID)
         let place = await player.playlistPlace(remembered: memory.loadPlaylist())
-        // The Mac's own queue when it's the phone's playlist (the round
-        // trip) or the phone has none; else the phone's playlist, even for a
+        // Not from a playlist: perhaps an album (17 November 2026).
+        let album = place == nil ? await player.albumPlace() : nil
+        // The Mac's own queue when it's the phone's playlist or album (the
+        // round trip) or the phone has neither; else the phone's, even for a
         // song the Mac has, as when the Mac plays the song's station.
-        if let ahead, place == nil || (ahead <= Self.skipsAtMost && latest()?.playlist?.name == place?.name) {
+        let sameAsTheMac: Bool
+        if let place {
+            sameAsTheMac = latest()?.playlist?.name == place.name
+        } else if let album {
+            sameAsTheMac = latest()?.track?.album == album.title
+        } else {
+            sameAsTheMac = true
+        }
+        if let ahead, (place == nil && album == nil) || (ahead <= Self.skipsAtMost && sameAsTheMac) {
             return await skipMacAhead(ahead, to: catalogID, here: here, with: player, timeout: timeout)
         }
         if let place {
             record("Send back to Mac: the phone's playlist, from song \(place.index + 1) of \(place.count)\(place.isShuffled ? ", shuffled" : "")")
+        } else if let album {
+            record("Send back to Mac: the phone's album, from song \(album.index + 1) of \(album.count)\(album.isShuffled ? ", shuffled here; in order on the Mac" : "")")
         }
-        return await sendAsStation(here, catalogID: catalogID, playlist: place, with: player, timeout: timeout + Self.stationStartAllowance)
+        return await sendAsStation(here, catalogID: catalogID, playlist: place, album: album, with: player,
+                                   timeout: timeout + Self.stationStartAllowance)
     }
 
     /// Songs the Mac may skip through to reach the phone's song, rather than
@@ -257,13 +270,14 @@ public struct Handover {
     /// With `playlist`, a Mac connected to Music that has it plays the
     /// playlist from the song instead, which starts with the song every
     /// time; an older Mac, or one without the playlist, plays the station.
-    private func sendAsStation(_ here: PhoneNowPlaying, catalogID: String, playlist: PlaylistPlace? = nil, with player: any PhoneMusicPlaying,
-                               timeout: TimeInterval) async -> SendBackOutcome {
+    private func sendAsStation(_ here: PhoneNowPlaying, catalogID: String, playlist: PlaylistPlace? = nil, album: AlbumPlace? = nil,
+                               with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> SendBackOutcome {
         let before = latest()
         // Where the phone is and the song's title, so the Mac can seek itself
         // the moment Music starts the song (16 November 2026).
         let position = player.nowPlaying()?.position ?? here.position
-        guard await step(.playStation(seededBy: catalogID, position: position, title: here.title, playlist: playlist, issuedAt: now())) else {
+        guard await step(.playStation(seededBy: catalogID, position: position, title: here.title, playlist: playlist, album: album,
+                                      issuedAt: now())) else {
             return .macRefused
         }
         let deadline = now().addingTimeInterval(timeout)
@@ -276,7 +290,7 @@ public struct Handover {
                 if sameSong { await seekIfTheMacMissedIt(player: player, here: here) }
                 if player.nowPlaying()?.isPlaying == true { player.pause() }
                 memory.save(nil)
-                let what = playlist == nil ? "the song's station" : "the song's playlist (or its station)"
+                let what = playlist != nil ? "the song's playlist (or its station)" : album != nil ? "the song's album (or its station)" : "the song's station"
                 record(sameSong ? "Send back to Mac: \(what) plays on the Mac from the same point; Apple Music here is paused"
                                 : "Send back to Mac: \(what) plays on the Mac, from another song; Apple Music here is paused")
                 return sameSong ? .sentBack : .sentAsStation

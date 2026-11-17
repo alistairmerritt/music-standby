@@ -340,6 +340,51 @@ import StandByProtocol
             if case .played = outcome { music.startNextSong() }
             return outcome
         }
+        private var _albums: [(String, AlbumPlace)] = []
+        var albums: [(String, AlbumPlace)] { lock.withLock { _albums } }
+        func playAlbum(_ catalogID: String, in place: AlbumPlace, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+            lock.withLock { _albums.append((catalogID, place)) }
+            guard case .played = outcome else { return outcome }
+            await beforeStart()
+            music.startNextSong()
+            return outcome
+        }
+    }
+
+    private static let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 25, index: 9, shuffled: true)
+
+    @Test func anAlbumFromThePhonePlaysInOrderWithShuffleOff() async throws {
+        let r = await rig(state: "paused")
+        _ = r.music.run(.setShuffle(true))
+        let remote = PlaylistRemote(.played(index: 9), music: r.music)
+        r.companion.remote = remote
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", album: Self.album, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(remote.albums.map(\.0) == ["1730817069"])
+        #expect(remote.asked.isEmpty, "not a playlist")
+        #expect(r.music.openedLocations.isEmpty, "no station")
+        #expect(!r.music.shuffle, "Music can't shuffle within an album, so it plays in order")
+        #expect(await eventually { r.music.position > 60 })
+        #expect(!r.companion.events.contains { $0.text.contains("Made-Up") })
+    }
+
+    @Test func aPlaylistWinsOverAnAlbumAndANoShowAlbumIsTheStation() async throws {
+        let r = await rig(state: "paused")
+        let remote = PlaylistRemote(.played(index: 59), music: r.music)
+        r.companion.remote = remote
+        let both = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: Self.place,
+                                                       album: Self.album, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: both)?.accepted == true }
+        #expect(remote.asked.count == 1 && remote.albums.isEmpty)
+
+        let r2 = await rig(state: "paused")
+        let missing = PlaylistRemote(.notHere, music: r2.music)
+        r2.companion.remote = missing
+        let id = await r2.relay.simulate(.playStation(seededBy: "1730817069", album: Self.album, issuedAt: Date()))
+        await eventually { await r2.relay.ack(for: id)?.accepted == true }
+        #expect(missing.albums.count == 1)
+        #expect(r2.music.openedLocations.first?.hasSuffix("/station/ra.1730817069") == true)
     }
 
     @Test func aPlaylistFromThePhonePlaysFromTheSongInsteadOfTheStation() async throws {
@@ -601,7 +646,7 @@ import StandByProtocol
     @Test func artworkThatStaysThePreviousSongsFallsBackToTheCatalogue() async throws {
         final class Clock: @unchecked Sendable { var date = Date() }
         let clock = Clock()
-        let a = FakeMusic.Track(title: "Magic Wand", artist: "The Avalanches", album: "Magic Wand", duration: 230, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
+        let a = FakeMusic.Track(title: "Magic Wand", artist: "Made-Up Band", album: "Magic Wand", duration: 230, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
         let c = FakeMusic.Track(title: "Sunshine", artist: "Clancy", album: "Sunshine", duration: 190, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 300))
         let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
         let r = await rig(now: { clock.date }, tracks: [a, c], artworkLookup: catalogue)

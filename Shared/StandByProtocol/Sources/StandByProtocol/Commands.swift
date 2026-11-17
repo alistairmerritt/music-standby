@@ -64,12 +64,18 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     /// when the Mac's library doesn't have the playlist with the song, the
     /// station as before. Added 17 November 2026; an older Mac ignores it.
     public var playlist: PlaylistPlace?
+    /// For `playStation`, when `playlist` is nil: the library album the phone
+    /// plays the song from. A Mac connected to Music that has the song plays
+    /// the album on from it, in album order; otherwise the station. Added 17
+    /// November 2026; an older Mac ignores it.
+    public var album: AlbumPlace?
 
     public static let maximumAge: TimeInterval = 10
 
     public init(id: UUID = UUID(), kind: CommandKind, issuedAt: Date? = nil,
                 position: TimeInterval? = nil, level: Double? = nil, outputID: String? = nil,
-                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil, playlist: PlaylistPlace? = nil) {
+                catalogID: String? = nil, title: String? = nil, reason: CommandReason? = nil, playlist: PlaylistPlace? = nil,
+                album: AlbumPlace? = nil) {
         self.id = id
         self.kind = kind
         self.issuedAt = issuedAt
@@ -80,6 +86,7 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
         self.title = title
         self.reason = reason
         self.playlist = playlist
+        self.album = album
     }
 
     public static func seek(to position: TimeInterval, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
@@ -99,9 +106,10 @@ public struct RemoteCommand: Codable, Equatable, Sendable, Identifiable {
     /// play (16 November 2026). With `playlist`, a Mac that has it plays the
     /// playlist from the song instead (17 November 2026).
     public static func playStation(seededBy catalogID: String, position: TimeInterval? = nil, title: String? = nil,
-                                   playlist: PlaylistPlace? = nil, id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
+                                   playlist: PlaylistPlace? = nil, album: AlbumPlace? = nil,
+                                   id: UUID = UUID(), issuedAt: Date? = nil) -> RemoteCommand {
         RemoteCommand(id: id, kind: .playStation, issuedAt: issuedAt, position: position, catalogID: catalogID, title: title,
-                      playlist: playlist)
+                      playlist: playlist, album: album)
     }
 
     /// False when `issuedAt` is missing: the temporary contract never sent it.

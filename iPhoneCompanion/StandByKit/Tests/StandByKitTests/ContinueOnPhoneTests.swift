@@ -46,6 +46,13 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         remembered.append(place)
         return playlistHere
     }
+    /// What `albumPlace()` finds here, and how often it was asked.
+    var albumHere: AlbumPlace?
+    private(set) var albumAsks = 0
+    func albumPlace() async -> AlbumPlace? {
+        albumAsks += 1
+        return albumHere
+    }
     /// What `play(_:in:…)` plays: nil when the playlist isn't here.
     var playsPlaylist: PlaylistPlace?
     private(set) var playlistAsked: [(id: String, place: PlaylistPlace, position: TimeInterval)] = []

@@ -48,6 +48,17 @@ import Testing
         #expect(command.hasRequiredValue)
     }
 
+    @Test func playStationCarriesAnAlbumOverTheWire() throws {
+        let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 25, index: 9, shuffled: true)
+        #expect(album.isValid && album.isShuffled)
+        #expect(!AlbumPlace(title: "", count: 3, index: 0).isValid)
+        #expect(!AlbumPlace(title: "A", count: 3, index: 3).isValid)
+        let command = RemoteCommand.playStation(seededBy: "1", position: 5, title: "Song", album: album, issuedAt: Date(timeIntervalSince1970: 1_794_207_600))
+        let data = try StandByWire.makeEncoder().encode(command)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""album":{"#))
+        #expect(try StandByWire.makeDecoder().decode(RemoteCommand.self, from: data) == command)
+    }
+
     @Test func aCommandWithoutAPlaylistLeavesItOut() throws {
         let data = try StandByWire.makeEncoder().encode(RemoteCommand.playStation(seededBy: "1"))
         #expect(!String(decoding: data, as: UTF8.self).contains("playlist"))

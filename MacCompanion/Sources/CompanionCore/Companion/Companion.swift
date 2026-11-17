@@ -356,7 +356,8 @@ public final class Companion {
         } else {
             await monitor.waitOutLaunch()
             let outcome: MusicController.CommandOutcome
-            var playedPlaylist: PlaylistPlace?
+            var shuffleOnceStarted: Bool?
+            var source = "the station"
             switch command.kind {
             case .seek:
                 // Clamped to the track Music had at the last read; Music
@@ -369,7 +370,7 @@ public final class Companion {
             case .selectOutput:
                 outcome = await controller.selectOutput(command.outputID ?? "")
             case .playStation:
-                (outcome, playedPlaylist) = await playPlaylistOrStation(command)
+                (outcome, shuffleOnceStarted, source) = await playPlaylistOrStation(command)
             case .play, .pause, .next, .previous:
                 outcome = await controller.perform(MusicCommand(command.kind)!)
             }
@@ -391,9 +392,9 @@ public final class Companion {
                 }
                 if command.kind == .playStation, let position = command.position, let title = command.title {
                     seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now(),
-                                             shuffle: playedPlaylist.map(\.isShuffled))
-                } else if let playedPlaylist {
-                    _ = await controller.setShuffle(playedPlaylist.isShuffled)
+                                             shuffle: shuffleOnceStarted, what: source)
+                } else if let shuffleOnceStarted {
+                    _ = await controller.setShuffle(shuffleOnceStarted)
                 }
             }
         }
@@ -490,12 +491,33 @@ public final class Companion {
     }
 
     /// Continue on Mac for a song outside the Mac's queue: the library
-    /// playlist the phone plays it from, from the song, when the phone says
-    /// which and this Mac is connected to Music and has it with the song;
-    /// otherwise the song's station, as before (17 November 2026). Logs
-    /// the song's place, never the playlist's name.
-    private func playPlaylistOrStation(_ command: RemoteCommand) async -> (MusicController.CommandOutcome, PlaylistPlace?) {
+    /// playlist or album the phone plays it from, from the song, when the
+    /// phone says which and this Mac is connected to Music and has it with
+    /// the song; otherwise the song's station, as before (17 November 2026).
+    /// Also says what Music's shuffle should be once the song plays: the
+    /// phone's for a playlist, off for an album (Music can't shuffle within
+    /// one), untouched for a station. Logs the song's place, never a name.
+    private func playPlaylistOrStation(_ command: RemoteCommand) async -> (MusicController.CommandOutcome, Bool?, String) {
         let catalogID = command.catalogID ?? ""
+        if command.playlist == nil, let album = command.album {
+            if !album.isValid {
+                recordHandBack("playStation: the phone's album place isn't usable; the station instead")
+            } else if let player = remote as? any MusicRemotePlaying {
+                // Shuffle on, Music draws from the whole library after an album's cue.
+                let controller = controller
+                switch await player.playAlbum(catalogID, in: album, beforeStart: { _ = await controller.setShuffle(false) }) {
+                case .played(let index):
+                    recordHandBack("playStation: the phone's album, from song \(index + 1) of \(album.count)\(album.isShuffled ? ", in order (Music can't shuffle within an album)" : "")")
+                    return (.performed, false, "the album")
+                case .notHere:
+                    recordHandBack("playStation: no album here has the song; the station instead")
+                case .failed(let reason):
+                    recordHandBack("playStation: the album didn't play (\(reason)); the station instead")
+                }
+            } else {
+                recordHandBack("playStation: not connected to Music, so no album; the station instead")
+            }
+        }
         if let place = command.playlist {
             if !place.isValid {
                 recordHandBack("playStation: the phone's playlist place isn't usable; the station instead")
@@ -503,7 +525,7 @@ public final class Companion {
                 switch await player.play(catalogID, in: place) {
                 case .played(let index):
                     recordHandBack("playStation: the phone's playlist, from song \(index + 1) of \(place.count)\(place.isShuffled ? ", shuffled" : "")")
-                    return (.performed, place)
+                    return (.performed, place.isShuffled, "the playlist")
                 case .notHere:
                     recordHandBack("playStation: no playlist here by that name has the song; the station instead")
                 case .failed(let reason):
@@ -513,7 +535,7 @@ public final class Companion {
                 recordHandBack("playStation: not connected to Music, so no playlist; the station instead")
             }
         }
-        return (await controller.playStation(seededBy: catalogID), nil)
+        return (await controller.playStation(seededBy: catalogID), nil, "the station")
     }
 
     @ObservationIgnored private var stationSeek: Task<Void, Never>?
@@ -532,8 +554,8 @@ public final class Companion {
     /// For a playlist (`shuffle` set), Music's shuffle follows the phone's
     /// once the song plays: on, Music keeps the song and shuffles the rest
     /// (seen 17 November 2026).
-    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, shuffle: Bool? = nil) {
-        let what = shuffle == nil ? "the station" : "the playlist"
+    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, shuffle: Bool? = nil,
+                                          what: String = "the station") {
         let before = snapshot?.track?.persistentID ?? snapshot?.track?.title
         stationSeek?.cancel()
         stationSeek = Task { [weak self] in
@@ -961,7 +983,7 @@ extension RemoteCommand {
         case .seek: "seek \(position.map { String(format: "%.1f", $0) } ?? "-")"
         case .setVolume: "setVolume \(level.map { String(format: "%.2f", $0) } ?? "-")"
         case .selectOutput: "selectOutput \(outputID ?? "-")"
-        case .playStation: "playStation \(catalogID ?? "-")\(playlist == nil ? "" : " in a playlist")"
+        case .playStation: "playStation \(catalogID ?? "-")\(playlist != nil ? " in a playlist" : album != nil ? " in an album" : "")"
         case .play, .pause, .next, .previous: kind.rawValue + (reason.map { " (\($0))" } ?? "")
         }
     }

@@ -367,6 +367,18 @@ case "remote":
             return 2
         }
         let client = MusicRemoteClient(pairing: MusicRemotePairing(guid: options[0], serviceName: options[1]))
+        if options.count == 5, options[2] == "playalbum", let index = Int(options[4]) {
+            // Plays the library album with this song on from it, as Continue on Mac does:
+            // msbctl remote GUID SERVICE playalbum CATALOGUE-ID SONG-NUMBER (in the phone's count)
+            let place = AlbumPlace(title: "album", count: max(index, 1), index: max(index - 1, 0))
+            let started = Date()
+            let outcome = await client.playAlbum(options[3], in: place, beforeStart: {
+                _ = await MusicController().setShuffle(false)
+            })
+            print("play the album from song \(index): \(outcome) in \(ms(since: started)) ms")
+            if case .played = outcome { return 0 }
+            return 1
+        }
         if options.count == 6, options[2] == "play", let index = Int(options[4]) {
             // Plays a library playlist from a song, as Continue on Mac does:
             // msbctl remote GUID SERVICE play NAME SONG-NUMBER CATALOGUE-ID

@@ -368,6 +368,19 @@ describe("commands", () => {
     expect((await pending).status).toBe(200);
   });
 
+  it("forwards Continue on Mac's album as the phone sent it (17 November 2026)", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const id = newCommandID();
+    const command = {
+      id, kind: "playStation", issuedAt: new Date().toISOString(), position: 12, catalogID: "1234567890", title: "Song",
+      album: { title: "Album", artist: "Artist", count: 38, index: 30, shuffled: true },
+    };
+    const pending = call("POST", "/v1/commands", { token: phoneToken, body: { command, sessionID }, headers: { "Idempotency-Key": id } });
+    expect((await mac.next("command")).command).toEqual(command);
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 45 } });
+    expect((await pending).status).toBe(200);
+  });
+
   it("passes the Mac's rejection through", async () => {
     const { mac, phoneToken, sessionID } = await playingSetup();
     const { id, body } = commandBody(sessionID, "play");

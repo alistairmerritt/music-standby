@@ -160,6 +160,49 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(sent.first?.playlist == sunday)
     }
 
+    // MARK: Albums (17 November 2026)
+
+    private static let album = AlbumPlace(title: "Album", artist: "Artist", count: 12, index: 5)
+
+    @Test func withoutAPlaylistTheSongGoesWithItsAlbum() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: nil)
+        phone.albumHere = Self.album
+        #expect(try await handBack(relay, phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.map(\.kind) == [.playStation])
+        #expect(sent.first?.album == Self.album)
+        #expect(sent.first?.playlist == nil)
+    }
+
+    @Test func aPlaylistMeansTheAlbumIsntLookedUp() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let phone = phone("270246724", playlist: aaHere)
+        phone.albumHere = Self.album
+        #expect(try await handBack(relay, phone) == .sentBack)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.first?.playlist == aaHere && sent.first?.album == nil)
+        #expect(phone.albumAsks == 0)
+    }
+
+    /// The Mac played the album, the phone took its next songs: coming back
+    /// a song on, the Mac skips ahead in its own queue, which is the album.
+    @Test func anAlbumRoundTripSkipsAheadInTheMacsQueue() async throws {
+        var albumOnTheMac = playingFromAA(state: .paused)
+        albumOnTheMac.playlist = nil
+        let relay = FakeRelay(mac(albumOnTheMac))
+        var next = macPlays("1102359994", title: "Lady Divine")
+        next.playback?.track?.album = "Album"
+        await relay.setNext(next)
+        let phone = phone("1102359994", playlist: nil)
+        phone.current?.title = "Lady Divine"
+        phone.albumHere = Self.album
+        #expect(try await handBack(relay, phone) == .sentBack)
+        #expect(await relay.sent.map(\.command.kind) == [.next, .seek, .play], "the Mac's queue is the album")
+    }
+
     @Test func withoutAPlaylistItsTheStationOrSkipsAsBefore() async throws {
         let outside = FakeRelay(mac(playingFromAA(state: .paused)))
         await outside.setNext(macPlays("270246724"))

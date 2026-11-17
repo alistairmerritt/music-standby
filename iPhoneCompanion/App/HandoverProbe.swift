@@ -53,6 +53,114 @@ enum HandoverProbe {
         }
     }
 
+    /// `-albumProbe TITLE SONG SECONDS [shuffle]`: plays the library album
+    /// with that title from that song (from 1, by disc, then track), as a
+    /// person tapping a song in the album would.
+    static func runAlbumIfAsked() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let at = arguments.firstIndex(of: "-albumProbe"), arguments.count > at + 3,
+              let number = Int(arguments[at + 2]), let seconds = Double(arguments[at + 3]) else { return }
+        let title = arguments[at + 1]
+        let shuffle = arguments.count > at + 4 && arguments[at + 4] == "shuffle"
+        Task {
+            let query = MPMediaQuery.songs()
+            query.addFilterPredicate(MPMediaPropertyPredicate(value: title, forProperty: MPMediaItemPropertyAlbumTitle))
+            let songs = (query.items ?? []).sorted { ($0.discNumber, $0.albumTrackNumber) < ($1.discNumber, $1.albumTrackNumber) }
+            say("album: \(songs.count) songs titled \(title)")
+            guard number >= 1, number <= songs.count else { return finish() }
+            let player = MPMusicPlayerController.systemMusicPlayer
+            player.shuffleMode = .off
+            player.setQueue(with: MPMediaItemCollection(items: songs))
+            player.nowPlayingItem = songs[number - 1]
+            try? await player.prepareToPlay()
+            player.currentPlaybackTime = seconds
+            player.play()
+            if shuffle {
+                try? await Task.sleep(for: .seconds(1))
+                player.shuffleMode = .songs
+            }
+            try? await Task.sleep(for: .seconds(2))
+            let now = player.nowPlayingItem
+            say("playing: index \(player.indexOfNowPlayingItem), disc \(now?.discNumber ?? 0) track \(now?.albumTrackNumber ?? 0), shuffle \(player.shuffleMode.rawValue), \(describe(now))")
+            finish()
+        }
+    }
+
+    /// `-libraryShuffleProbe`: the whole library, shuffled, from the song
+    /// Apple Music here is on (or the first library song). `-catalogPlaylistProbe
+    /// TERM SONG`: an Apple Music playlist found by search, from that song (from
+    /// 1), through MusicKit's system player.
+    static func runQueueProbesIfAsked() {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-libraryShuffleProbe") {
+            Task {
+                let player = MPMusicPlayerController.systemMusicPlayer
+                let songs = MPMediaQuery.songs().items ?? []
+                guard let item = player.nowPlayingItem ?? songs.first else { return finish() }
+                say("library: \(songs.count) songs; starting from \(describe(item))")
+                player.shuffleMode = .off
+                player.setQueue(with: MPMediaQuery.songs())
+                player.nowPlayingItem = item
+                try? await player.prepareToPlay()
+                player.play()
+                try? await Task.sleep(for: .seconds(1.5))
+                say("playing: \(player.nowPlayingItem?.persistentID == item.persistentID ? "the same song" : "ANOTHER song"), index \(player.indexOfNowPlayingItem)")
+                player.shuffleMode = .songs
+                try? await Task.sleep(for: .seconds(1.5))
+                say("shuffle on: \(player.nowPlayingItem?.persistentID == item.persistentID ? "still the same song" : "ANOTHER song"), state \(player.playbackState.rawValue)")
+                for _ in 0..<2 {
+                    player.skipToNextItem()
+                    try? await Task.sleep(for: .seconds(2))
+                    say("next: \(describe(player.nowPlayingItem)) from album \(player.nowPlayingItem?.albumTitle ?? "?")")
+                }
+                finish()
+            }
+        }
+        if let at = arguments.firstIndex(of: "-libraryAddProbe"), arguments.count > at + 1 {
+            // Adds an Apple Music playlist found by search to the library (the person agreed).
+            let term = arguments[at + 1]
+            Task {
+                do {
+                    var search = MusicCatalogSearchRequest(term: term, types: [Playlist.self])
+                    search.limit = 3
+                    guard let found = try await search.response().playlists.first else { say("no playlist for \(term)"); return finish() }
+                    let started = Date()
+                    try await MusicLibrary.shared.add(found)
+                    say("added \(found.name) [\(found.id)] to the library in \(Int(Date().timeIntervalSince(started) * 1000)) ms at \(Date())")
+                } catch {
+                    say("add failed: \(error)")
+                }
+                finish()
+            }
+        }
+        if let at = arguments.firstIndex(of: "-catalogPlaylistProbe"), arguments.count > at + 2, let number = Int(arguments[at + 2]) {
+            let term = arguments[at + 1]
+            Task {
+                do {
+                    var search = MusicCatalogSearchRequest(term: term, types: [Playlist.self])
+                    search.limit = 3
+                    guard let found = try await search.response().playlists.first else { say("no playlist for \(term)"); return finish() }
+                    let playlist = try await found.with([.entries])
+                    let tracks = Array(playlist.entries ?? [])
+                    say("playlist \(playlist.name) [\(playlist.id)]: \(tracks.count) songs")
+                    guard number >= 1, number <= tracks.count else { return finish() }
+                    let target = tracks[number - 1]
+                    let player = SystemMusicPlayer.shared
+                    player.queue = SystemMusicPlayer.Queue(playlist: playlist, startingAt: target)
+                    try await player.play()
+                    try? await Task.sleep(for: .seconds(2.5))
+                    say("target: \(target.title); playing: \(player.queue.currentEntry?.title ?? "nil"), status \(player.state.playbackStatus)")
+                    try await player.skipToNextEntry()
+                    try? await Task.sleep(for: .seconds(2.5))
+                    say("expected next: \(number < tracks.count ? tracks[number].title : "-"); now: \(player.queue.currentEntry?.title ?? "nil")")
+                } catch {
+                    say("failed: \(error)")
+                }
+                finish()
+            }
+        }
+    }
+
     static func runIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-playlistProbePause") {

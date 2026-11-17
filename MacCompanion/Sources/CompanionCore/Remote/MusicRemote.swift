@@ -36,6 +36,16 @@ public struct RemoteQueue: Equatable, Sendable {
 /// iPhone carries on here instead of becoming the song's station.
 public protocol MusicRemotePlaying: Sendable {
     func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome
+    /// Plays the library album that has this song, on from it in album
+    /// order. `beforeStart` runs just before Music is told, only once the
+    /// album is found: the companion turns shuffle off there.
+    func playAlbum(_ catalogID: String, in place: AlbumPlace, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome
+}
+
+extension MusicRemotePlaying {
+    public func playAlbum(_ catalogID: String, in place: AlbumPlace, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+        .failed("this remote can't play an album")
+    }
 }
 
 public enum PlaylistPlayOutcome: Equatable, Sendable {
@@ -112,6 +122,8 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
     private var session: UInt64?
     private var catalogByPersistentID: [String: String] = [:]
     private var catalogByItemID: [UInt64: String] = [:]
+    /// Catalogue ID → the album (`asai`) its library song is on.
+    private var albumByCatalog: [String: UInt64] = [:]
     private var libraryReadAt: Date?
     /// The library's `miid`: `playspec` names the database by it.
     private var databaseID: UInt64?
@@ -182,19 +194,22 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
         let databases = DMAPNode.parse(try await get("/databases"))
         guard let database = databases.first("mlcl")?.first("miid")?.integer else { throw Failure.unreachable }
         databaseID = database
-        let meta = "dmap.itemid,dmap.persistentid,com.apple.itunes.itms-songid"
+        let meta = "dmap.itemid,dmap.persistentid,com.apple.itunes.itms-songid,daap.songalbumid"
         let items = DMAPNode.parse(try await get("/databases/\(database)/items?type=music&meta=\(meta)"))
         var byPersistentID: [String: String] = [:]
         var byItemID: [UInt64: String] = [:]
+        var albums: [String: UInt64] = [:]
         for item in items.first("mlcl")?.all("mlit") ?? [] {
             guard let catalog = item.all("aeSI").first?.integer, catalog != 0 else { continue }
             if let persistent = item.all("mper").first?.integer {
                 byPersistentID[String(format: "%016llX", persistent)] = String(catalog)
             }
             if let id = item.all("miid").first?.integer { byItemID[id] = String(catalog) }
+            if let album = item.all("asai").first?.integer, album != 0 { albums[String(catalog)] = album }
         }
         catalogByPersistentID = byPersistentID
         catalogByItemID = byItemID
+        albumByCatalog = albums
     }
 
     /// Where each Up Next song comes from, in order: its playlist and its
@@ -266,6 +281,53 @@ public actor MusicRemoteClient: MusicRemoteReading, MusicRemotePlaying {
                 return .played(index: index)
             }
             return .notHere
+        } catch Failure.unpaired {
+            status = .unpaired
+            return .failed("Music has forgotten this remote")
+        } catch {
+            status = .unreachable
+            port = nil
+            session = nil
+            return .failed("Music's remote protocol didn't answer")
+        }
+    }
+
+    // MARK: Albums (17 November 2026)
+
+    /// Plays the library album with this song on from it, in album order:
+    /// Music's `cue` over the album's songs, which counts them by disc, then
+    /// track. Music's own listing of the album comes in another order, so
+    /// the place is worked out here. Shuffle must be off, or Music draws from
+    /// the whole library: `beforeStart` sees to that. The quotes go as they
+    /// are, as for `playspec`. Seen on 17 November 2026: track 10 of a
+    /// one-disc album, and disc 2 track 10 of a two-disc one as index 20.
+    public func playAlbum(_ catalogID: String, in place: AlbumPlace,
+                          beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+        guard place.isValid else { return .notHere }
+        do {
+            if albumByCatalog[catalogID] == nil {
+                libraryReadAt = nil   // a song added since the last read
+                try await refreshLibrary()
+            }
+            guard let album = albumByCatalog[catalogID] else { return .notHere }
+            let database = try await libraryDatabase()
+            let meta = "dmap.itemid,dmap.itemname,daap.songdiscnumber,daap.songtracknumber,com.apple.itunes.itms-songid"
+            let list = DMAPNode.parse(try await get("/databases/\(database)/items?type=music&query='daap.songalbumid:\(album)'&meta=\(meta)"))
+            let songs = (list.first("mlcl")?.all("mlit") ?? []).map { item in
+                (disc: item.all("asdn").first?.integer ?? 0, track: item.all("astn").first?.integer ?? 0,
+                 name: item.all("minm").first?.string ?? "",
+                 catalogID: item.all("aeSI").first?.integer.flatMap { $0 == 0 ? nil : String($0) })
+            }.sorted { ($0.disc, $0.track, $0.name) < ($1.disc, $1.track, $1.name) }
+            let ids = songs.map(\.catalogID)
+            guard let index = ids.indices.filter({ ids[$0] == catalogID }).min(by: { abs($0 - place.index) < abs($1 - place.index) }) else {
+                return .notHere
+            }
+            await beforeStart()
+            _ = try await control("/ctrl-int/1/cue?command=clear")
+            let answer = try await control("/ctrl-int/1/cue?command=play&query='daap.songalbumid:\(album)'&index=\(index)&sort=album")
+            status = .connected
+            guard answer == 200 || answer == 204 else { return .failed("Music answered cue with \(answer)") }
+            return .played(index: index)
         } catch Failure.unpaired {
             status = .unpaired
             return .failed("Music has forgotten this remote")

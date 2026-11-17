@@ -47,6 +47,15 @@ export interface PlaylistPlace {
   shuffled?: boolean;
 }
 
+/** A song's place in a library album (Shared/StandByProtocol/Album.swift). Added 17 November 2026. Passed through. */
+export interface AlbumPlace {
+  title: string;
+  artist?: string;
+  count: number;
+  index: number;
+  shuffled?: boolean;
+}
+
 /** One place Music can play to (Shared/StandByProtocol/Output.swift). */
 export interface AudioOutput {
   id: string;
@@ -98,6 +107,8 @@ export interface RemoteCommand {
   reason?: string;
   /** For `playStation`: the phone's playlist, which a Mac connected to Music plays from the song. Passed through. */
   playlist?: PlaylistPlace;
+  /** For `playStation` without a playlist: the phone's library album, which the Mac plays on from the song in album order. Passed through. */
+  album?: AlbumPlace;
 }
 
 export interface CommandAck {
