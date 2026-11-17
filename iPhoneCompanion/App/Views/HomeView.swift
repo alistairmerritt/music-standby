@@ -108,8 +108,7 @@ struct HomeView: View {
             if sessionShown.isActive {
                 // The system's own words were "primary session"; this says what it means.
                 LabeledContent("Status", value: sessionShown.isPrimary ? "Showing" : "Another app is showing")
-                // Another app showing: the same request brings Second Chair back.
-                Button(sessionShown.isPrimary ? "Refresh Now Playing" : "Show in Now Playing") {
+                Button("Refresh Now Playing") {
                     Task { await model.activateNowPlaying() }
                 }
                 Button("Stop Showing", role: .destructive) {
@@ -122,10 +121,11 @@ struct HomeView: View {
                 .disabled(model.attributes == nil)
             }
         } header: {
+            Text("Lock Screen and StandBy")
+        } footer: {
             // iOS shows a session only once the app has asked while open, so a
             // dismissed player stays hidden until the next launch re-requests it.
-            // The guide explains it; the reminder covers it (17 November 2026).
-            Text("Lock Screen and StandBy")
+            Text("If you dismiss the player, it stays hidden until you next open Second Chair.")
         }
     }
 

@@ -101,7 +101,7 @@ Results are from the mock transport with the phone on USB. See [STATUS.md](STATU
 
 - Check Diagnostics for an error.
 - Confirm `MusicStandByNowPlaying.appex` is inside the app's `Extensions` folder in the built product.
-- Foreground the app and tap **Show in Now Playing** (it reads **Refresh Now Playing** while the player is showing), since the primary request only counts in the foreground.
+- Foreground the app and tap **Refresh Now Playing**, since the primary request only counts in the foreground.
 - If the time is frozen and buttons flip with no effect, the extension isn't running properly. See the install warning above.
 
 ## Reading what happened
