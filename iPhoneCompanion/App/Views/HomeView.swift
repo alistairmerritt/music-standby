@@ -116,7 +116,7 @@ struct HomeView: View {
             ))
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("If you’ve dismissed Second Chair from your Lock Screen or StandBy, get a silent notification when your Mac starts playing music again. It shows during a Focus too. Tap it to bring the player back.")
+                Text("If Second Chair leaves your Lock Screen or StandBy, because you dismissed it or because Apple Music took its place while your Mac was paused, get a silent notification when your Mac starts playing again. It shows during a Focus too. Tap it to bring the player back.")
                 if let problem = reminders.problem {
                     Text(problem).foregroundStyle(.red)
                 }
@@ -335,7 +335,7 @@ private struct HandoffSection: View {
                     row("Continue on iPhone", symbol: "iphone",
                         detail: model.macSongHasNoCatalogID
                             ? "Your iPhone will look this song up in Apple Music, then continue it here with your Up Next queue. Playback on your Mac will pause."
-                            : "Continue listening on your iPhone, including your Up Next queue. Playback on your Mac will pause.",
+                            : "Continue listening on your iPhone, with your playlist or Up Next queue. Playback on your Mac will pause.",
                         enabled: !(phonePlaying && !macPlaying)) { await continueHere() }
                 }
                 if showsContinueOnMac {

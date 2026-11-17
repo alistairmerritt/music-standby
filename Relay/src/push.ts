@@ -109,7 +109,7 @@ export function makeReminder(token: string, macName: string): AlertPush {
     collapseID: REMINDER_ID,
     payload: {
       aps: {
-        alert: { title: `Music playing on ${macName}`, body: "Tap to show on your Lock Screen." },
+        alert: { title: `Music playing on ${macName}`, body: "Tap to show it on your Lock Screen and in StandBy." },
         "thread-id": REMINDER_ID,
         "interruption-level": "time-sensitive",
         "relevance-score": 1,

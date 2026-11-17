@@ -76,7 +76,7 @@ from `playback.outputs` in `session`.
 | `APNS_ENVIRONMENT` | `development` | Where a pairing's pushes go first. A token refused there with `BadDeviceToken` is tried once in the other environment, and the one that delivers is kept for the pairing (see [APNs status](#apns-status)) |
 | `APNS_TOPIC` | `com.alistairmerritt.MusicStandBy.push-type.nowplaying` | |
 | `APNS_APP_TOPIC` | `APNS_TOPIC` without `.push-type.nowplaying` | Topic of reminder alerts |
-| `REMIND_AFTER_MS` | 1800000 | How long the Mac must not have played before a reminder |
+| `REMIND_AFTER_MS` | 480000 | How long the Mac must not have played before a reminder: 8 minutes, about when iOS gives StandBy to the phone's own Apple Music |
 | `ARTWORK_FOLLOW_UP_MS` | 700 | Delay before an update with new artwork is sent again |
 | `ARTWORK_DOWNLOAD_FOLLOW_UP_MS` | 1000 | Delay after the phone downloads the artwork it was last pushed before that update is sent again (once per artwork) |
 | `DEV_ENDPOINTS` | `0` | `1` enables `/v1/dev/pushes` and `/v1/dev/apns-probe`. `npm run dev`, the tests and the harness set it. A deployment leaves it off, except for a minute to run the APNs probe |
@@ -153,6 +153,13 @@ Then the reminder became Time Sensitive (version `eeae1bd9`, 12 November): it ca
 ordinary alert, a Focus held it back, and StandBy usually runs under a Work or Sleep Focus, so
 it never appeared there. 61 tests pass. Not yet seen arriving in StandBy, which needs a
 30-minute break in playback.
+
+Then the reminder came sooner (17 November): after 8 minutes without playing, not 30, and it
+says "Tap to show it on your Lock Screen and in StandBy." On an iPhone in StandBy, iOS gave the
+display to the phone's own Apple Music once the Mac had been paused about 7–8 minutes, even with
+the Mac's companion quit so that no push arrived, and the Mac playing again didn't win it back:
+only opening the app does. At 30 minutes, a break of 8–30 minutes left neither the player nor a
+reminder.
 
 Later on 12 November, each pairing finds its own APNs environment (see
 [APNs status](#apns-status)), so TestFlight builds, whose tokens are production ones, get

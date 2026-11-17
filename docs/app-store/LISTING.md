@@ -78,7 +78,7 @@ Press it here. It happens there.
 • Play, pause, skip and scrub. The music keeps playing on your Mac.
 • Change the volume of Music on your Mac from the app.
 • When the song changes on your Mac, your iPhone keeps up by itself.
-• Swiped the player away? An optional reminder brings it back when the music starts again.
+• Player gone from your Lock Screen or StandBy? An optional reminder brings it back when your Mac starts playing again.
 
 Take your music with you. Then bring it back.
 • Continue on iPhone picks up the song from your Mac in Apple Music on your iPhone, from the same point, with your playlist or Up Next queue.
