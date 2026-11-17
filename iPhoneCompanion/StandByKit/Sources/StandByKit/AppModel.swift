@@ -134,12 +134,22 @@ public final class AppModel {
         if let graceDeadline, now() >= graceDeadline {
             await endSession(.connectionLost)
         }
+        // While this iPhone plays and the Mac doesn't, as after Continue on
+        // iPhone, the phone's music keeps the system player: asking here put
+        // the Mac's paused song in Control Centre whenever Second Chair was
+        // open (17 November 2026). StandBy already preferred the phone's.
+        let deferToPhone = phonePlaysMusic() && attributes?.isPlaying != true
         if shouldShowSession, let attributes {
-            await activate(with: attributes)
-        } else if sessionController.isActive {
+            await activate(with: attributes, requestingPrimary: !deferToPhone)
+        } else if sessionController.isActive, !deferToPhone {
             await sessionController.requestPrimary()
         }
     }
+
+    /// Whether Apple Music on this iPhone is playing. The app sets it; Second
+    /// Chair then leaves the system player to the phone's music on opening
+    /// while the Mac is paused (17 November 2026).
+    @ObservationIgnored public var phonePlaysMusic: @MainActor () -> Bool = { false }
 
     /// Time in the background is not a lost connection. Stop reading the Mac
     /// and drop any countdown; the next foreground reads afresh and reconciles.
@@ -408,8 +418,8 @@ public final class AppModel {
         }
     }
 
-    private func activate(with attributes: MacPlaybackAttributes) async {
-        await sessionController.activate(with: attributes)
+    private func activate(with attributes: MacPlaybackAttributes, requestingPrimary: Bool = true) async {
+        await sessionController.activate(with: attributes, requestingPrimary: requestingPrimary)
         let error = sessionController.lastError
         if let error, error != lastRecordedActivationError {
             record("Now Playing failed: \(error)")

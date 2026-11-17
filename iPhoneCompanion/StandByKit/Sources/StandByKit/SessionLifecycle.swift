@@ -13,7 +13,9 @@ public protocol RemoteSessionControlling: AnyObject {
     /// system won't promote is still a working session.
     var lastPrimaryError: String? { get }
 
-    func activate(with attributes: MacPlaybackAttributes) async
+    /// Starts or updates the session, then asks to be the system's primary
+    /// player unless `requestingPrimary` is false.
+    func activate(with attributes: MacPlaybackAttributes, requestingPrimary: Bool) async
     func publish(_ attributes: MacPlaybackAttributes) async
     func deactivate() async
     func requestPrimary() async
@@ -26,6 +28,10 @@ public protocol RemoteSessionControlling: AnyObject {
 
 extension RemoteSessionControlling {
     public func adoptExisting() async {}
+
+    public func activate(with attributes: MacPlaybackAttributes) async {
+        await activate(with: attributes, requestingPrimary: true)
+    }
 }
 
 /// When a Now Playing session should end.
