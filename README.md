@@ -22,7 +22,8 @@ the old name.
   action. The phone is woken in the background, or shown a notification with a Continue on
   Mac button, which Apple Watch shows too.
 - **Shortcuts actions** on the iPhone for every control and both directions; a reminder
-  notification when the Mac starts playing; Launch at Login on the Mac.
+  notification when the Mac starts playing again after a break, to bring the player back;
+  Launch at Login on the Mac.
 
 ## How it works
 

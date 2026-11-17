@@ -619,7 +619,7 @@ describe("reminders", () => {
     const paused = playback({ state: "paused", isPlaying: false });
     mac.send({ type: "state", message: paused });
     await waitForRevision(phoneToken, paused.revision);
-    await pauseFor(pairingID, 31);
+    await pauseFor(pairingID, 9);   // past the 8 minutes after which iOS gives StandBy to Apple Music
     const resumed = playback();
     mac.send({ type: "state", message: resumed });
     await waitForRevision(phoneToken, resumed.revision);
@@ -627,7 +627,7 @@ describe("reminders", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].payload).toEqual({
       aps: {
-        alert: { title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." },
+        alert: { title: "Music playing on Studio Mac", body: "Tap to show it on your Lock Screen and in StandBy." },
         "thread-id": "mac-playing",
         "interruption-level": "time-sensitive",
         "relevance-score": 1,
@@ -645,7 +645,7 @@ describe("reminders", () => {
     const { mac, pairingID, phoneToken } = await playingSetup();
     await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
     mac.send({ type: "state", message: playback({ state: "paused", isPlaying: false }) });
-    await pauseFor(pairingID, 5);
+    await pauseFor(pairingID, 7);   // the player is still showing
     const quick = playback();
     mac.send({ type: "state", message: quick });
     await waitForRevision(phoneToken, quick.revision);
