@@ -18,6 +18,7 @@ struct HomeView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        ScrollViewReader { proxy in
         Form {
             if isDemoLayout { demoSection }
 
@@ -48,9 +49,10 @@ struct HomeView: View {
                 }
             } else {
                 HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic)
-                addToLibrarySection
+                    .id("continueListening")
             }
             nowPlayingSection
+                .id("lockScreen")
             // The reminder comes from the relay, which the demo doesn't use.
             if !isDemoLayout { remindersSection }
             macSection
@@ -81,13 +83,33 @@ struct HomeView: View {
         } message: {
             Text("You’ll need a new pairing code to connect again.")
         }
+        #if DEBUG
+        .task {
+            // -screenshotScroll continueListening|lockScreen: the lower part, for screenshots.
+            guard let target = ScreenshotMode.scrollTarget else { return }
+            try? await Task.sleep(for: .seconds(1))
+            proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.08))
+        }
+        #endif
+        }
+    }
+
+    /// Whether there's a session, or in a development build's screenshots
+    /// what `-screenshotNowPlaying` asks for (the simulator has none).
+    private var sessionIsActive: Bool {
+        #if DEBUG
+        if ScreenshotMode.nowPlayingState != nil { return true }
+        #endif
+        return model.sessionController.isActive
     }
 
     private var nowPlayingSection: some View {
         Section {
-            if model.sessionController.isActive {
-                // The system's own words were "primary session"; this says what it means.
-                LabeledContent("Status", value: model.sessionController.isSystemPrimary ? "Showing" : "Another app is showing")
+            // No status row: iOS's `isSystemPrimary` read false while Second
+            // Chair was on the Lock Screen (8 and 17 November 2026), so
+            // "Another app is showing" was wrong, and nothing else tells which
+            // player shows. Diagnostics keeps the raw value.
+            if sessionIsActive {
                 Button("Refresh Now Playing") {
                     Task { await model.activateNowPlaying() }
                 }
@@ -109,18 +131,6 @@ struct HomeView: View {
         }
     }
 
-    /// Off unless turned on (17 November 2026), as adding changes the
-    /// library: the Mac can only play a playlist or album that's in it.
-    @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
-
-    private var addToLibrarySection: some View {
-        Section {
-            Toggle("Add to Library for Continue on Mac", isOn: $addsToLibrary)
-        } footer: {
-            Text("Your Mac can only play a playlist or album from your library. Turn this on and, when you continue an Apple Music playlist or album that isn’t in your library, Second Chair adds it first, and your Mac plays it from the same song a few seconds later. With it off, your Mac plays the song’s station instead.")
-        }
-    }
-
     private var remindersSection: some View {
         Section {
             Toggle("Remind When Music Starts", isOn: Binding(
@@ -129,7 +139,7 @@ struct HomeView: View {
             ))
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("If Second Chair leaves your Lock Screen or StandBy, because you dismissed it or because Apple Music took its place while your Mac was paused, get a silent notification when your Mac starts playing again. It shows during a Focus too. Tap it to bring the player back.")
+                Text("Get a silent reminder when your Mac starts playing again after a break. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
                 if let problem = reminders.problem {
                     Text(problem).foregroundStyle(.red)
                 }
@@ -318,6 +328,9 @@ private struct HandoffSection: View {
     let allowAppleMusic: (_ canAsk: Bool) async -> Void
     @State private var working = false
     @State private var problem: String?
+    /// Off unless turned on (17 November 2026), as adding changes the
+    /// library: the Mac can only play a playlist or album that's in it.
+    @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
 
     private var macPlaying: Bool { model.attributes?.isPlaying == true }
     private var phonePlaying: Bool { here?.isPlaying == true }
@@ -364,6 +377,12 @@ private struct HandoffSection: View {
                 if let problem { Text(problem) } else if let detail = status?.detail { Text(detail) }
             }
             .onChange(of: [macPlaying, phonePlaying]) { problem = nil }
+            // Part of Continue Listening, so its short label reads in context.
+            Section {
+                Toggle("Automatically Add to Library", isOn: $addsToLibrary)
+            } footer: {
+                Text("To keep your playlist or album going when you Continue Listening from iPhone to Mac, Second Chair can add it to your Apple Music library automatically. It stays there until you remove it. With this off, your Mac plays the song’s station instead.")
+            }
         }
     }
 

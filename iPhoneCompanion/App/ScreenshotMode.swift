@@ -21,6 +21,21 @@ import UIKit
 enum ScreenshotMode {
     static var isOn: Bool { ProcessInfo.processInfo.arguments.contains("-screenshotDemo") }
 
+    /// `-screenshotNowPlaying on`: Home's Lock Screen section as if the
+    /// player had a session (the simulator can't start one).
+    static var nowPlayingState: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let at = arguments.firstIndex(of: "-screenshotNowPlaying"), arguments.count > at + 1 else { return nil }
+        return arguments[at + 1]
+    }
+
+    /// `-screenshotScroll ID`: Home scrolls to that section (`continueListening`, `lockScreen`).
+    static var scrollTarget: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let at = arguments.firstIndex(of: "-screenshotScroll"), arguments.count > at + 1 else { return nil }
+        return arguments[at + 1]
+    }
+
     private static let suite = "com.alistairmerritt.MusicStandBy.screenshots"
     private static let mac = PairedMac(id: DemoMode.mac.id, name: "MacBook Pro")
 

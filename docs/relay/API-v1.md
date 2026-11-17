@@ -218,7 +218,7 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
       song, then shuffles its library.
     - `repeatMode` (`off`, `one`, `all`): Music's repeat once the song plays.
     - `addedToLibrary` on `playlist` or `album`: the phone has just added that Apple Music
-      playlist or album to the library (the iPhone setting Add to Library for Continue on Mac,
+      playlist or album to the library (the iPhone setting Automatically Add to Library,
       off by default). The Mac acks at once, then looks for it every 2 s for up to 25 s after
       `issuedAt`, then plays the station.
   - `playback` may also carry:
