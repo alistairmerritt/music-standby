@@ -23,7 +23,7 @@ Continue Listening carries what the music plays from, not just the song.
 
 **Continue on Mac**, besides a library playlist:
 - a library album, in order (Music can't shuffle within one);
-- an Apple Music playlist or album, added to the library first, only with the setting **Add to Library for Continue on Mac** (off by default, so adding never changes the library unasked). The Mac waits up to 25 s for it to arrive.
+- an Apple Music playlist or album, added to the library first, only with the setting **Automatically Add to Library**, under Continue Listening (off by default, so adding never changes the library unasked). The Mac waits up to 25 s for it to arrive.
 - the phone's station, which starts on another song on the Mac;
 - the whole library shuffled (a guess: the phone shuffles a library song from no playlist or album it can find);
 - repeat.

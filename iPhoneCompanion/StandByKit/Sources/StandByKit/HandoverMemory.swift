@@ -43,7 +43,7 @@ public struct HandoverMemory {
     /// minute (17 November 2026). Checked against Music's queue before use.
     public var loadPlaylist: @MainActor () -> PlaylistPlace?
     public var savePlaylist: @MainActor (PlaylistPlace?) -> Void
-    /// The setting "Add to Library for Continue on Mac" (17 November 2026):
+    /// The setting "Automatically Add to Library", under Continue Listening (17 November 2026):
     /// Continue on Mac adds an Apple Music playlist or album that isn't in
     /// the library, so the Mac can play it. Off unless turned on: adding
     /// changes the person's library.
