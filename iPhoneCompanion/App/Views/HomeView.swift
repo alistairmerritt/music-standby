@@ -22,22 +22,35 @@ struct HomeView: View {
         Form {
             if isDemoLayout { demoSection }
 
-            Section("Now Playing on Mac") {
+            Section {
                 if let attributes = model.attributes, let track = attributes.track {
-                    NowPlayingRow(track: track, attributes: attributes, artwork: model.artwork) { seconds in
-                        Task { await model.seek(to: seconds) }
-                    }
-                    TransportControls(isPlaying: attributes.isPlaying) { kind in
-                        Task { await model.send(kind) }
-                    }
-                    if let volume = attributes.volume {
-                        VolumeRow(level: volume) { level in
-                            Task { await model.setVolume(level) }
+                    // Greyed out and inert while the iPhone plays and the Mac
+                    // doesn't, as after Continue on iPhone: the Mac's paused
+                    // song isn't what's playing (17 November 2026).
+                    Group {
+                        NowPlayingRow(track: track, attributes: attributes, artwork: model.artwork) { seconds in
+                            Task { await model.seek(to: seconds) }
+                        }
+                        TransportControls(isPlaying: attributes.isPlaying) { kind in
+                            Task { await model.send(kind) }
+                        }
+                        if let volume = attributes.volume {
+                            VolumeRow(level: volume) { level in
+                                Task { await model.setVolume(level) }
+                            }
                         }
                     }
+                    .disabled(iPhoneIsPlaying)
+                    .opacity(iPhoneIsPlaying ? 0.4 : 1)
                 } else {
                     Text("Nothing is playing on your Mac.")
                         .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text(iPhoneIsPlaying ? "Now Playing on Mac · Paused" : "Now Playing on Mac")
+            } footer: {
+                if iPhoneIsPlaying, iPhoneHasMacSong {
+                    Text("This song is playing on your iPhone now.")
                 }
             }
 
@@ -92,6 +105,24 @@ struct HomeView: View {
         }
         #endif
         }
+    }
+
+    /// Apple Music on this iPhone plays while the Mac doesn't (17 November
+    /// 2026). Read once a second, like the rest of Home's view of it.
+    private var iPhoneIsPlaying: Bool {
+        guard model.attributes?.isPlaying != true else { return false }
+        #if DEBUG
+        if ScreenshotMode.iPhonePlaying { return true }
+        #endif
+        return phoneNowPlaying?.isPlaying == true
+    }
+
+    /// The iPhone plays the Mac's current song, as Continue on iPhone leaves it.
+    private var iPhoneHasMacSong: Bool {
+        #if DEBUG
+        if ScreenshotMode.iPhonePlaying { return true }
+        #endif
+        return model.macQueuePosition(of: phoneNowPlaying?.catalogID) == 0
     }
 
     /// Whether there's a session, or in a development build's screenshots
