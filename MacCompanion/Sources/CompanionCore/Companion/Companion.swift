@@ -234,7 +234,7 @@ public final class Companion {
             await monitor.waitOutLaunch()
             let outcome = await controller.perform(command)
             record("menu \(command.rawValue): \(outcome)")
-            if outcome == .performed { await settleAndRead() } else { await ingest(await monitor.read(.command), trigger: .command) }
+            if outcome == .performed { scheduleSettleRead() } else { await ingest(await monitor.read(.command), trigger: .command) }
         }
     }
 
@@ -330,7 +330,7 @@ public final class Companion {
             guard let self else { return .rejected(command.id, revision: 0, ProtocolError(.internal)) }
             let (ack, performed) = await apply(command)
             await send(.ack(ack))
-            if performed { enqueue { [weak self] in await self?.settleAndRead() } }
+            if performed { scheduleSettleRead() }
             return ack
         }
     }
@@ -429,9 +429,27 @@ public final class Companion {
         if ackOrder.count > 64 { acks[ackOrder.removeFirst()] = nil }
     }
 
-    private func settleAndRead() async {
-        try? await Task.sleep(for: settleDelay)
-        await ingest(await monitor.read(.command), trigger: .command)
+    @ObservationIgnored private var settleSleeper: Task<Void, Never>?
+    @ObservationIgnored private var settleToken = 0
+
+    /// One re-read after a burst of commands, `settleDelay` after the last.
+    /// It used to sit on the serial chain, sleeping, then reading Music, its
+    /// artwork and the queue, so the next command waited behind all of it:
+    /// "next, seek, play" took 8 s in the 19 November 2026 soak test. Now the
+    /// sleep is off the chain, a newer command replaces it, and a read that
+    /// was queued but not started is skipped when a newer command came.
+    private func scheduleSettleRead() {
+        settleSleeper?.cancel()
+        settleToken += 1
+        let token = settleToken
+        settleSleeper = Task { [weak self, settleDelay] in
+            try? await Task.sleep(for: settleDelay)
+            guard !Task.isCancelled else { return }
+            self?.enqueue { [weak self] in
+                guard let self, token == settleToken else { return }
+                await ingest(await monitor.read(.command), trigger: .command)
+            }
+        }
     }
 
     private func ingest(_ snapshot: MusicSnapshot, trigger: MusicMonitor.Trigger) async {
@@ -683,7 +701,8 @@ public final class Companion {
     /// starts, and set shuffle and repeat to the phone's.
     private func afterStart(_ command: RemoteCommand, _ start: HandOverStart) async {
         if let position = command.position, let title = command.title {
-            seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now(), shuffle: start.shuffle,
+            seekWhenTheStationStarts(with: title, at: position, issuedAt: command.issuedAt ?? now(),
+                                     positionIsPaused: command.positionIsPaused ?? false, shuffle: start.shuffle,
                                      repeatMode: start.repeatMode, what: start.what)
         } else {
             if let shuffle = start.shuffle { _ = await controller.setShuffle(shuffle) }
@@ -707,8 +726,8 @@ public final class Companion {
     /// For a playlist (`shuffle` set), Music's shuffle follows the phone's
     /// once the song plays: on, Music keeps the song and shuffles the rest
     /// (seen 17 November 2026).
-    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, shuffle: Bool? = nil,
-                                          repeatMode: RepeatMode? = nil, what: String = "the station") {
+    private func seekWhenTheStationStarts(with title: String, at position: TimeInterval, issuedAt: Date, positionIsPaused: Bool = false,
+                                          shuffle: Bool? = nil, repeatMode: RepeatMode? = nil, what: String = "the station") {
         let before = snapshot?.track?.persistentID ?? snapshot?.track?.title
         stationSeek?.cancel()
         stationSeek = Task { [weak self] in
@@ -722,7 +741,8 @@ public final class Companion {
                 // more, and the phone seeks itself if the Mac is slow (17
                 // November 2026).
                 if track.title.compare(title, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
-                    let target = position + max(0, now().timeIntervalSince(issuedAt)) + 0.2
+                    // A paused phone isn't moving on: seek to where it stopped.
+                    let target = positionIsPaused ? position + 0.2 : position + max(0, now().timeIntervalSince(issuedAt)) + 0.2
                     if track.duration <= 0 || target < track.duration - 2 {
                         _ = await controller.seek(to: target)
                         recordHandBack("playStation: \(what) starts with the song; seek to \(Int(target)) s")
@@ -730,8 +750,13 @@ public final class Companion {
                 } else {
                     recordHandBack("playStation: \(what) starts with another song; no seek")
                 }
+                // Say so now rather than at the next poll, up to 2 s away: the
+                // phone checks the Mac's position soon after and seeks itself
+                // if it hasn't moved (soak test, 19 November 2026).
+                refresh()
                 if let shuffle { _ = await controller.setShuffle(shuffle) }
                 if let repeatMode { _ = await controller.setRepeat(repeatMode) }
+                refresh()
                 return
             }
         }

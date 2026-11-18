@@ -310,6 +310,43 @@ import StandByProtocol
         #expect(r.music.position < 75)
     }
 
+    @Test func aBurstOfCommandsIsConfirmedBeforeOneSettleRead() async throws {
+        let r = await rig()
+        r.companion.settleDelay = .milliseconds(400)
+        try? await Task.sleep(for: .milliseconds(450))   // the start-up read has settled
+        let before = r.music.scripts.filter { $0 == .snapshot }.count
+        let started = Date()
+        let ids = [await r.relay.simulateCommand(.next), await r.relay.simulateCommand(.next), await r.relay.simulateCommand(.pause)]
+        for id in ids { await eventually { await r.relay.ack(for: id) != nil } }
+        #expect(Date().timeIntervalSince(started) < 0.3, "no command waited behind a sleeping settle-read")
+        #expect(r.music.scripts.filter { $0 == .snapshot }.count == before, "no read has run yet")
+        try? await Task.sleep(for: .milliseconds(900))
+        let reads = r.music.scripts.filter { $0 == .snapshot }.count - before
+        #expect(reads == 1, "one read after the burst, not one per command (\(reads))")
+    }
+
+    @Test func aPausedPhonesPositionIsNotMovedOn() async throws {
+        let r = await rig(state: "paused")
+        let issued = Date().addingTimeInterval(-3)   // three seconds old: a playing phone would be 3 s further on
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 30, title: "Idontknow", positionIsPaused: true, issuedAt: issued))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(await eventually { r.music.position > 29 })
+        #expect(r.music.position < 31, "seeked to where the phone stopped, not three seconds past it (\(r.music.position))")
+    }
+
+    @Test func theMacSaysWhereItIsRightAfterItsOwnSeek() async throws {
+        let r = await rig(state: "paused")
+        await eventually { r.music.position < 20 }
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        // Polls are an hour apart in this rig, so only the Mac's own refresh can say it.
+        let said = await eventually {
+            let list = await self.states(r.relay)
+            return list.contains { (m: PlaybackMessage) in m.track?.title == "Idontknow" && m.elapsedTime > 60 }
+        }
+        #expect(said)
+    }
+
     @Test func aStationStartingWithAnotherSongIsLeftWhereItIs() async throws {
         let r = await rig(state: "paused")
         let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Some Other Song", issuedAt: Date()))

@@ -37,6 +37,15 @@ import Testing
         #expect(PlaylistPlace(name: "P", count: 2, index: 0, shuffled: true).isShuffled)
     }
 
+    @Test func playStationCarriesAPausedPositionOverTheWire() throws {
+        let command = RemoteCommand.playStation(seededBy: "1", position: 6.5, title: "Song", positionIsPaused: true,
+                                                issuedAt: Date(timeIntervalSince1970: 1_794_207_600))
+        let decoded = try StandByWire.makeDecoder().decode(RemoteCommand.self, from: try StandByWire.makeEncoder().encode(command))
+        #expect(decoded.positionIsPaused == true)
+        let plain = try StandByWire.makeEncoder().encode(RemoteCommand.playStation(seededBy: "1"))
+        #expect(!String(decoding: plain, as: UTF8.self).contains("positionIsPaused"))
+    }
+
     @Test func playStationCarriesThePlaylistOverTheWire() throws {
         let command = RemoteCommand.playStation(seededBy: "576670459", position: 61.5, title: "Song Forty", playlist: place,
                                                 issuedAt: Date(timeIntervalSince1970: 1_794_207_600))

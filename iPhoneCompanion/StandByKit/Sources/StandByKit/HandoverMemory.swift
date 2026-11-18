@@ -43,6 +43,11 @@ public struct HandoverMemory {
     /// minute (17 November 2026). Checked against Music's queue before use.
     public var loadPlaylist: @MainActor () -> PlaylistPlace?
     public var savePlaylist: @MainActor (PlaylistPlace?) -> Void
+    /// The library album Continue on iPhone last played here (19 November
+    /// 2026), for the same reason: a shuffled album an app queued is in no
+    /// recently played list, and the way back sent the library shuffled.
+    public var loadAlbum: @MainActor () -> AlbumPlace?
+    public var saveAlbum: @MainActor (AlbumPlace?) -> Void
     /// The setting "Automatically Add to Library", under Continue Listening (17 November 2026):
     /// Continue on Mac adds an Apple Music playlist or album that isn't in
     /// the library, so the Mac can play it. Off unless turned on: adding
@@ -58,6 +63,8 @@ public struct HandoverMemory {
     public init(load: @escaping @MainActor () -> HandoverMark?, save: @escaping @MainActor (HandoverMark?) -> Void,
                 loadPlaylist: @escaping @MainActor () -> PlaylistPlace? = { nil },
                 savePlaylist: @escaping @MainActor (PlaylistPlace?) -> Void = { _ in },
+                loadAlbum: @escaping @MainActor () -> AlbumPlace? = { nil },
+                saveAlbum: @escaping @MainActor (AlbumPlace?) -> Void = { _ in },
                 addsToLibrary: @escaping @MainActor () -> Bool = { false },
                 loadQueued: @escaping @MainActor () -> [String]? = { nil },
                 saveQueued: @escaping @MainActor ([String]?) -> Void = { _ in }) {
@@ -65,6 +72,8 @@ public struct HandoverMemory {
         self.save = save
         self.loadPlaylist = loadPlaylist
         self.savePlaylist = savePlaylist
+        self.loadAlbum = loadAlbum
+        self.saveAlbum = saveAlbum
         self.addsToLibrary = addsToLibrary
         self.loadQueued = loadQueued
         self.saveQueued = saveQueued
@@ -80,6 +89,7 @@ public struct HandoverMemory {
 
     static let key = "continueOnPhoneMark"
     static let playlistKey = "continueOnPhonePlaylist"
+    static let albumKey = "continueOnPhoneAlbum"
     static let queuedKey = "continueOnPhoneQueued"
 
     public static func defaults(_ defaults: UserDefaults) -> HandoverMemory {
@@ -95,6 +105,7 @@ public struct HandoverMemory {
         }
         return HandoverMemory(load: { load(HandoverMark.self, key) }, save: { save($0, key) },
                               loadPlaylist: { load(PlaylistPlace.self, playlistKey) }, savePlaylist: { save($0, playlistKey) },
+                              loadAlbum: { load(AlbumPlace.self, albumKey) }, saveAlbum: { save($0, albumKey) },
                               addsToLibrary: { defaults.object(forKey: addsToLibraryKey) as? Bool ?? false },
                               loadQueued: { load([String].self, queuedKey) }, saveQueued: { save($0, queuedKey) })
     }

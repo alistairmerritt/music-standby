@@ -327,7 +327,7 @@ enum HandoverProbe {
                     say("item: cloud \(item.isCloudItem), media type \(item.mediaType.rawValue), protected \(item.hasProtectedAsset), album track \(item.albumTrackNumber), count \(item.albumTrackCount), in library \(item.persistentID != 0)")
                 }
                 say("playlist: \(String(describing: await phone.playlistPlace(remembered: nil)))")
-                say("album: \(String(describing: await phone.albumPlace()))")
+                say("album: \(String(describing: await phone.albumPlace(remembered: nil)))")
                 say("Apple Music: \(String(describing: await phone.appleMusicSource()))")
                 say("library shuffled: \(await phone.isShufflingLibrary()); repeat \(String(describing: phone.repeatMode())); MediaPlayer repeat \(player.repeatMode.rawValue), MusicKit repeat \(String(describing: SystemMusicPlayer.shared.state.repeatMode))")
                 if let at = arguments.firstIndex(of: "-setRepeat"), arguments.count > at + 1 {
