@@ -113,7 +113,7 @@ enum HandoverProbe {
         let arguments = ProcessInfo.processInfo.arguments
         // Any probe, and -stayAwake: the phone doesn't auto-lock while it runs,
         // so a long test can go on launching it (19 November 2026).
-        if arguments.contains(where: { $0.hasSuffix("Probe") || $0.hasPrefix("-continueOn") || $0 == "-stayAwake" || $0 == "-phoneState" || $0 == "-phoneSkip" }) {
+        if arguments.contains(where: { $0.hasSuffix("Probe") || $0.hasPrefix("-continueOn") || $0 == "-stayAwake" || $0 == "-phoneState" || $0 == "-phoneSkip" || $0 == "-phoneShuffle" }) {
             UIApplication.shared.isIdleTimerDisabled = true
         }
         if arguments.contains("-phoneState") {
@@ -121,6 +121,14 @@ enum HandoverProbe {
             let player = MPMusicPlayerController.systemMusicPlayer
             let item = player.nowPlayingItem
             say("state|\(item?.title ?? "-")|\(item?.playbackStoreID ?? "-")|\(player.playbackState == .playing ? "playing" : "not playing")|\(String(format: "%.1f", player.currentPlaybackTime))|shuffle \(player.shuffleMode.rawValue)|repeat \(player.repeatMode.rawValue)|index \(player.indexOfNowPlayingItem)")
+            finish()
+            return
+        }
+        if let at = arguments.firstIndex(of: "-phoneShuffle"), arguments.count > at + 1 {
+            // Turns Apple Music's shuffle here on or off, as the Now Playing screen would.
+            let player = MPMusicPlayerController.systemMusicPlayer
+            player.shuffleMode = arguments[at + 1] == "on" ? .songs : .off
+            say("shuffle \(player.shuffleMode.rawValue)")
             finish()
             return
         }
