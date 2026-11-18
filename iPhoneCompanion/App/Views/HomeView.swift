@@ -158,7 +158,7 @@ struct HomeView: View {
         } footer: {
             // iOS shows a session only once the app has asked while open, so a
             // dismissed player stays hidden until the next launch re-requests it.
-            Text("If you dismiss the player, it stays hidden until you next open Second Chair.")
+            Text("If you dismiss the player on your Lock Screen, it will stay hidden until you next open Second Chair.")
         }
     }
 
