@@ -328,7 +328,9 @@ public final class Companion {
     public func handle(_ command: RemoteCommand) async -> CommandAck {
         await serial { [weak self] in
             guard let self else { return .rejected(command.id, revision: 0, ProtocolError(.internal)) }
+            if command.kind == .next || command.kind == .previous { await spaceSkips() }
             let (ack, performed) = await apply(command)
+            if performed, command.kind == .next || command.kind == .previous { lastSkipAt = ContinuousClock.now }
             await send(.ack(ack))
             if performed { scheduleSettleRead() }
             return ack
@@ -427,6 +429,21 @@ public final class Companion {
         acks[ack.commandID] = ack
         ackOrder.append(ack.commandID)
         if ackOrder.count > 64 { acks[ackOrder.removeFirst()] = nil }
+    }
+
+    /// Music ignores a skip that comes while the last one is still loading
+    /// its song: two `next track` back to back advance once (19 November
+    /// 2026, on this Mac with a streamed album; 0.6 s apart both land). The
+    /// settle-read sat between commands once and spaced them by accident;
+    /// since it left the chain (0.3.4) the phone's "next, next, seek, play"
+    /// lost its second skip. Skips are now spaced on purpose.
+    @ObservationIgnored public var skipSpacing: Duration = .milliseconds(650)
+    @ObservationIgnored private var lastSkipAt: ContinuousClock.Instant?
+
+    private func spaceSkips() async {
+        guard let last = lastSkipAt else { return }
+        let wait = skipSpacing - (ContinuousClock.now - last)
+        if wait > .zero { try? await Task.sleep(for: wait) }
     }
 
     @ObservationIgnored private var settleSleeper: Task<Void, Never>?
