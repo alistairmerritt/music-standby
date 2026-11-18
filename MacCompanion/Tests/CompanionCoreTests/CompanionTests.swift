@@ -25,6 +25,7 @@ import StandByProtocol
                                   transport: relay, store: CompanionStore(defaults: defaults), device: Self.device,
                                   artworkLookup: artworkLookup, now: now, isMusicLaunching: { false })
         companion.settleDelay = .zero
+        companion.skipSpacing = .zero
         companion.artworkSettle = 0
         for state in PlaybackState.allCases { companion.monitor.pollIntervals[state] = .seconds(3600) }
         companion.remote = remote
@@ -323,6 +324,21 @@ import StandByProtocol
         try? await Task.sleep(for: .milliseconds(900))
         let reads = r.music.scripts.filter { $0 == .snapshot }.count - before
         #expect(reads == 1, "one read after the burst, not one per command (\(reads))")
+    }
+
+    @Test func skipsAreSpacedSoMusicDoesntDropOne() async throws {
+        let r = await rig()
+        r.companion.skipSpacing = .milliseconds(400)
+        let first = await r.relay.simulateCommand(.next)
+        await eventually { await r.relay.ack(for: first) != nil }
+        let started = Date()
+        let second = await r.relay.simulateCommand(.next)
+        await eventually { await r.relay.ack(for: second) != nil }
+        #expect(Date().timeIntervalSince(started) >= 0.3, "the second skip waited for the first to settle")
+        let pause = await r.relay.simulateCommand(.pause)
+        let before = Date()
+        await eventually { await r.relay.ack(for: pause) != nil }
+        #expect(Date().timeIntervalSince(before) < 0.3, "only skips are spaced")
     }
 
     @Test func aPausedPhonesPositionIsNotMovedOn() async throws {
