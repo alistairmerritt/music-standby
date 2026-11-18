@@ -217,6 +217,9 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
     - `shuffledLibrary`: the phone shuffles its whole library (a guess). The Mac plays the
       song, then shuffles its library.
     - `repeatMode` (`off`, `one`, `all`): Music's repeat once the song plays.
+    - `positionIsPaused` (19 November 2026): the phone was paused at `position`, so the Mac
+      seeks to exactly `position` instead of adding the time since `issuedAt`. An older Mac
+      ignores it.
     - `addedToLibrary` on `playlist` or `album`: the phone has just added that Apple Music
       playlist or album to the library (the iPhone setting Automatically Add to Library,
       off by default). The Mac acks at once, then looks for it every 2 s for up to 25 s after

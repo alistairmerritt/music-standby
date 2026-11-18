@@ -104,6 +104,27 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.repeatsSet == [.all])
     }
 
+    @Test func theAlbumContinueOnIPhoneStartedIsRemembered() async throws {
+        let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 10, index: 2, shuffled: true)
+        var m = playingFromAA()
+        m.playlist = nil
+        m.album = album
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsAlbum = album
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(HandoverMemory.defaults(h.defaults).loadAlbum() == album, "kept for the way back")
+        // Anything else Continue on iPhone does forgets it.
+        let (h2, task2) = await ready(playingFromAA())
+        defer { task2.cancel() }
+        HandoverMemory.defaults(h2.defaults).saveAlbum(album)
+        let other = FakePhoneMusic()
+        other.playsPlaylist = aaHere
+        #expect(await h2.model.continueOnPhone(with: other) == .continued)
+        #expect(HandoverMemory.defaults(h2.defaults).loadAlbum() == nil)
+    }
+
     @Test func theMacsAlbumPlaysHere() async {
         let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 10, index: 2)
         var m = playingFromAA()
@@ -209,9 +230,11 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         return phone
     }
 
-    private func handBack(_ relay: FakeRelay, _ phone: FakePhoneMusic, remembering: PlaylistPlace? = nil) async throws -> SendBackOutcome {
+    private func handBack(_ relay: FakeRelay, _ phone: FakePhoneMusic, remembering: PlaylistPlace? = nil,
+                          rememberingAlbum: AlbumPlace? = nil) async throws -> SendBackOutcome {
         let clock = MutableClock()
-        let memory = HandoverMemory(load: { nil }, save: { _ in }, loadPlaylist: { remembering }, savePlaylist: { _ in })
+        let memory = HandoverMemory(load: { nil }, save: { _ in }, loadPlaylist: { remembering }, savePlaylist: { _ in },
+                                    loadAlbum: { rememberingAlbum })
         let remote = MacRemote(client: relay, now: { clock.now }, sleep: { clock.advance($0) }, memory: memory)
         try await remote.read()
         return await remote.handover().sendBackToMac(with: phone)
@@ -282,6 +305,30 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(sent.map(\.kind) == [.playStation])
         #expect(sent.first?.album == Self.album)
         #expect(sent.first?.playlist == nil)
+    }
+
+    @Test func theRememberedAlbumIsOfferedOnTheWayBack() async throws {
+        let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 10, index: 2, shuffled: true)
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let back = phone("270246724", playlist: nil)
+        back.albumHere = album
+        #expect(try await handBack(relay, back, rememberingAlbum: album) == .sentBack)
+        #expect(back.rememberedAlbums == [album], "the remembered album is offered")
+    }
+
+    @Test func aPausedPhoneSaysItsPositionIsntMovingOn() async throws {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setNext(macPlays("270246724"))
+        let paused = phone("270246724", playlist: nil)
+        paused.current?.isPlaying = false
+        #expect(try await handBack(relay, paused) == .sentBack)
+        #expect(await relay.sent.map(\.command).first?.positionIsPaused == true)
+
+        let relay2 = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay2.setNext(macPlays("270246724"))
+        #expect(try await handBack(relay2, phone("270246724", playlist: nil)) == .sentBack)
+        #expect(await relay2.sent.map(\.command).first?.positionIsPaused == nil, "a playing phone leaves it out")
     }
 
     @Test func aPlaylistMeansTheAlbumIsntLookedUp() async throws {

@@ -387,6 +387,7 @@ describe("commands", () => {
       { station: { id: "ra.985484166", name: "Made-Up Radio" }, repeatMode: "all" },
       { shuffledLibrary: true, repeatMode: "one" },
       { playlist: { name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5, addedToLibrary: true } },
+      { positionIsPaused: true },
     ];
     for (const [n, extra] of commands.entries()) {
       const id = newCommandID();

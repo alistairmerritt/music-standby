@@ -134,6 +134,8 @@ export interface RemoteCommand {
   shuffledLibrary?: boolean;
   /** For `playStation`, added 17 November 2026: the phone's repeat. Passed through. */
   repeatMode?: string;
+  /** For `playStation`, added 19 November 2026: the phone was paused at `position`, so the Mac seeks exactly there. Passed through. */
+  positionIsPaused?: boolean;
 }
 
 export interface CommandAck {

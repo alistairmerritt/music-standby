@@ -43,8 +43,11 @@ public protocol PhoneMusicPlaying: AnyObject {
               timeout: TimeInterval) async -> PlaylistPlace?
     /// The library album Apple Music here plays its current song from, and
     /// the song's place in it by disc, then track: for Continue on Mac when
-    /// the song isn't from a playlist. Nil when it can't be told.
-    func albumPlace() async -> AlbumPlace?
+    /// the song isn't from a playlist. Shuffled, it's accepted when it's
+    /// `remembered` (the album Continue on iPhone last started here; Apple
+    /// Music never lists one an app queued) or the album recently played
+    /// names. Nil when it can't be told.
+    func albumPlace(remembered: AlbumPlace?) async -> AlbumPlace?
 
     // MARK: Added 17 November 2026
 
@@ -100,7 +103,7 @@ extension PhoneMusicPlaying {
     public func isShufflingLibrary() async -> Bool { false }
     public func repeatMode() -> RepeatMode? { nil }
     public func setRepeat(_ mode: RepeatMode) {}
-    public func albumPlace() async -> AlbumPlace? { nil }
+    public func albumPlace(remembered: AlbumPlace?) async -> AlbumPlace? { nil }
     public func playlistPlace(remembered: PlaylistPlace?) async -> PlaylistPlace? { nil }
     public func play(_ catalogID: String, in place: PlaylistPlace, position: @escaping @MainActor () -> TimeInterval,
                      timeout: TimeInterval) async -> PlaylistPlace? { nil }

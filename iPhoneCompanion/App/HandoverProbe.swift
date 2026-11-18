@@ -111,6 +111,41 @@ enum HandoverProbe {
     /// 1), through MusicKit's system player.
     static func runQueueProbesIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
+        // Any probe, and -stayAwake: the phone doesn't auto-lock while it runs,
+        // so a long test can go on launching it (19 November 2026).
+        if arguments.contains(where: { $0.hasSuffix("Probe") || $0.hasPrefix("-continueOn") || $0 == "-stayAwake" || $0 == "-phoneState" || $0 == "-phoneSkip" || $0 == "-phoneShuffle" }) {
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        if arguments.contains("-phoneState") {
+            // One line: song, store ID, playing, position, shuffle, repeat, queue index.
+            let player = MPMusicPlayerController.systemMusicPlayer
+            let item = player.nowPlayingItem
+            say("state|\(item?.title ?? "-")|\(item?.playbackStoreID ?? "-")|\(player.playbackState == .playing ? "playing" : "not playing")|\(String(format: "%.1f", player.currentPlaybackTime))|shuffle \(player.shuffleMode.rawValue)|repeat \(player.repeatMode.rawValue)|index \(player.indexOfNowPlayingItem)")
+            finish()
+            return
+        }
+        if let at = arguments.firstIndex(of: "-phoneShuffle"), arguments.count > at + 1 {
+            // Turns Apple Music's shuffle here on or off, as the Now Playing screen would.
+            let player = MPMusicPlayerController.systemMusicPlayer
+            player.shuffleMode = arguments[at + 1] == "on" ? .songs : .off
+            say("shuffle \(player.shuffleMode.rawValue)")
+            finish()
+            return
+        }
+        if let at = arguments.firstIndex(of: "-phoneSkip"), arguments.count > at + 1, let count = Int(arguments[at + 1]) {
+            // Skips Apple Music here on by COUNT songs, as listening on would.
+            Task {
+                let player = MPMusicPlayerController.systemMusicPlayer
+                for _ in 0..<count {
+                    player.skipToNextItem()
+                    try? await Task.sleep(for: .milliseconds(800))
+                }
+                try? await Task.sleep(for: .seconds(1))
+                say("skipped \(count): \(describe(player.nowPlayingItem)), \(player.playbackState == .playing ? "playing" : "not playing")")
+                finish()
+            }
+            return
+        }
         if arguments.contains("-libraryShuffleProbe") {
             Task {
                 let player = MPMusicPlayerController.systemMusicPlayer
@@ -300,7 +335,7 @@ enum HandoverProbe {
                     say("item: cloud \(item.isCloudItem), media type \(item.mediaType.rawValue), protected \(item.hasProtectedAsset), album track \(item.albumTrackNumber), count \(item.albumTrackCount), in library \(item.persistentID != 0)")
                 }
                 say("playlist: \(String(describing: await phone.playlistPlace(remembered: nil)))")
-                say("album: \(String(describing: await phone.albumPlace()))")
+                say("album: \(String(describing: await phone.albumPlace(remembered: nil)))")
                 say("Apple Music: \(String(describing: await phone.appleMusicSource()))")
                 say("library shuffled: \(await phone.isShufflingLibrary()); repeat \(String(describing: phone.repeatMode())); MediaPlayer repeat \(player.repeatMode.rawValue), MusicKit repeat \(String(describing: SystemMusicPlayer.shared.state.repeatMode))")
                 if let at = arguments.firstIndex(of: "-setRepeat"), arguments.count > at + 1 {

@@ -49,8 +49,10 @@ final class FakePhoneMusic: PhoneMusicPlaying {
     /// What `albumPlace()` finds here, and how often it was asked.
     var albumHere: AlbumPlace?
     private(set) var albumAsks = 0
-    func albumPlace() async -> AlbumPlace? {
+    private(set) var rememberedAlbums: [AlbumPlace?] = []
+    func albumPlace(remembered place: AlbumPlace?) async -> AlbumPlace? {
         albumAsks += 1
+        rememberedAlbums.append(place)
         return albumHere
     }
     /// What `play(_:in:…)` plays: nil when the playlist isn't here.

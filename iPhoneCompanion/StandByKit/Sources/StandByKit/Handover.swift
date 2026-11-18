@@ -75,6 +75,7 @@ public struct Handover {
         if let place = message.playlist, place.isValid {
             if let played = await player.play(catalogID, in: place, position: position, timeout: wait) {
                 memory.savePlaylist(played)
+                memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's playlist plays here, from song \(played.index + 1) of \(played.count)\(played.isShuffled ? ", shuffled" : "")")
                 return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
                                               from: "the playlist", repeatMode: message.repeatMode, with: player)
@@ -83,6 +84,7 @@ public struct Handover {
         } else if let album = message.album, album.isValid {
             if let played = await player.play(catalogID, inAlbum: album, position: position, timeout: wait) {
                 memory.savePlaylist(nil)
+                memory.saveAlbum(played)
                 record("Continue on iPhone: the Mac's album plays here, from song \(played.index + 1) of \(played.count)\(played.isShuffled ? ", shuffled" : "")")
                 return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
                                               from: "the album", repeatMode: message.repeatMode, with: player)
@@ -91,6 +93,7 @@ public struct Handover {
         } else if message.shuffledLibrary == true {
             if await player.playShuffledLibrary(from: catalogID, position: position, timeout: wait) {
                 memory.savePlaylist(nil)
+                memory.saveAlbum(nil)
                 record("Continue on iPhone: the song plays here, then the library shuffled")
                 return await finishContinuing(catalogID, songsAfter: Self.stationBelow, from: "the library", repeatMode: message.repeatMode,
                                               with: player)
@@ -106,16 +109,19 @@ public struct Handover {
                                                    shuffled: message.shuffled == true, allowStation: allowStation) {
             case .playlist(let played)?:
                 memory.savePlaylist(nil)
+                memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's Apple Music playlist plays here, from song \(played.index + 1) of \(played.count)")
                 return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
                                               from: "the playlist", repeatMode: message.repeatMode, with: player)
             case .album(let played, _)?:
                 memory.savePlaylist(nil)
+                memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's Apple Music album plays here, from song \(played.index + 1) of \(played.count)")
                 return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
                                               from: "the album", repeatMode: message.repeatMode, with: player)
             case .station?:
                 memory.savePlaylist(nil)
+                memory.saveAlbum(nil)
                 record("Continue on iPhone: the song plays here, then the Mac's station")
                 return await finishContinuing(catalogID, songsAfter: Self.stationBelow, from: "the station", repeatMode: nil, with: player)
             case nil:
@@ -123,6 +129,7 @@ public struct Handover {
             }
         }
         memory.savePlaylist(nil)
+        memory.saveAlbum(nil)
         let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
         let started = await player.play(catalogIDs: queue, position: position, timeout: timeout)
         guard started else {
@@ -259,7 +266,7 @@ public struct Handover {
         let fromMacUpNext = memory.loadQueued()?.contains(catalogID) == true
         var place = fromMacUpNext ? nil : await player.playlistPlace(remembered: memory.loadPlaylist())
         // Not from a playlist: perhaps an album (17 November 2026).
-        var album = place == nil && !fromMacUpNext ? await player.albumPlace() : nil
+        var album = place == nil && !fromMacUpNext ? await player.albumPlace(remembered: memory.loadAlbum()) : nil
         // Neither in the library: Apple Music's own, or the library shuffled.
         let lookFurther = place == nil && album == nil && !fromMacUpNext
         let appleMusic = lookFurther ? await player.appleMusicSource() : nil
@@ -375,10 +382,15 @@ public struct Handover {
         let before = latest()
         // Where the phone is and the song's title, so the Mac can seek itself
         // the moment Music starts the song (16 November 2026).
-        let position = player.nowPlaying()?.position ?? here.position
+        let nowPlaying = player.nowPlaying()
+        let position = nowPlaying?.position ?? here.position
+        // A paused phone isn't moving on, so the Mac mustn't add the time
+        // since `issuedAt` (it overshot to 10 s instead of 6.5 s in the 19
+        // November 2026 soak test).
+        let paused = (nowPlaying?.isPlaying ?? here.isPlaying) == false
         guard await step(.playStation(seededBy: catalogID, position: position, title: here.title, playlist: playlist, album: album,
                                       station: station, shuffledLibrary: shuffledLibrary, repeatMode: repeatMode,
-                                      issuedAt: now())) else {
+                                      positionIsPaused: paused ? true : nil, issuedAt: now())) else {
             return .macRefused
         }
         let deadline = now().addingTimeInterval(timeout)
@@ -414,9 +426,10 @@ public struct Handover {
             guard let mac = latest() else { return nil }
             return abs(mac.elapsed(at: now()) - (player.nowPlaying()?.position ?? here.position))
         }
-        for attempt in 0..<4 {
+        // Six looks, 3 s: the Mac now says where it is straight after its seek.
+        for attempt in 0..<6 {
             if let gap = gap(), gap <= Self.seekTolerance { return }
-            if attempt < 3 {
+            if attempt < 5 {
                 try? await sleep(0.5)
                 await refresh()
             }
