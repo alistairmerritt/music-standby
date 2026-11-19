@@ -33,8 +33,12 @@ struct ContinueOnIPhoneIntent: AppIntent {
             try await continueInForeground("Second Chair needs to ask for access to Apple Music first.", alwaysConfirm: false)
         }
         let player = SystemMusicPhonePlayer()
+        // Whether the Mac was connected when the action read its state. An
+        // offline Mac can leave no song to continue, which is not the song's
+        // fault (20 November 2026, a CarPlay automation with the Mac asleep).
+        var macConnected = true
         var outcome = try await ShortcutRemote.run { remote in
-            try await remote.read()
+            macConnected = try await remote.read().macConnected
             return await remote.handover(record: Self.log).continueOnPhone(with: player, timeout: canOpen ? 6 : 10)
         }
         if outcome == .didNotStart, canOpen {
@@ -52,6 +56,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
         // with a CarPlay automation: carry on with what the phone has.
         case .resumedHere: dialog = "Continuing where your iPhone left off."
         case .alreadyPlayingHere: dialog = "Already playing on your iPhone."
+        case .unavailable where !macConnected: throw ShortcutError(ShortcutError.notConnected)
         case .unavailable: throw ShortcutError("Nothing on your Mac can be continued here. The song has to be in Apple Music.")
         case .notAllowed: throw ShortcutError("Allow access to Apple Music in Settings to continue listening on your iPhone.")
         case .didNotStart: throw ShortcutError("Couldn’t start playback on your iPhone. Music is still playing on your Mac.")
