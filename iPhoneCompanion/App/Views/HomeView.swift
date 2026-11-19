@@ -155,10 +155,6 @@ struct HomeView: View {
             }
         } header: {
             Text("Lock Screen and StandBy")
-        } footer: {
-            // iOS shows a session only once the app has asked while open, so a
-            // dismissed player stays hidden until the next launch re-requests it.
-            Text("If you dismiss the player on your Lock Screen, it will stay hidden until you next open Second Chair.")
         }
     }
 
@@ -170,7 +166,7 @@ struct HomeView: View {
             ))
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Get a silent reminder when your Mac starts playing again after a break. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
+                Text("When your Mac starts playing again after a break, Second Chair brings the player back to your Lock Screen and StandBy and sends a silent reminder. If the player doesn’t appear, tap the reminder.")
                 if let problem = reminders.problem {
                     Text(problem).foregroundStyle(.red)
                 }
