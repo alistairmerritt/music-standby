@@ -89,6 +89,8 @@ public final class Companion {
 
     @ObservationIgnored private let store: CompanionStore
     @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored private var errorHold = ReadErrorHold()
+    @ObservationIgnored private var holdingErrors = false
     @ObservationIgnored private var publisher: PlaybackPublisher
     @ObservationIgnored private var artworkByTrack: [String: ArtworkEntry] = [:]
     /// The track whose artwork is being shown, and since when.
@@ -481,6 +483,14 @@ public final class Companion {
         if trigger == .launch || trigger == .terminate {
             record("Music \(trigger == .launch ? "launched" : "quit") (NSWorkspace)")
         }
+        // A slow Music, as when it starts a streamed song, can fail a few
+        // reads in a row. Keep the last good one for a short while instead.
+        if errorHold.holds(snapshot, lastGood: self.snapshot) {
+            if !holdingErrors { record("held a failed read: \(snapshot.detail ?? "no detail") [\(trigger.rawValue)]") }
+            holdingErrors = true
+            return
+        }
+        holdingErrors = false
         if self.snapshot?.state != snapshot.state || self.snapshot?.track != snapshot.track {
             record("music \(snapshot.state.rawValue)\(snapshot.track.map { ": \($0.title) — \($0.artist)" } ?? "") [\(trigger.rawValue)]")
         }
