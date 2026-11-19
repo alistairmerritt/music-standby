@@ -671,3 +671,33 @@ struct Harness {
         #expect(await h.transport.connectCount == 0)
     }
 }
+
+// MARK: - Show in Now Playing from the background (19 November 2026)
+
+@MainActor
+@Suite struct BackgroundShowTests {
+    @Test func showsThePlayerOnceTheMacsSongArrives() async {
+        let h = Harness()
+        let task = Task { await h.model.activateNowPlaying(waitingForTheMacFor: .seconds(3)) }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        #expect(await task.value == true)
+        #expect(h.controller.isActive)
+    }
+
+    @Test func givesUpWhenNoSongArrivesSoTheActionCanOpenTheApp() async {
+        let h = Harness()
+        #expect(await h.model.activateNowPlaying(waitingForTheMacFor: .milliseconds(200)) == false)
+        #expect(!h.controller.isActive)
+    }
+
+    @Test func withTheAppOpenAndASongAlreadyHereItShowsAtOnce() async {
+        let h = Harness()
+        let loop = await h.run()
+        defer { loop.cancel() }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        await eventually("song seen") { h.model.attributes?.track != nil }
+        #expect(await h.model.activateNowPlaying(waitingForTheMacFor: .seconds(3)) == true)
+    }
+}
