@@ -106,7 +106,8 @@ public struct Handover {
             let settled = message.appleMusicSince.map { now().timeIntervalSince($0) >= Self.recentlyPlayedLag } ?? true
             let allowStation = (message.upNext?.count ?? 0) <= 1 && settled
             switch await player.playFromAppleMusic(catalogID, position: position, timeout: wait + Self.recentlyPlayedAllowance,
-                                                   shuffled: message.shuffled == true, allowStation: allowStation) {
+                                                   shuffled: message.shuffled == true, allowStation: allowStation,
+                                                   following: (message.upNext ?? []).compactMap(\.catalogID)) {
             case .playlist(let played)?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)

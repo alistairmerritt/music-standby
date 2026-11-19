@@ -79,10 +79,10 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         return playsLibrary
     }
     var playsFromAppleMusic: AppleMusicSource?
-    private(set) var appleMusicAsked: [(id: String, shuffled: Bool, allowStation: Bool)] = []
+    private(set) var appleMusicAsked: [(id: String, shuffled: Bool, allowStation: Bool, following: [String])] = []
     func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool) async -> AppleMusicSource? {
-        appleMusicAsked.append((catalogID, shuffled, allowStation))
+                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? {
+        appleMusicAsked.append((catalogID, shuffled, allowStation, following))
         return playsFromAppleMusic
     }
     var appleMusicHere: AppleMusicSource?
