@@ -47,7 +47,7 @@ export interface AlertPush {
       category?: string;
       "interruption-level": "time-sensitive";
       "relevance-score": number;
-      /** Also wakes the app in the background (the reminder: EXPERIMENT, 19 November 2026). */
+      /** Also wakes the app in the background (the reminder). */
       "content-available"?: 1;
     };
     /** Continue from iPhone's notification (API-v1 §14). */
@@ -115,7 +115,7 @@ export function makeReminder(token: string, macName: string): AlertPush {
         "thread-id": REMINDER_ID,
         "interruption-level": "time-sensitive",
         "relevance-score": 1,
-        // EXPERIMENT: wakes the app too, so it can show the player without a tap.
+        // Wakes the app too, so it can show the player without a tap.
         "content-available": 1,
       },
     },
