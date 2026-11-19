@@ -195,6 +195,46 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   answers `invalid_request` when one is missing. `playback.volume` and `playback.outputs` in
   `GET /v1/session`, and `attributes.volume` in pushes, carry the results. All optional, so an
   older Mac or relay leaves them out.
+- **Playlists (17 November 2026).** `playStation` may carry `playlist`, a `PlaylistPlace`
+  (`name`, `count`, `index` from 0, and optionally `cloudID` and `shuffled`): the library
+  playlist the phone plays the song from. A Mac connected to Music plays that playlist from
+  the song instead of the station, and shuffles the rest when `shuffled`; without the
+  playlist it plays the station, as an older Mac does. The Mac's `playback.playlist` in
+  `GET /v1/session` names the playlist its song plays from when Up Next is the rest of it in
+  order, so Continue on iPhone plays the playlist rather than 25 of its songs. Both pass
+  through the relay untouched, and `playlist` is never pushed.
+- **Albums (17 November 2026).** Without a `playlist`, `playStation` may carry `album`, an
+  `AlbumPlace` (`title`, `count`, `index` from 0 by disc then track, and optionally `artist` and
+  `shuffled`): the library album the phone plays the song from. A Mac connected to Music that
+  has the song plays the album on from it in album order (Music's remote protocol `cue`), with
+  Music's shuffle off, since shuffling there draws from the whole library; otherwise the
+  station. Passed through untouched.
+- **Every source (17 November 2026, Mac 0.3.3).** All optional and passed through untouched;
+  none is ever pushed.
+  - `playStation` may also carry:
+    - `station` (`id` `ra.…`, `name`): the phone's Apple Music station, which the Mac plays
+      instead of the song's. It starts on a song Apple chooses.
+    - `shuffledLibrary`: the phone shuffles its whole library (a guess). The Mac plays the
+      song, then shuffles its library.
+    - `repeatMode` (`off`, `one`, `all`): Music's repeat once the song plays.
+    - `positionIsPaused` (19 November 2026): the phone was paused at `position`, so the Mac
+      seeks to exactly `position` instead of adding the time since `issuedAt`. An older Mac
+      ignores it.
+    - `addedToLibrary` on `playlist` or `album`: the phone has just added that Apple Music
+      playlist or album to the library (the iPhone setting Automatically Add to Library,
+      off by default). The Mac acks at once, then looks for it every 2 s for up to 25 s after
+      `issuedAt`, then plays the station.
+  - `playback` may also carry:
+    - `album` (an `AlbumPlace`, maybe `shuffled`);
+    - `playlist.shuffled`;
+    - `shuffledLibrary`;
+    - `fromAppleMusic`: Up Next comes from outside the library, so the phone looks in Apple
+      Music's recently played, with `shuffled` for Music's shuffle and `appleMusicSince` for
+      when that began. Recently played took 25–40 s to list a station the Mac had started, so
+      the phone takes no station from it for the first minute.
+    - `repeatMode`.
+  - The Mac reads these again every 15 s while a song plays, and sends a state when shuffle,
+    repeat or the source changed.
 - **`sessionID` names the session the command came from.** One that names a session must name
   the current one (`409 no_session` or `session_mismatch` otherwise), so a stale Lock Screen
   can't act on a newer session; the extension always sends it. Since 16 November 2026 it may be
@@ -253,10 +293,12 @@ Idempotency-Key: 5C1F7A9E-2B4D-4C61-8E3F-0A9B8C7D6E5F
   isn't current is refused with `409 session_mismatch`.
 - **Reminders (opt-in).** `PUT /v1/tokens/alert` stores the app's ordinary APNs device token,
   and `DELETE` removes it. While it's stored, the relay sends an alert push when the Mac starts
-  playing after at least `REMIND_AFTER_MS` (default 30 minutes) not playing, or when it starts a
-  new session. iOS shows a session only once the app has asked while open, so a dismissed player
-  stays hidden until the app is opened; nothing tells the relay whether it is showing, so the
-  reminder goes out blind. Headers: `apns-push-type: alert`, `apns-topic:
+  playing after at least `REMIND_AFTER_MS` (default 8 minutes; 30 before 17 November 2026) not
+  playing, or when it starts a new session. iOS shows a session only once the app has asked while
+  open, so a dismissed player stays hidden until the app is opened. And once the Mac has been
+  paused about 7–8 minutes, iOS gives StandBy and the Lock Screen to the phone's own Apple Music,
+  which only opening the app undoes, so the default matches that. Nothing tells the relay
+  whether the player is showing, so the reminder goes out blind. Headers: `apns-push-type: alert`, `apns-topic:
   com.alistairmerritt.MusicStandBy`, `apns-collapse-id: mac-playing` (each replaces the last),
   `apns-expiration: <now + 10 min>`. Body, with no sound:
   `{"aps": {"alert": {"title": "Music playing on <Mac name>", "body": "Tap to show on your Lock Screen."}, "thread-id": "mac-playing", "interruption-level": "time-sensitive", "relevance-score": 1}}`.

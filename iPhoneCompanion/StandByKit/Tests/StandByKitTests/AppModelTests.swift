@@ -70,7 +70,7 @@ final class FakeSessionController: RemoteSessionControlling {
     private(set) var deactivations = 0
     private(set) var primaryRequests = 0
 
-    func activate(with attributes: MacPlaybackAttributes) async {
+    func activate(with attributes: MacPlaybackAttributes, requestingPrimary: Bool) async {
         activations.append(attributes)
         if failActivation {
             lastError = "activation failed"
@@ -79,7 +79,7 @@ final class FakeSessionController: RemoteSessionControlling {
         isActive = true
         sessionID = attributes.id
         lastError = nil
-        primaryRequests += 1
+        if requestingPrimary { primaryRequests += 1 }
     }
 
     func publish(_ attributes: MacPlaybackAttributes) async {
@@ -621,6 +621,39 @@ struct Harness {
         #expect(h.controller.primaryRequests == before + 1)
     }
 
+    /// 17 November 2026: after Continue on iPhone, opening Second Chair put
+    /// the Mac's paused song in Control Centre over the phone's music.
+    @Test func foregroundLeavesThePrimarySlotToThePhonesMusicWhileTheMacIsPaused() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.play()
+        await h.transport.emit(.playback(message(revision: 2, state: .paused)))
+        await eventually("paused") { h.model.attributes?.isPlaying == false }
+        var phonePlays = true
+        h.model.phonePlaysMusic = { phonePlays }
+        let before = h.controller.primaryRequests
+        await h.model.sceneDidBecomeActive()
+        #expect(h.controller.primaryRequests == before, "the phone's music keeps it")
+        #expect(h.controller.isActive, "the session stays, and still updates")
+        phonePlays = false
+        await h.model.sceneDidBecomeActive()
+        #expect(h.controller.primaryRequests == before + 1, "a paused phone: Second Chair asks, as before")
+    }
+
+    @Test func foregroundStillAsksWhileTheMacPlaysToo() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.play()
+        h.model.phonePlaysMusic = { true }
+        let before = h.controller.primaryRequests
+        await h.model.sceneDidBecomeActive()
+        #expect(h.controller.primaryRequests == before + 1)
+    }
+
     @Test func coldLaunchWithNowPlayingEnabledActivates() async {
         let h = Harness(nowPlayingEnabled: true)
         let task = await h.run()
@@ -636,5 +669,35 @@ struct Harness {
         let task = await h.run()
         defer { task.cancel() }
         #expect(await h.transport.connectCount == 0)
+    }
+}
+
+// MARK: - Show in Now Playing from the background (19 November 2026)
+
+@MainActor
+@Suite struct BackgroundShowTests {
+    @Test func showsThePlayerOnceTheMacsSongArrives() async {
+        let h = Harness()
+        let task = Task { await h.model.activateNowPlaying(waitingForTheMacFor: .seconds(3)) }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        #expect(await task.value == true)
+        #expect(h.controller.isActive)
+    }
+
+    @Test func givesUpWhenNoSongArrivesSoTheActionCanOpenTheApp() async {
+        let h = Harness()
+        #expect(await h.model.activateNowPlaying(waitingForTheMacFor: .milliseconds(200)) == false)
+        #expect(!h.controller.isActive)
+    }
+
+    @Test func withTheAppOpenAndASongAlreadyHereItShowsAtOnce() async {
+        let h = Harness()
+        let loop = await h.run()
+        defer { loop.cancel() }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        await eventually("song seen") { h.model.attributes?.track != nil }
+        #expect(await h.model.activateNowPlaying(waitingForTheMacFor: .seconds(3)) == true)
     }
 }

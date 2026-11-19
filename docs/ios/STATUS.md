@@ -1,10 +1,55 @@
 # iOS status
 
-Last updated 15 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
+Last updated 17 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
 
 **Renamed to Second Chair on 11 November 2026.** Only the names people see changed (Home Screen, screens, notifications); bundle identifiers, App IDs, the push topic and the Keychain group keep `MusicStandBy`. Entries below that predate the rename use the old name.
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
+
+## Every source carries over (17 November 2026, Mac 0.3.3)
+
+Continue Listening carries what the music plays from, not just the song.
+
+**Continue on iPhone**, besides a library playlist in order:
+- a shuffled library playlist (shuffled here once the song plays);
+- a library album, in order or shuffled;
+- the whole library shuffled;
+- an Apple Music playlist, album or station outside the library:
+  - found in Apple Music's recently played, which is account-wide;
+  - a playlist or album only when it has the song;
+  - a station only when the Mac lists one song ahead and has played from Apple Music for a minute;
+  - for a station, the song plays here, then the Mac's station;
+- repeat.
+
+**Continue on Mac**, besides a library playlist:
+- a library album, in order (Music can't shuffle within one);
+- an Apple Music playlist or album, added to the library first, only with the setting **Automatically Add to Library**, under Continue Listening (off by default, so adding never changes the library unasked). The Mac waits up to 25 s for it to arrive.
+- the phone's station, which starts on another song on the Mac;
+- the whole library shuffled (a guess: the phone shuffles a library song from no playlist or album it can find);
+- repeat.
+
+A song that Continue on iPhone queued from the Mac's Up Next is never taken for a playlist, album or station: recently played once named an old station for one.
+
+**Seen on this iPhone and Mac on 17 November 2026,** muted throughout:
+- album, Mac to iPhone, from song 3 of 10;
+- library shuffle, Mac to iPhone;
+- repeat;
+- shuffled playlist, Mac to iPhone, then the round trip back;
+- station, Mac to iPhone: the song, then the Mac's own station, once recently played listed it after 25–40 s;
+- library shuffle, iPhone to Mac;
+- station, iPhone to Mac.
+
+**Apple facts learned:**
+- **Music, read over DACP:**
+  - a cue'd album plays from Music's "Music" list (`aePS` 6), not the library's container 62;
+  - `cue` resets repeat to off;
+  - shuffle and repeat read back late after a set.
+- **iPhone, MediaPlayer and MusicKit:**
+  - MediaPlayer's `repeatMode` is right where MusicKit's `state.repeatMode` isn't;
+  - a station and a library song look alike to both MediaPlayer and MusicKit, apart from shuffle;
+  - `prepareToPlay` takes 0.2–2.2 s, while the library lookups take about 30 ms.
+
+**Not tried on a device:** Continue on Mac adding a new Apple Music playlist to the library. It would change the library. The add itself took 5.4 s on 17 November, and the Mac saw the playlist 4.3 s later.
 
 ## Continue on iPhone for songs the Mac can't find (16 November 2026)
 
@@ -185,6 +230,13 @@ Every control in the app is also a Shortcuts action, in `iPhoneCompanion/App/Sho
 
 **Play To was removed on 12 November (evening)**, from the Shortcuts actions and from the app (the picker under the volume slider). Music on the Mac can't switch to some speakers at all: tried with AppleScript alone, with no Second Chair code involved, the switch to the Bedroom HomePod timed out after 20 s and the MacBook stayed selected, and Music refuses the Kitchen HomePod with -15014. Alistair found Play To to the Bedroom HomePod failed every time. The protocol (`selectOutput`, `playback.outputs`), the Mac and the relay keep their support, and so does `AppModel.selectOutput`; nothing on the phone sends it now. Its free App Shortcut slot went to Stop Showing.
 
+**Since 17 November 2026 the app's button stays in Second Chair:** Home greys out the Mac's section and says "This song is now playing on your iPhone." The Shortcuts action still opens Music unless its Open Music option is off. Seen on TestFlight 202611172127 with the iPhone playing:
+- **With Second Chair open:** the Mac's paused Now Playing took the system player, because the app asked to be primary on opening.
+- **StandBy:** kept the phone's Apple Music.
+- **The Lock Screen:** showed both.
+
+So since then, opening Second Chair doesn't ask to be primary while the iPhone plays and the Mac doesn't (`AppModel.phonePlaysMusic`). It still asks with the iPhone paused, which is how it takes StandBy back from Apple Music after 8 minutes.
+
 **Continue on iPhone opens the Music app (12 November, 20:40).** The app's button opens `music://` once the song plays here, and so does the action, through `OpenURLIntent`. The action has an **Open Music** option, on by default, to turn off for an automation that shouldn't bring an app to the screen (the car). On the iPhone (development build, silent as above), Music came to the front about 2.5 s after the tile and about 3 s after the app's button, with the Mac paused each time. Seen on the way: for "Chewing Gum" (Blood Orange) the Mac's state had no catalogue ID even minutes into the song, so Continue on iPhone said there was nothing to continue. A Mac-side lookup gap, not this change.
 
 **On TestFlight as build 202611122150** (uploaded 12 November 21:53, with Continue from iPhone and the paused-Mac fix). Before it, **build 202611122052** (version 0.1, uploaded 12 November 20:55 by `scripts/archive.sh --upload` from `feature/shortcuts`), with Continue on iPhone opening Music. The build before, 202611122021, drew an App Store Connect email: **ITMS-90626, an App Intent description "cannot contain" "mac", "iphone" or "apple"**, for all eleven descriptions. Titles ("Play on Mac", "Continue on iPhone"), Siri phrases and summaries weren't flagged. The descriptions now say "computer" and "phone", and `scripts/archive.sh` refuses an archive whose intent descriptions contain mac, iphone, ipad, apple or siri, before it exports or uploads. The export checks passed (production pushes, Time Sensitive, the Now Playing extension with its App Group).
@@ -295,6 +347,8 @@ The app registered its push-to-start token 6–13 times within a second of each 
 
 **Reminders are Time Sensitive (12 November).** In StandBy the reminder never appeared. It was an ordinary ("active") alert, and a Focus holds those back; StandBy usually runs under a Work or Sleep Focus (Home Assistant showed Work Focus on). The relay now sends it with `interruption-level: time-sensitive`, and the app has the Time Sensitive Notifications entitlement (added to the App ID by automatic provisioning). On the iPhone, Settings → Notifications → Second Chair now shows "Time Sensitive Notifications: on". The relay with it was deployed the same morning (version `eeae1bd9`). Not yet seen arriving in StandBy: that needs a 30-minute break in playback. Settings that still affect it: a Focus can turn off "Time Sensitive" for its apps; Show Previews "When Unlocked" hides the text in StandBy; StandBy's own "Show Notifications".
 
+**StandBy goes to Apple Music after about 8 minutes paused (17 November).** In StandBy on the charger, with the Mac paused, iOS switched from Second Chair's player to the phone's own Apple Music (its last song, with the AirPlay icon) after about 7–8 minutes. That happened even with the Mac's companion quit, so it's an iOS timer, not our pushes. Pushes from the Mac playing again, answered 200, didn't win it back; opening the app does (`requestToBecomeSystemPrimary()` only works in the foreground). Apple Music can't be cleared from here: `stop()`, `nowPlayingItem = nil` and an empty queue all left its song loaded. So the reminder now comes after 8 minutes without playing, not 30, and its setting's footer says it covers Apple Music taking the player's place.
+
 **Getting ready for TestFlight (12 November).** `iPhoneCompanion/scripts/archive.sh` archives and exports with the relay host built in, and checks the export is signed for production pushes with Time Sensitive (DEVICE-TESTING, "TestFlight and the App Store"). The Release configuration compiles with the host in its `Info.plist` (unsigned build). **First TestFlight build uploaded the same day**: build 202611121125 (version 0.1), archived and exported by the script, which checked the package carries `aps-environment` `production`, Time Sensitive, the relay host, and the Now Playing extension (in `Extensions/`, as an ExtensionKit extension) with the App Group. The distribution certificate is cloud-managed, so none was added to the keychain. `ITSAppUsesNonExemptEncryption` is `NO` (HTTPS only), so App Store Connect doesn't ask about export compliance. Installed from TestFlight on the iPhone 15 Pro over the Xcode build: the pairing carried over (same Keychain group), and with the phone locked and the app asleep, a skip on the Mac reached the Lock Screen by push, so the relay found the production environment by itself. On that first skip the artwork didn't come with the title; it did from the next song on (relay README, the TestFlight paragraph). The App Group was then registered for both App IDs, so builds no longer need temporary entitlements: a Debug build with the committed ones signed for the device. Production push tokens are handled by the relay, which retries a sandbox `BadDeviceToken` in production and remembers the answer per pairing; no app change was needed.
 
 **Continue on iPhone (12 November).** When the Mac's state names the song's Apple Music catalogue ID (`track.catalogID`, from the Mac paired with Music as a remote), Home shows **Continue on iPhone** in its own Continue Listening box under Now Playing. It asks once for Apple Music access (`NSAppleMusicUsageDescription`), then `MPMusicPlayerController.systemMusicPlayer` gets the song and the Mac's Up Next (`setQueue(with:)` catalogue IDs), `prepareToPlay`, the Mac's extrapolated position, `play`. Once Music here plays that song (`nowPlayingItem.playbackStoreID`), the app sends the Mac an ordinary `pause`; until then the Mac keeps playing, so a failure costs nothing. Logic in `AppModel.continueOnPhone(with:)` behind `PhoneMusicPlaying` (4 tests); the player in `App/PhoneMusicPlayer.swift`. On the iPhone 15 Pro (development build 202611121237): the song moved instantly, the Mac paused about a second later, and once the Mac looked up songs outside its library, the queue came over too. 190 StandByKit tests pass.
@@ -357,7 +411,7 @@ iPhone 15 Pro, iOS 27.2, free Personal Team, mock transport, connected by USB. "
 
 Once, on an older build, neither app appeared when audio started. That wasn't reproduced with the newer build.
 
-**System Primary** read No once while the session was on screen. A later check reported no errors, but the value wasn't recorded. It hasn't affected StandBy or the Lock Screen.
+**System Primary** read No once while the session was on screen. A later check reported no errors, but the value wasn't recorded. It hasn't affected StandBy or the Lock Screen. On 17 November 2026 it read false again for the app's only session, for 10 s after the app opened and asked (no error), with Second Chair on the Lock Screen. So Home no longer shows a Status ("Showing" / "Another app is showing") for the Lock Screen; Diagnostics keeps the raw value.
 
 **Installing over a live session leaves a broken extension.** iOS relaunched the extension from the outgoing copy of the app at the moment of install. That process had its file writes denied, failed every command, and survived ending and restarting the session. Separately, a launch 5 s after an install failed, while one about 50 s later worked. Could affect real app updates. Not yet tested whether a phone restart clears it. Seen again on 11 November: an extension launched 3 s before an install finished kept the old code (its debug dylib had the old build's UUID), and crashed on the new app's attributes. Once it had crashed, the next launch ran the new code.
 

@@ -31,17 +31,56 @@ public struct HandoverMark: Codable, Equatable, Sendable {
     }
 }
 
-/// Keeps the last `HandoverMark`. The app's button and the Shortcuts actions
-/// share one, in the App Group's defaults.
+/// Keeps the last `HandoverMark`, and the playlist Continue on iPhone last
+/// started here. The app's button and the Shortcuts actions share them, in
+/// the App Group's defaults.
 @MainActor
 public struct HandoverMemory {
     public var load: @MainActor () -> HandoverMark?
     public var save: @MainActor (HandoverMark?) -> Void
+    /// The library playlist Continue on iPhone last played here, for the way
+    /// back: Apple Music lists it as recently played only after about a
+    /// minute (17 November 2026). Checked against Music's queue before use.
+    public var loadPlaylist: @MainActor () -> PlaylistPlace?
+    public var savePlaylist: @MainActor (PlaylistPlace?) -> Void
+    /// The library album Continue on iPhone last played here (19 November
+    /// 2026), for the same reason: a shuffled album an app queued is in no
+    /// recently played list, and the way back sent the library shuffled.
+    public var loadAlbum: @MainActor () -> AlbumPlace?
+    public var saveAlbum: @MainActor (AlbumPlace?) -> Void
+    /// The setting "Automatically Add to Library", under Continue Listening (17 November 2026):
+    /// Continue on Mac adds an Apple Music playlist or album that isn't in
+    /// the library, so the Mac can play it. Off unless turned on: adding
+    /// changes the person's library.
+    public var addsToLibrary: @MainActor () -> Bool
+    /// The catalogue IDs Continue on iPhone last queued here from the Mac's
+    /// Up Next (17 November 2026). A song from them isn't from any playlist,
+    /// album or station Apple Music lists as recently played, which is
+    /// account-wide: an old station there once looked current.
+    public var loadQueued: @MainActor () -> [String]?
+    public var saveQueued: @MainActor ([String]?) -> Void
 
-    public init(load: @escaping @MainActor () -> HandoverMark?, save: @escaping @MainActor (HandoverMark?) -> Void) {
+    public init(load: @escaping @MainActor () -> HandoverMark?, save: @escaping @MainActor (HandoverMark?) -> Void,
+                loadPlaylist: @escaping @MainActor () -> PlaylistPlace? = { nil },
+                savePlaylist: @escaping @MainActor (PlaylistPlace?) -> Void = { _ in },
+                loadAlbum: @escaping @MainActor () -> AlbumPlace? = { nil },
+                saveAlbum: @escaping @MainActor (AlbumPlace?) -> Void = { _ in },
+                addsToLibrary: @escaping @MainActor () -> Bool = { false },
+                loadQueued: @escaping @MainActor () -> [String]? = { nil },
+                saveQueued: @escaping @MainActor ([String]?) -> Void = { _ in }) {
         self.load = load
         self.save = save
+        self.loadPlaylist = loadPlaylist
+        self.savePlaylist = savePlaylist
+        self.loadAlbum = loadAlbum
+        self.saveAlbum = saveAlbum
+        self.addsToLibrary = addsToLibrary
+        self.loadQueued = loadQueued
+        self.saveQueued = saveQueued
     }
+
+    /// The App Group key for `addsToLibrary`; missing means off.
+    public static let addsToLibraryKey = "continueOnMacAddsToLibrary"
 
     /// Remembers nothing: every Continue on iPhone takes the Mac's song.
     public static var none: HandoverMemory {
@@ -49,18 +88,26 @@ public struct HandoverMemory {
     }
 
     static let key = "continueOnPhoneMark"
+    static let playlistKey = "continueOnPhonePlaylist"
+    static let albumKey = "continueOnPhoneAlbum"
+    static let queuedKey = "continueOnPhoneQueued"
 
     public static func defaults(_ defaults: UserDefaults) -> HandoverMemory {
-        HandoverMemory(
-            load: { defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(HandoverMark.self, from: $0) } },
-            save: { mark in
-                if let mark, let data = try? JSONEncoder().encode(mark) {
-                    defaults.set(data, forKey: key)
-                } else {
-                    defaults.removeObject(forKey: key)
-                }
+        func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        }
+        func save<T: Encodable>(_ value: T?, _ key: String) {
+            if let value, let data = try? JSONEncoder().encode(value) {
+                defaults.set(data, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
             }
-        )
+        }
+        return HandoverMemory(load: { load(HandoverMark.self, key) }, save: { save($0, key) },
+                              loadPlaylist: { load(PlaylistPlace.self, playlistKey) }, savePlaylist: { save($0, playlistKey) },
+                              loadAlbum: { load(AlbumPlace.self, albumKey) }, saveAlbum: { save($0, albumKey) },
+                              addsToLibrary: { defaults.object(forKey: addsToLibraryKey) as? Bool ?? false },
+                              loadQueued: { load([String].self, queuedKey) }, saveQueued: { save($0, queuedKey) })
     }
 
     /// The app's own, shared by the app and its Shortcuts actions.

@@ -38,6 +38,33 @@ export interface QueuedTrack {
   duration: number;
 }
 
+/** A song's place in a library playlist (Shared/StandByProtocol/Playlist.swift). Added 17 November 2026. Passed through. */
+export interface PlaylistPlace {
+  name: string;
+  cloudID?: string;
+  count: number;
+  index: number;
+  shuffled?: boolean;
+  /** True when the phone has just added this Apple Music playlist to the library for the Mac. */
+  addedToLibrary?: boolean;
+}
+
+/** An Apple Music station (Shared/StandByProtocol/Sources.swift). Added 17 November 2026. Passed through. */
+export interface StationPlace {
+  id: string;
+  name: string;
+}
+
+/** A song's place in a library album (Shared/StandByProtocol/Album.swift). Added 17 November 2026. Passed through. */
+export interface AlbumPlace {
+  title: string;
+  artist?: string;
+  count: number;
+  index: number;
+  shuffled?: boolean;
+  addedToLibrary?: boolean;
+}
+
 /** One place Music can play to (Shared/StandByProtocol/Output.swift). */
 export interface AudioOutput {
   id: string;
@@ -65,6 +92,18 @@ export interface PlaybackMessage {
   upNext?: QueuedTrack[];
   /** Whether the Mac is connected to Music as a remote, for Continue Listening. Passed through. */
   musicConnection?: string;
+  /** The library playlist the song plays from, when Up Next is the rest of it. Reaches the phone in GET /v1/session; never pushed. */
+  playlist?: PlaylistPlace;
+  /** Added 17 November 2026, like `playlist`: the library album the song plays from. */
+  album?: AlbumPlace;
+  /** Added 17 November 2026: the Mac shuffles its whole library. */
+  shuffledLibrary?: boolean;
+  /** Added 17 November 2026: Up Next comes from Apple Music outside the library. */
+  fromAppleMusic?: boolean;
+  /** Added 17 November 2026: Music's repeat, "off", "one" or "all". */
+  repeatMode?: string;
+  /** Added 17 November 2026: Music's shuffle, with `fromAppleMusic`. */
+  shuffled?: boolean;
 }
 
 export interface ProtocolError {
@@ -85,6 +124,18 @@ export interface RemoteCommand {
   outputID?: string;
   /** Why the phone sent it; `continue_on_phone` on Continue on iPhone's pause. Passed through. */
   reason?: string;
+  /** For `playStation`: the phone's playlist, which a Mac connected to Music plays from the song. Passed through. */
+  playlist?: PlaylistPlace;
+  /** For `playStation` without a playlist: the phone's library album, which the Mac plays on from the song in album order. Passed through. */
+  album?: AlbumPlace;
+  /** For `playStation`, added 17 November 2026: the phone's Apple Music station, which the Mac plays instead of the song's. Passed through. */
+  station?: StationPlace;
+  /** For `playStation`, added 17 November 2026: the phone shuffles its whole library. Passed through. */
+  shuffledLibrary?: boolean;
+  /** For `playStation`, added 17 November 2026: the phone's repeat. Passed through. */
+  repeatMode?: string;
+  /** For `playStation`, added 19 November 2026: the phone was paused at `position`, so the Mac seeks exactly there. Passed through. */
+  positionIsPaused?: boolean;
 }
 
 export interface CommandAck {

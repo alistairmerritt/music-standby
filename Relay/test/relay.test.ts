@@ -355,6 +355,50 @@ describe("commands", () => {
     expect(r.status).toBe(400);
   });
 
+  it("forwards Continue on Mac's playlist as the phone sent it (17 November 2026)", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const id = newCommandID();
+    const command = {
+      id, kind: "playStation", issuedAt: new Date().toISOString(), position: 61.5, catalogID: "270246724", title: "Song Sixty",
+      playlist: { name: "Road Trip", cloudID: "pl.u-Zx9yW8vU7tS6r", count: 123, index: 59, shuffled: true },
+    };
+    const pending = call("POST", "/v1/commands", { token: phoneToken, body: { command, sessionID }, headers: { "Idempotency-Key": id } });
+    expect((await mac.next("command")).command).toEqual(command);
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 44 } });
+    expect((await pending).status).toBe(200);
+  });
+
+  it("forwards Continue on Mac's album as the phone sent it (17 November 2026)", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const id = newCommandID();
+    const command = {
+      id, kind: "playStation", issuedAt: new Date().toISOString(), position: 12, catalogID: "1234567890", title: "Song",
+      album: { title: "Album", artist: "Artist", count: 38, index: 30, shuffled: true },
+    };
+    const pending = call("POST", "/v1/commands", { token: phoneToken, body: { command, sessionID }, headers: { "Idempotency-Key": id } });
+    expect((await mac.next("command")).command).toEqual(command);
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 45 } });
+    expect((await pending).status).toBe(200);
+  });
+
+  it("forwards Continue on Mac's station, library shuffle, repeat and new library playlist as the phone sent them (17 November 2026)", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const commands = [
+      { station: { id: "ra.985484166", name: "Made-Up Radio" }, repeatMode: "all" },
+      { shuffledLibrary: true, repeatMode: "one" },
+      { playlist: { name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5, addedToLibrary: true } },
+      { positionIsPaused: true },
+    ];
+    for (const [n, extra] of commands.entries()) {
+      const id = newCommandID();
+      const command = { id, kind: "playStation", issuedAt: new Date().toISOString(), position: 12, catalogID: "1234567890", title: "Song", ...extra };
+      const pending = call("POST", "/v1/commands", { token: phoneToken, body: { command, sessionID }, headers: { "Idempotency-Key": id } });
+      expect((await mac.next("command")).command).toEqual(command);
+      mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: 46 + n } });
+      expect((await pending).status).toBe(200);
+    }
+  });
+
   it("passes the Mac's rejection through", async () => {
     const { mac, phoneToken, sessionID } = await playingSetup();
     const { id, body } = commandBody(sessionID, "play");
@@ -463,16 +507,29 @@ describe("catalogue ID and Up Next", () => {
         { catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312.3 },
         { title: "Uploaded demo", artist: "Me", duration: 0 },
       ],
+      playlist: { name: "Road Trip", count: 123, index: 39 },
+      album: { title: "Late Night Tales", artist: "Jon Hopkins", count: 20, index: 3, shuffled: true },
+      shuffledLibrary: true,
+      fromAppleMusic: true,
+      repeatMode: "all",
+      shuffled: true,
     });
     mac.send({ type: "state", message: state });
     const s = await waitForRevision(phoneToken, state.revision);
     expect(s.playback.track.catalogID).toBe("1102360418");
     expect(s.playback.upNext).toEqual(state.upNext);
+    expect(s.playback.playlist).toEqual(state.playlist);
+    for (const key of ["album", "shuffledLibrary", "fromAppleMusic", "repeatMode", "shuffled"] as const) {
+      expect(s.playback[key]).toEqual(state[key]);
+    }
     const sent = (await pushes(phoneToken)).slice(before);
     expect(sent.length).toBeGreaterThan(0);
     for (const push of sent) {
       expect(push.payload.aps.attributes.track.catalogID).toBeUndefined();
       expect(push.payload.aps.attributes.upNext).toBeUndefined();
+      expect(push.payload.aps.attributes.playlist).toBeUndefined();
+      expect(push.payload.aps.attributes.album).toBeUndefined();
+      expect(push.payload.aps.attributes.repeatMode).toBeUndefined();
       expect(JSON.stringify(push.payload).length).toBeLessThan(4096);
     }
   });
@@ -603,7 +660,7 @@ describe("reminders", () => {
     const paused = playback({ state: "paused", isPlaying: false });
     mac.send({ type: "state", message: paused });
     await waitForRevision(phoneToken, paused.revision);
-    await pauseFor(pairingID, 31);
+    await pauseFor(pairingID, 9);   // past the 8 minutes after which iOS gives StandBy to Apple Music
     const resumed = playback();
     mac.send({ type: "state", message: resumed });
     await waitForRevision(phoneToken, resumed.revision);
@@ -611,10 +668,11 @@ describe("reminders", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].payload).toEqual({
       aps: {
-        alert: { title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." },
+        alert: { title: "Music playing on Studio Mac", body: "Tap to show it on your Lock Screen and in StandBy." },
         "thread-id": "mac-playing",
         "interruption-level": "time-sensitive",
         "relevance-score": 1,
+        "content-available": 1,
       },
     });
     expect(sent[0].payload.aps.sound).toBeUndefined();
@@ -629,7 +687,7 @@ describe("reminders", () => {
     const { mac, pairingID, phoneToken } = await playingSetup();
     await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
     mac.send({ type: "state", message: playback({ state: "paused", isPlaying: false }) });
-    await pauseFor(pairingID, 5);
+    await pauseFor(pairingID, 7);   // the player is still showing
     const quick = playback();
     mac.send({ type: "state", message: quick });
     await waitForRevision(phoneToken, quick.revision);

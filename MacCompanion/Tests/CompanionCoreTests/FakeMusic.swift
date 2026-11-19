@@ -33,6 +33,10 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
     private var _openedLocations: [String] = []
     var openedLocations: [String] { lock.withLock { _openedLocations } }
     private var _volume = 100
+    private var _shuffle = false
+    var shuffle: Bool { lock.withLock { _shuffle } }
+    private var _repeatMode: RepeatMode = .off
+    var repeatMode: RepeatMode { lock.withLock { _repeatMode } }
     /// Music's AirPlay devices: name, kind text, selected, available, network address.
     private var _outputs: [(name: String, kind: String, selected: Bool, available: Bool, address: String?)] = [
         ("Test Mac", "computer", true, true, nil),
@@ -81,6 +85,16 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
     var current: Track { lock.withLock { tracks[_index] } }
 
     func failNext(code: Int, message: String) { lock.withLock { _nextFailure = (code, message) } }
+    /// As Music does when a remote's `playspec` starts a playlist: the next
+    /// song, from its start, playing.
+    func startNextSong() {
+        lock.withLock {
+            _previousIndex = _index
+            _index = (_index + 1) % tracks.count
+            _position = 0
+            _state = "playing"
+        }
+    }
     func quitDuringNextScript() { lock.withLock { _quitDuringNextScript = true } }
     /// Music's habit seen on 11 Nov 2026: right after a skip, the artwork read
     /// returns the previous track's image under the new track's persistent ID.
@@ -124,6 +138,12 @@ final class FakeMusic: MusicScriptRunning, @unchecked Sendable {
                 return .value(.text("ok"))
             case .setVolume(let level):
                 _volume = min(100, max(0, level))
+                return .value(.text("ok"))
+            case .setShuffle(let on):
+                _shuffle = on
+                return .value(.text("ok"))
+            case .setRepeat(let mode):
+                _repeatMode = mode
                 return .value(.text("ok"))
             case .selectOutput(let id):
                 guard let index = _outputs.firstIndex(where: { AudioOutput.makeID(networkAddress: $0.address, name: $0.name) == id }) else {

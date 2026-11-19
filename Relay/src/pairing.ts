@@ -178,8 +178,14 @@ export class Pairing extends DurableObject<Env> {
   private get pausedTimeout(): number {
     return Number(this.env.PAUSED_TIMEOUT_MS ?? 0);
   }
+  /**
+   * 8 minutes: iOS gives StandBy and the Lock Screen to the phone's own Apple
+   * Music once the Mac has been paused about 7–8 minutes, and only opening the
+   * app wins them back (seen on an iPhone, 17 November 2026). Was 30 minutes,
+   * which left a break of 8–30 minutes with neither the player nor a reminder.
+   */
   private get remindAfter(): number {
-    return Number(this.env.REMIND_AFTER_MS ?? 30 * 60_000);
+    return Number(this.env.REMIND_AFTER_MS ?? 8 * 60_000);
   }
   /** How long a background hand-back push gets before the notification. */
   private get handBackNotifyAfter(): number {

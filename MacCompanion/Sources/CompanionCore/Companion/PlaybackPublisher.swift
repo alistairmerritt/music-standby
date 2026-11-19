@@ -39,10 +39,26 @@ public struct PlaybackPublisher: Sendable {
         let session = sessions.update(for: snapshot.state, makeID: makeSessionID)
         var candidate = Self.message(for: snapshot, artworkID: artworkID, queue: queue, session: session, revision: latestRevision,
                                      musicConnection: musicConnection)
-        guard candidate.hasVisibleChange(from: lastSent) else { return nil }
+        // Since when the Mac plays from Apple Music outside its library: kept
+        // while it goes on doing so (17 November 2026).
+        if candidate.fromAppleMusic == true {
+            candidate.appleMusicSince = lastSent?.fromAppleMusic == true ? lastSent?.appleMusicSince ?? candidate.capturedAt : candidate.capturedAt
+        }
+        guard candidate.hasVisibleChange(from: lastSent) || Self.contextChanged(candidate, from: lastSent) else { return nil }
         candidate.revision = revisions.next()
         lastSent = candidate
         return candidate
+    }
+
+    /// Shuffle, repeat or the source changed on the same song (17 November
+    /// 2026): the phone needs it for Continue on iPhone. Only when both
+    /// messages carry a queue read, so a slow read doesn't count.
+    static func contextChanged(_ message: PlaybackMessage, from previous: PlaybackMessage?) -> Bool {
+        guard let previous, message.track != nil, message.upNext != nil, previous.upNext != nil else { return false }
+        return message.playlist?.name != previous.playlist?.name || message.playlist?.isShuffled != previous.playlist?.isShuffled
+            || message.album?.title != previous.album?.title || message.album?.isShuffled != previous.album?.isShuffled
+            || message.shuffledLibrary != previous.shuffledLibrary || message.fromAppleMusic != previous.fromAppleMusic
+            || message.repeatMode != previous.repeatMode || message.shuffled != previous.shuffled
     }
 
     static func message(for snapshot: MusicSnapshot, artworkID: String?, queue: RemoteQueue? = nil, session: UUID?,
@@ -57,6 +73,9 @@ public struct PlaybackPublisher: Sendable {
             capturedAt: StandByWire.wirePrecision(snapshot.capturedAt), track: track, canGoNext: canSkip, canGoPrevious: canSkip,
             listeningSessionID: session, detail: snapshot.detail,
             volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs,
-            upNext: track == nil ? nil : queue?.upNext, musicConnection: musicConnection)
+            upNext: track == nil ? nil : queue?.upNext, musicConnection: musicConnection,
+            playlist: track == nil ? nil : queue?.playlist, album: track == nil ? nil : queue?.album,
+            shuffledLibrary: track == nil ? nil : queue?.shuffledLibrary, fromAppleMusic: track == nil ? nil : queue?.fromAppleMusic,
+            repeatMode: track == nil ? nil : queue?.repeatMode, shuffled: track == nil ? nil : queue?.shuffled)
     }
 }

@@ -34,7 +34,7 @@ struct ShortcutError: Error, CustomLocalizedStringResourceConvertible {
         case TransportError.notPaired:
             message = "Second Chair isn’t paired with a Mac. Open Second Chair to pair."
         case TransportError.notConnected:
-            message = "Your Mac isn’t connected. Check that it’s awake and Second Chair is open on it."
+            message = Self.notConnected
         case TransportError.commandRejected(.noSession):
             message = "There’s nothing to control on your Mac yet. Play something in Music there first."
         case TransportError.macUnreachable:
@@ -45,6 +45,8 @@ struct ShortcutError: Error, CustomLocalizedStringResourceConvertible {
             message = error.localizedDescription
         }
     }
+
+    static let notConnected = "Your Mac isn’t connected. Check that it’s awake and Second Chair is open on it."
 
     var localizedStringResource: LocalizedStringResource { "\(message)" }
 }

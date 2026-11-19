@@ -110,7 +110,7 @@ describe("APNsPushSender", () => {
     expect(request.headers.get("apns-collapse-id")).toBe("mac-playing");
     expect(Number(request.headers.get("apns-expiration"))).toBeGreaterThan(Date.now() / 1000 + 60);
     const body = (await request.json()) as any;
-    expect(body.aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Tap to show on your Lock Screen." });
+    expect(body.aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Tap to show it on your Lock Screen and in StandBy." });
     expect(body.aps.sound).toBeUndefined();
     expect(body.aps["interruption-level"]).toBe("time-sensitive");
   });

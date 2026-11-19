@@ -140,12 +140,22 @@ public final class AppModel {
         if let graceDeadline, now() >= graceDeadline {
             await endSession(.connectionLost)
         }
+        // While this iPhone plays and the Mac doesn't, as after Continue on
+        // iPhone, the phone's music keeps the system player: asking here put
+        // the Mac's paused song in Control Centre whenever Second Chair was
+        // open (17 November 2026). StandBy already preferred the phone's.
+        let deferToPhone = phonePlaysMusic() && attributes?.isPlaying != true
         if shouldShowSession, let attributes {
-            await activate(with: attributes)
-        } else if sessionController.isActive {
+            await activate(with: attributes, requestingPrimary: !deferToPhone)
+        } else if sessionController.isActive, !deferToPhone {
             await sessionController.requestPrimary()
         }
     }
+
+    /// Whether Apple Music on this iPhone is playing. The app sets it; Second
+    /// Chair then leaves the system player to the phone's music on opening
+    /// while the Mac is paused (17 November 2026).
+    @ObservationIgnored public var phonePlaysMusic: @MainActor () -> Bool = { false }
 
     /// Time in the background is not a lost connection. Stop reading the Mac
     /// and drop any countdown; the next foreground reads afresh and reconciles.
@@ -247,6 +257,29 @@ public final class AppModel {
         } else {
             record("Now Playing session active. Primary: \(sessionController.isSystemPrimary)")
         }
+    }
+
+    /// `activateNowPlaying` from a Shortcuts action that runs in the background,
+    /// where nothing has the event loop running: listens for the Mac's state
+    /// until it has a song, then shows the player. False when no song arrived
+    /// within `timeout`, so the caller can open the app instead.
+    ///
+    /// On 19 November 2026, with the phone locked and the player dismissed, this
+    /// showed the player on the Lock Screen about 20 s after the Mac started
+    /// playing, without opening the app.
+    public func activateNowPlaying(waitingForTheMacFor timeout: Duration) async -> Bool {
+        // Already running when the app is open; then this ends at once.
+        let listening = Task { await start() }
+        defer { listening.cancel() }
+        let step = Duration.milliseconds(50)
+        var waited = Duration.zero
+        while attributes?.track == nil, waited < timeout {
+            try? await Task.sleep(for: step)
+            waited += step
+        }
+        guard attributes?.track != nil else { return false }
+        await activateNowPlaying()
+        return true
     }
 
     public func stopNowPlaying() async {
@@ -422,8 +455,8 @@ public final class AppModel {
         }
     }
 
-    private func activate(with attributes: MacPlaybackAttributes) async {
-        await sessionController.activate(with: attributes)
+    private func activate(with attributes: MacPlaybackAttributes, requestingPrimary: Bool = true) async {
+        await sessionController.activate(with: attributes, requestingPrimary: requestingPrimary)
         let error = sessionController.lastError
         if let error, error != lastRecordedActivationError {
             record("Now Playing failed: \(error)")

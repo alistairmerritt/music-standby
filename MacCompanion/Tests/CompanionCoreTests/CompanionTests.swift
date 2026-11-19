@@ -25,6 +25,7 @@ import StandByProtocol
                                   transport: relay, store: CompanionStore(defaults: defaults), device: Self.device,
                                   artworkLookup: artworkLookup, now: now, isMusicLaunching: { false })
         companion.settleDelay = .zero
+        companion.skipSpacing = .zero
         companion.artworkSettle = 0
         for state in PlaybackState.allCases { companion.monitor.pollIntervals[state] = .seconds(3600) }
         companion.remote = remote
@@ -310,12 +311,293 @@ import StandByProtocol
         #expect(r.music.position < 75)
     }
 
+    @Test func aBurstOfCommandsIsConfirmedBeforeOneSettleRead() async throws {
+        let r = await rig()
+        r.companion.settleDelay = .milliseconds(400)
+        try? await Task.sleep(for: .milliseconds(450))   // the start-up read has settled
+        let before = r.music.scripts.filter { $0 == .snapshot }.count
+        let started = Date()
+        let ids = [await r.relay.simulateCommand(.next), await r.relay.simulateCommand(.next), await r.relay.simulateCommand(.pause)]
+        for id in ids { await eventually { await r.relay.ack(for: id) != nil } }
+        #expect(Date().timeIntervalSince(started) < 0.3, "no command waited behind a sleeping settle-read")
+        #expect(r.music.scripts.filter { $0 == .snapshot }.count == before, "no read has run yet")
+        try? await Task.sleep(for: .milliseconds(900))
+        let reads = r.music.scripts.filter { $0 == .snapshot }.count - before
+        #expect(reads == 1, "one read after the burst, not one per command (\(reads))")
+    }
+
+    @Test func skipsAreSpacedSoMusicDoesntDropOne() async throws {
+        let r = await rig()
+        r.companion.skipSpacing = .milliseconds(400)
+        let first = await r.relay.simulateCommand(.next)
+        await eventually { await r.relay.ack(for: first) != nil }
+        let started = Date()
+        let second = await r.relay.simulateCommand(.next)
+        await eventually { await r.relay.ack(for: second) != nil }
+        #expect(Date().timeIntervalSince(started) >= 0.3, "the second skip waited for the first to settle")
+        let pause = await r.relay.simulateCommand(.pause)
+        let before = Date()
+        await eventually { await r.relay.ack(for: pause) != nil }
+        #expect(Date().timeIntervalSince(before) < 0.3, "only skips are spaced")
+    }
+
+    @Test func aPausedPhonesPositionIsNotMovedOn() async throws {
+        let r = await rig(state: "paused")
+        let issued = Date().addingTimeInterval(-3)   // three seconds old: a playing phone would be 3 s further on
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 30, title: "Idontknow", positionIsPaused: true, issuedAt: issued))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(await eventually { r.music.position > 29 })
+        #expect(r.music.position < 31, "seeked to where the phone stopped, not three seconds past it (\(r.music.position))")
+    }
+
+    @Test func theMacSaysWhereItIsRightAfterItsOwnSeek() async throws {
+        let r = await rig(state: "paused")
+        await eventually { r.music.position < 20 }
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        // Polls are an hour apart in this rig, so only the Mac's own refresh can say it.
+        let said = await eventually {
+            let list = await self.states(r.relay)
+            return list.contains { (m: PlaybackMessage) in m.track?.title == "Idontknow" && m.elapsedTime > 60 }
+        }
+        #expect(said)
+    }
+
     @Test func aStationStartingWithAnotherSongIsLeftWhereItIs() async throws {
         let r = await rig(state: "paused")
         let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Some Other Song", issuedAt: Date()))
         await eventually { await r.relay.ack(for: id)?.accepted == true }
         await eventually { r.companion.events.contains { $0.text.contains("another song") } }
         #expect(r.music.position < 5)
+    }
+
+    // MARK: Continue on Mac with a playlist (17 November 2026)
+
+    private static let place = PlaylistPlace(name: "Road Trip", cloudID: "pl.u-Zx9yW8vU7tS6r", count: 123, index: 59)
+
+    /// Music's remote protocol as Continue on Mac uses it: records what it
+    /// was asked to play, and starts Music's next song when it "plays".
+    private final class PlaylistRemote: MusicRemoteReading, MusicRemotePlaying, @unchecked Sendable {
+        let outcome: PlaylistPlayOutcome
+        let music: FakeMusic
+        private let lock = NSLock()
+        private var _asked: [(String, PlaylistPlace)] = []
+        var asked: [(String, PlaylistPlace)] { lock.withLock { _asked } }
+        /// Answers `.notHere` this many times first, as for a playlist still on its way.
+        private var notHereFirst: Int
+        init(_ outcome: PlaylistPlayOutcome, music: FakeMusic, notHereFirst: Int = 0) {
+            self.outcome = outcome
+            self.music = music
+            self.notHereFirst = notHereFirst
+        }
+        private func answer() -> PlaylistPlayOutcome {
+            lock.withLock {
+                guard notHereFirst > 0 else { return outcome }
+                notHereFirst -= 1
+                return .notHere
+            }
+        }
+        func queue(current track: MusicTrack?) async -> RemoteQueue? { nil }
+        func play(_ catalogID: String, in place: PlaylistPlace) async -> PlaylistPlayOutcome {
+            lock.withLock { _asked.append((catalogID, place)) }
+            let outcome = answer()
+            if case .played = outcome { music.startNextSong() }
+            return outcome
+        }
+        private var _library: [String] = []
+        var library: [String] { lock.withLock { _library } }
+        func playInLibrary(_ catalogID: String, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+            lock.withLock { _library.append(catalogID) }
+            let outcome = answer()
+            guard case .played = outcome else { return outcome }
+            await beforeStart()
+            music.startNextSong()
+            return outcome
+        }
+        private var _albums: [(String, AlbumPlace)] = []
+        var albums: [(String, AlbumPlace)] { lock.withLock { _albums } }
+        func playAlbum(_ catalogID: String, in place: AlbumPlace, beforeStart: @escaping @Sendable () async -> Void) async -> PlaylistPlayOutcome {
+            lock.withLock { _albums.append((catalogID, place)) }
+            let outcome = answer()
+            guard case .played = outcome else { return outcome }
+            await beforeStart()
+            music.startNextSong()
+            return outcome
+        }
+    }
+
+    private static let album = AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 25, index: 9, shuffled: true)
+
+    @Test func anAlbumFromThePhonePlaysInOrderWithShuffleOff() async throws {
+        let r = await rig(state: "paused")
+        _ = r.music.run(.setShuffle(true))
+        let remote = PlaylistRemote(.played(index: 9), music: r.music)
+        r.companion.remote = remote
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", album: Self.album, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(remote.albums.map(\.0) == ["1730817069"])
+        #expect(remote.asked.isEmpty, "not a playlist")
+        #expect(r.music.openedLocations.isEmpty, "no station")
+        #expect(!r.music.shuffle, "Music can't shuffle within an album, so it plays in order")
+        #expect(await eventually { r.music.position > 60 })
+        #expect(!r.companion.events.contains { $0.text.contains("Made-Up") })
+    }
+
+    @Test func aPlaylistWinsOverAnAlbumAndANoShowAlbumIsTheStation() async throws {
+        let r = await rig(state: "paused")
+        let remote = PlaylistRemote(.played(index: 59), music: r.music)
+        r.companion.remote = remote
+        let both = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: Self.place,
+                                                       album: Self.album, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: both)?.accepted == true }
+        #expect(remote.asked.count == 1 && remote.albums.isEmpty)
+
+        let r2 = await rig(state: "paused")
+        let missing = PlaylistRemote(.notHere, music: r2.music)
+        r2.companion.remote = missing
+        let id = await r2.relay.simulate(.playStation(seededBy: "1730817069", album: Self.album, issuedAt: Date()))
+        await eventually { await r2.relay.ack(for: id)?.accepted == true }
+        #expect(missing.albums.count == 1)
+        #expect(r2.music.openedLocations.first?.hasSuffix("/station/ra.1730817069") == true)
+    }
+
+    @Test func aPlaylistFromThePhonePlaysFromTheSongInsteadOfTheStation() async throws {
+        let r = await rig(state: "paused")   // on "Losing My Edge"; the playlist starts with "Idontknow"
+        let remote = PlaylistRemote(.played(index: 59), music: r.music)
+        r.companion.remote = remote
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: Self.place,
+                                                     issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true)
+        #expect(remote.asked.map(\.0) == ["1730817069"])
+        #expect(remote.asked.first?.1 == Self.place)
+        #expect(r.music.openedLocations.isEmpty, "no station")
+        #expect(await eventually { r.music.position > 60 }, "seeked to where the phone is")
+        #expect(!r.music.shuffle)
+        #expect(!r.companion.events.contains { $0.text.contains("Road Trip") }, "the playlist's name stays out of the log")
+    }
+
+    @Test func aShuffledPlaylistShufflesOnceTheSongPlays() async throws {
+        let r = await rig(state: "paused")
+        r.companion.remote = PlaylistRemote(.played(index: 59), music: r.music)
+        var shuffled = Self.place
+        shuffled.shuffled = true
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: shuffled,
+                                                     issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(await eventually { r.music.shuffle })
+        #expect(await eventually { r.music.position > 60 })
+    }
+
+    // MARK: Library shuffle, the phone's station, new playlists, repeat (17 November 2026)
+
+    @Test func theLibraryShuffledPlaysTheSongThenShuffles() async throws {
+        let r = await rig(state: "paused")
+        _ = r.music.run(.setShuffle(true))
+        let remote = PlaylistRemote(.played(index: 3), music: r.music)
+        r.companion.remote = remote
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", shuffledLibrary: true,
+                                                     repeatMode: .all, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(remote.library == ["1730817069"])
+        #expect(r.music.openedLocations.isEmpty, "no station")
+        #expect(await eventually { r.music.position > 60 })
+        #expect(await eventually { r.music.shuffle }, "shuffle on once the song plays")
+        #expect(r.music.repeatMode == .all)
+    }
+
+    @Test func theLibraryShuffledWithoutTheSongIsTheStation() async throws {
+        let r = await rig(state: "paused")
+        let remote = PlaylistRemote(.notHere, music: r.music)
+        r.companion.remote = remote
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", shuffledLibrary: true, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(r.music.openedLocations.first?.hasSuffix("/station/ra.1730817069") == true)
+    }
+
+    @Test func thePhonesStationPlaysRatherThanTheSongs() async throws {
+        let r = await rig(state: "paused")
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow",
+                                                     station: StationPlace(id: "ra.985484166", name: "Made-Up Radio"), issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(r.music.openedLocations.first?.hasSuffix("/station/ra.985484166") == true)
+        #expect(!r.companion.events.contains { $0.text.contains("Made-Up") }, "the station's name stays out of the log")
+        // An ID that can't go in a link is the song's station.
+        let r2 = await rig(state: "paused")
+        let bad = await r2.relay.simulate(.playStation(seededBy: "1730817069", station: StationPlace(id: "ra.x\"; quit", name: "X"),
+                                                       issuedAt: Date()))
+        await eventually { await r2.relay.ack(for: bad)?.accepted == true }
+        #expect(r2.music.openedLocations == [try #require(MusicController.stationURL(seededBy: "1730817069"))])
+    }
+
+    @Test func aPlaylistThePhoneJustAddedIsWaitedForThenPlayed() async throws {
+        let r = await rig(state: "paused")
+        r.companion.libraryPoll = .milliseconds(20)
+        let remote = PlaylistRemote(.played(index: 59), music: r.music, notHereFirst: 3)
+        r.companion.remote = remote
+        var added = Self.place
+        added.addedToLibrary = true
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: added,
+                                                     repeatMode: .one, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id) != nil }
+        #expect(await r.relay.ack(for: id)?.accepted == true, "answered at once; the wait goes on afterwards")
+        #expect(await eventually { remote.asked.count == 4 })
+        #expect(await eventually { r.music.position > 60 }, "seeked to where the phone is once it plays")
+        #expect(r.music.openedLocations.isEmpty, "no station")
+        #expect(r.music.repeatMode == .one)
+    }
+
+    @Test func aPlaylistThatNeverArrivesIsTheStationAndAnotherCommandEndsTheWait() async throws {
+        let r = await rig(state: "paused")
+        r.companion.libraryPoll = .milliseconds(20)
+        r.companion.librarySyncWait = 0.3
+        r.companion.remote = PlaylistRemote(.notHere, music: r.music)
+        var added = Self.place
+        added.addedToLibrary = true
+        let late = await r.relay.simulate(.playStation(seededBy: "1730817069", playlist: added, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: late)?.accepted == true }
+        #expect(await eventually { r.music.openedLocations.first?.hasSuffix("/station/ra.1730817069") == true })
+
+        let r2 = await rig(state: "paused")
+        r2.companion.libraryPoll = .milliseconds(200)
+        r2.companion.remote = PlaylistRemote(.notHere, music: r2.music)
+        let waiting = await r2.relay.simulate(.playStation(seededBy: "1730817069", playlist: added, issuedAt: Date()))
+        await eventually { await r2.relay.ack(for: waiting)?.accepted == true }
+        let pause = await r2.relay.simulate(RemoteCommand(kind: .pause, issuedAt: Date()))
+        await eventually { await r2.relay.ack(for: pause) != nil }
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(r2.music.openedLocations.isEmpty, "the wait ended without a station")
+    }
+
+    @Test func theStationWhenTheMacHasNoSuchPlaylistOrCantPlayIt() async throws {
+        for outcome in [PlaylistPlayOutcome.notHere, .failed("Music's remote protocol didn't answer")] {
+            let r = await rig(state: "paused")
+            let remote = PlaylistRemote(outcome, music: r.music)
+            r.companion.remote = remote
+            let id = await r.relay.simulate(.playStation(seededBy: "1730817069", position: 61, title: "Idontknow", playlist: Self.place,
+                                                         issuedAt: Date()))
+            await eventually { await r.relay.ack(for: id) != nil }
+            #expect(await r.relay.ack(for: id)?.accepted == true)
+            #expect(remote.asked.count == 1)
+            #expect(r.music.openedLocations.first?.hasSuffix("/station/ra.1730817069") == true)
+        }
+    }
+
+    @Test func theStationWhenNotConnectedToMusicOrThePlaceIsUnusable() async throws {
+        let r = await rig(state: "paused")
+        let id = await r.relay.simulate(.playStation(seededBy: "1730817069", playlist: Self.place, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: id)?.accepted == true }
+        #expect(r.music.openedLocations.count == 1)
+        #expect(r.companion.events.contains { $0.text.contains("not connected to Music") })
+
+        let remote = PlaylistRemote(.played(index: 0), music: r.music)
+        r.companion.remote = remote
+        let broken = PlaylistPlace(name: "Road Trip", count: 3, index: 7)
+        let second = await r.relay.simulate(.playStation(seededBy: "1730817069", playlist: broken, issuedAt: Date()))
+        await eventually { await r.relay.ack(for: second)?.accepted == true }
+        #expect(remote.asked.isEmpty)
+        #expect(r.music.openedLocations.count == 2)
     }
 
     @Test func aValueCommandWithoutItsValueIsInvalidAndNeverReachesMusic() async throws {
@@ -373,6 +655,25 @@ import StandByProtocol
         #expect(await eventually { await states(r.relay).last?.musicConnection == .forgotten })
         r.companion.remote = nil
         #expect(await eventually { await states(r.relay).last?.musicConnection == .notConnected })
+    }
+
+    /// Music's remote protocol whose repeat changes after the first read.
+    private actor ChangingRemote: MusicRemoteReading {
+        private(set) var reads = 0
+        func queue(current track: MusicTrack?) async -> RemoteQueue? {
+            reads += 1
+            return RemoteQueue(catalogID: "1730817069", upNext: [QueuedTrack(catalogID: "1", title: "A", artist: "B", duration: 100)],
+                               repeatMode: reads == 1 ? .off : .all)
+        }
+    }
+
+    @Test func aRepeatChangePartWayThroughASongReachesThePhone() async throws {
+        let remote = ChangingRemote()
+        let r = await rig(remote: remote)
+        r.companion.remoteRereadInterval = 0
+        await eventually { await states(r.relay).last?.repeatMode == .off }
+        #expect(await eventually { await states(r.relay).last?.repeatMode == .all }, "read again, and sent without a new song")
+        #expect(await states(r.relay).last?.track?.title == (await states(r.relay).first { $0.repeatMode == .off })?.track?.title)
     }
 
     private struct ConnectionRemote: MusicRemoteReading {
@@ -519,7 +820,7 @@ import StandByProtocol
     @Test func artworkThatStaysThePreviousSongsFallsBackToTheCatalogue() async throws {
         final class Clock: @unchecked Sendable { var date = Date() }
         let clock = Clock()
-        let a = FakeMusic.Track(title: "Magic Wand", artist: "The Avalanches", album: "Magic Wand", duration: 230, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
+        let a = FakeMusic.Track(title: "Magic Wand", artist: "Made-Up Band", album: "Magic Wand", duration: 230, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 800))
         let c = FakeMusic.Track(title: "Sunshine", artist: "Clancy", album: "Sunshine", duration: 190, pid: "3C97D19625454E5C", artwork: FakeMusic.png(side: 300))
         let catalogue = FakeCatalogue(.image(FakeMusic.png(side: 400)))
         let r = await rig(now: { clock.date }, tracks: [a, c], artworkLookup: catalogue)
