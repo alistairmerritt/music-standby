@@ -66,8 +66,10 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// Mac playing from outside its library (`fromAppleMusic`). Returns what
     /// it played; nil when recently played has nothing with the song yet
     /// (it lags about a minute) or Music didn't start it.
+    /// `following` is what the Mac queues after the song: a playlist or
+    /// album only counts when its songs match (`ContainerMatch`).
     func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool) async -> AppleMusicSource?
+                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource?
     /// Where Apple Music here plays its current song from when it's not a
     /// library playlist or album: an Apple Music playlist or album that
     /// recently played lists and has the song, or the station listed last.
@@ -97,7 +99,7 @@ extension PhoneMusicPlaying {
     public func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval,
                                     timeout: TimeInterval) async -> Bool { false }
     public func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                                   shuffled: Bool, allowStation: Bool) async -> AppleMusicSource? { nil }
+                                   shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? { nil }
     public func appleMusicSource() async -> AppleMusicSource? { nil }
     public func addToLibrary(_ source: AppleMusicSource) async -> Bool { false }
     public func isShufflingLibrary() async -> Bool { false }

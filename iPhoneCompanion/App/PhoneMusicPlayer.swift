@@ -523,17 +523,22 @@ extension SystemMusicPhonePlayer {
         case station(Station)
     }
 
-    func findInRecentlyPlayed(_ catalogID: String, allowStation: Bool) async -> RecentFind? {
+    /// `following` is what the Mac queues after the song. A playlist or album
+    /// that has the song only counts when its songs match (`ContainerMatch`):
+    /// a song's own album always has it (seen 19 November 2026).
+    func findInRecentlyPlayed(_ catalogID: String, allowStation: Bool, following: [String] = [], shuffled: Bool = false) async -> RecentFind? {
         guard access == .allowed else { return nil }
         for (n, container) in await recentContainers(2).enumerated() {
             switch container {
             case .playlist(let playlist):
                 guard let (loaded, entries) = await Self.withEntries(playlist),
-                      let index = entries.firstIndex(where: { Self.songID($0) == catalogID }) else { continue }
+                      let index = entries.firstIndex(where: { Self.songID($0) == catalogID }),
+                      ContainerMatch.accepts(entries.map(Self.songID), at: index, following: following, inOrder: !shuffled) else { continue }
                 return .playlist(loaded, entries, index: index)
             case .album(let album):
                 guard let (loaded, tracks) = await Self.withTracks(album),
-                      let index = tracks.firstIndex(where: { $0.id.rawValue == catalogID }) else { continue }
+                      let index = tracks.firstIndex(where: { $0.id.rawValue == catalogID }),
+                      ContainerMatch.accepts(tracks.map { $0.id.rawValue }, at: index, following: following, inOrder: !shuffled) else { continue }
                 return .album(loaded, tracks, index: index)
             case .station(let station):
                 guard n == 0, allowStation else { continue }
@@ -546,9 +551,9 @@ extension SystemMusicPhonePlayer {
     }
 
     func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool) async -> AppleMusicSource? {
+                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? {
         let started = Date()
-        guard let found = await findInRecentlyPlayed(catalogID, allowStation: allowStation) else { return nil }
+        guard let found = await findInRecentlyPlayed(catalogID, allowStation: allowStation, following: following, shuffled: shuffled) else { return nil }
         let left = max(1, timeout - Date().timeIntervalSince(started))
         switch found {
         case .playlist(let playlist, let entries, let index):

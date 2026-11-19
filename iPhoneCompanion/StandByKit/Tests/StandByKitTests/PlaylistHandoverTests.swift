@@ -173,6 +173,8 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.appleMusicAsked.count == 1)
         #expect(phone.appleMusicAsked.first?.shuffled == true)
         #expect(phone.appleMusicAsked.first?.allowStation == false, "four songs ahead on the Mac: not a station")
+        #expect(phone.appleMusicAsked.first?.following == m.upNext?.compactMap(\.catalogID),
+                "the Mac's next songs go along, so an album that merely has the song isn't taken for the playlist")
         #expect(phone.asked.isEmpty)
     }
 
