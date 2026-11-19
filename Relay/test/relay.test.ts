@@ -672,6 +672,7 @@ describe("reminders", () => {
         "thread-id": "mac-playing",
         "interruption-level": "time-sensitive",
         "relevance-score": 1,
+        "content-available": 1,
       },
     });
     expect(sent[0].payload.aps.sound).toBeUndefined();
