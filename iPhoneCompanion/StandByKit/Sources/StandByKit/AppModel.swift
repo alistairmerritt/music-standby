@@ -247,6 +247,29 @@ public final class AppModel {
         }
     }
 
+    /// `activateNowPlaying` from a Shortcuts action that runs in the background,
+    /// where nothing has the event loop running: listens for the Mac's state
+    /// until it has a song, then shows the player. False when no song arrived
+    /// within `timeout`, so the caller can open the app instead.
+    ///
+    /// On 19 November 2026, with the phone locked and the player dismissed, this
+    /// showed the player on the Lock Screen about 20 s after the Mac started
+    /// playing, without opening the app.
+    public func activateNowPlaying(waitingForTheMacFor timeout: Duration) async -> Bool {
+        // Already running when the app is open; then this ends at once.
+        let listening = Task { await start() }
+        defer { listening.cancel() }
+        let step = Duration.milliseconds(50)
+        var waited = Duration.zero
+        while attributes?.track == nil, waited < timeout {
+            try? await Task.sleep(for: step)
+            waited += step
+        }
+        guard attributes?.track != nil else { return false }
+        await activateNowPlaying()
+        return true
+    }
+
     public func stopNowPlaying() async {
         setNowPlayingEnabled(false)
         // A session from an earlier run that this one hasn't picked up yet,
