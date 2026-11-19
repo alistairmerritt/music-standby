@@ -26,6 +26,7 @@
           "fill" : {
             "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
           },
+          "glass" : false,
           "image-name" : "Second Chair-v2 5.png",
           "name" : "Second Chair-v2 5",
           "position" : {
@@ -102,6 +103,7 @@
       "blend-mode" : "normal",
       "layers" : [
         {
+          "glass" : false,
           "hidden" : false,
           "image-name" : "Second Chair-v2 4.png",
           "name" : "Second Chair-v2 4",
@@ -120,7 +122,7 @@
         "opacity" : 0.5
       },
       "translucency" : {
-        "enabled" : true,
+        "enabled" : false,
         "value" : 0
       }
     }
