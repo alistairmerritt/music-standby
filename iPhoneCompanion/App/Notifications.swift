@@ -53,6 +53,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// Mac without showing anything. iOS gives about 30 s, and the hand-back
     /// takes a few at most.
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        // EXPERIMENT (19 November 2026): the reminder wakes the app too, which
+        // shows the player now rather than at a tap.
+        if ReminderPush.isReminder(userInfo) {
+            let shown = await model.activateNowPlaying(waitingForTheMacFor: .seconds(10))
+            return shown ? .newData : .noData
+        }
         guard let request = HandBackResponder.request(from: userInfo) else { return .noData }
         let status = await handBack.respond(to: request, via: .wake, player: SystemMusicPhonePlayer())
         // Done before the notification came: it has nothing left to ask.
