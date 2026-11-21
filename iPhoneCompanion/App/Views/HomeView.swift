@@ -16,6 +16,7 @@ struct HomeView: View {
     @State private var canPlayCatalog: Bool?
     @Environment(\.openURL) private var openURL
     @State private var showsSettings = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView {
@@ -48,6 +49,12 @@ struct HomeView: View {
             .padding(.bottom, 32)
             .animation(.default, value: nowPlayingMode)
         }
+        // EXPERIMENT (22 November 2026): the song's artwork, blurred, behind
+        // Home, as Apple Music's player does, with a dark band at the top
+        // behind the title and the Mac's card.
+        .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style) }
+        .environment(\.colorScheme, showsArtworkBackground && model.artwork != nil && HomeBackground.style != .none ? .dark : colorScheme)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .navigationTitle("Second Chair")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -75,6 +82,12 @@ struct HomeView: View {
     }
 
     // MARK: State
+
+    /// The artwork goes behind Home only while it's the Mac's song that plays
+    /// or is paused there, not while the phone has the music.
+    private var showsArtworkBackground: Bool {
+        attributes?.track != nil && nowPlayingMode == .live
+    }
 
     private var connection: ConnectionState {
         #if DEBUG
@@ -257,3 +270,55 @@ enum HomeScreenshot {
     }
 }
 #endif
+
+/// Home's background: the song's artwork blurred, or its colour, with a dark
+/// band at the top. Nothing when there's no artwork.
+struct HomeBackground: View {
+    enum Style: String { case artwork, colour, none }
+
+    let artwork: CGImage?
+    let style: Style
+
+    /// `-homeBackground artwork|colour|none` in development builds; artwork by default.
+    static var style: Style {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let at = arguments.firstIndex(of: "-homeBackground"), arguments.count > at + 1,
+           let style = Style(rawValue: arguments[at + 1]) { return style }
+        #endif
+        return .artwork
+    }
+
+    var body: some View {
+        if let artwork, style != .none {
+            ZStack {
+                switch style {
+                case .artwork:
+                    Image(decorative: artwork, scale: 1)
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: 70, opaque: true)
+                        .saturation(1.25)
+                        // Pale covers stay readable under white text.
+                        .brightness(-0.12)
+                        .overlay(Color.black.opacity(0.35))
+                case .colour:
+                    let wall = ArtworkColours.wall(for: artwork)
+                    LinearGradient(colors: [wall.top, wall.bottom], startPoint: .top, endPoint: .bottom)
+                case .none:
+                    EmptyView()
+                }
+                // Dark behind the title and the Mac's card, fading out by the song.
+                LinearGradient(stops: [.init(color: .black.opacity(0.85), location: 0),
+                                       .init(color: .black.opacity(0.55), location: 0.18),
+                                       .init(color: .clear, location: 0.42)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .ignoresSafeArea()
+            .transition(.opacity)
+            .animation(.smooth(duration: 0.6), value: ObjectIdentifier(artwork))
+        } else {
+            Color(.systemBackground).ignoresSafeArea()
+        }
+    }
+}
