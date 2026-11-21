@@ -75,6 +75,16 @@ final class RecordingSleeper: @unchecked Sendable {
     private var stopAfter: Int?
     var recorded: [TimeInterval] { lock.withLock { values } }
 
+    /// Waits (up to a second) until `count` sleeps have been recorded. The
+    /// loop's next sleep comes just after the event a test waits for, so
+    /// reading `recorded` straight away can miss it (seen about one run in
+    /// four, 22 November 2026).
+    func waitFor(_ count: Int) async {
+        for _ in 0..<200 where recorded.count < count {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     /// Throws once `count` sleeps have happened, ending a polling loop.
     init(stopAfter count: Int? = nil) { stopAfter = count }
 
@@ -645,6 +655,7 @@ private final class ClientBox: @unchecked Sendable {
         let events = await collect(stream, count: 7)
         #expect(events == ["disconnected", "connecting", "connected:Studio Mac", "assigned:s1", "playback:42", "reconnecting", "connected:Studio Mac"])
         #expect(!events.contains { $0.hasPrefix("ended") })
+        await sleeper.waitFor(5)
         #expect(sleeper.recorded == [5, 1, 2, 4, 5], "poll, then 1, 2, 4 s of backoff, then polling resumes")
     }
 
