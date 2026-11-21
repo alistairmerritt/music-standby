@@ -285,6 +285,12 @@ public final class AppModel {
         return true
     }
 
+    /// iOS refused to make the player the system's own the last time it was
+    /// asked: error 5 for a request from the background while another player
+    /// (Apple Music) holds the Lock Screen, seen on 21 November 2026. Only an
+    /// app on screen can then take it.
+    public var primaryWasRefused: Bool { sessionController.lastPrimaryError != nil }
+
     public func stopNowPlaying() async {
         setNowPlayingEnabled(false)
         // A session from an earlier run that this one hasn't picked up yet,
