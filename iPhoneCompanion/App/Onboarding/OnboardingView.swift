@@ -239,8 +239,6 @@ private struct WelcomeScene: View {
         ActionsLayout(spacing: 24, horizontalPadding: 20, topPadding: 16) {
             NowPlayingPicture(artwork: record.cover, title: record.title, artist: record.artist, source: "MacBook Pro",
                               wall: record.wall, elapsed: elapsed, duration: record.duration)
-                .id(record.id)
-                .transition(.opacity)
             VStack(alignment: .leading, spacing: 12) {
                 Text("Your Mac’s music.\nOn your iPhone.").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)

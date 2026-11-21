@@ -1,6 +1,9 @@
 import CoreGraphics
 import Foundation
 import Observation
+import os
+
+private let diagnosticsLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "diagnostics")
 
 public struct DiagnosticEntry: Identifiable, Sendable {
     public let id = UUID()
@@ -282,6 +285,12 @@ public final class AppModel {
         return true
     }
 
+    /// iOS refused to make the player the system's own the last time it was
+    /// asked: error 5 for a request from the background while another player
+    /// (Apple Music) holds the Lock Screen, seen on 21 November 2026. Only an
+    /// app on screen can then take it.
+    public var primaryWasRefused: Bool { sessionController.lastPrimaryError != nil }
+
     public func stopNowPlaying() async {
         setNowPlayingEnabled(false)
         // A session from an earlier run that this one hasn't picked up yet,
@@ -537,6 +546,9 @@ public final class AppModel {
     }
 
     private func record(_ message: String) {
+        // Also to the device log, so background runs (the reminder, Shortcuts)
+        // can be read over a cable, not only in Diagnostics.
+        diagnosticsLog.notice("\(message, privacy: .public)")
         log.insert(DiagnosticEntry(date: now(), message: message), at: 0)
         if log.count > 100 { log.removeLast() }
     }
