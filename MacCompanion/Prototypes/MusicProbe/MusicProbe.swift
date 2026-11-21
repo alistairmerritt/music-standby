@@ -104,7 +104,7 @@ public final class MusicProbe {
     public var pollInterval: TimeInterval = 2.0
 
     /// NSAppleScript is not thread-safe: every execution goes through here.
-    private let queue = DispatchQueue(label: "au.ivystreet.musicstandby.musicprobe")
+    private let queue = DispatchQueue(label: "com.alistairmerritt.MusicStandBy.musicprobe")
     private var timer: DispatchSourceTimer?
     private var lastKey: String?
     private var compiledSnapshot: NSAppleScript?
