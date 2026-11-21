@@ -45,6 +45,11 @@ struct NowPlayingPanel: View {
                             }
                         }
                     }
+                    // The Mac's paused song while the iPhone plays another: its
+                    // controls aren't what's playing, so they step back (as
+                    // before the redesign, 17 November 2026).
+                    .disabled(dimsMacSong)
+                    .opacity(dimsMacSong ? 0.4 : 1)
                 case .onIPhone:
                     Text("Paused on Mac at \(Duration.seconds(attributes.elapsed(at: Date())), format: .time(pattern: .minuteSecond))")
                         .font(.subheadline)
@@ -64,23 +69,38 @@ struct NowPlayingPanel: View {
                              : AnyLayout(HStackLayout(alignment: .center, spacing: 16))
         layout {
             Artwork(image: model.artwork, size: stacked ? 180 : 120)
+                // Greyed while the iPhone plays and the Mac is paused: this is
+                // the Mac's song, not what's playing (Alistair, 21 November 2026).
+                .saturation(dimsMacSong ? 0 : 1)
+                .opacity(dimsMacSong ? 0.5 : 1)
             VStack(alignment: .leading, spacing: 4) {
                 if let label { label }
-                Text(track.title)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
-                Text(track.artist)
-                    .font(.body)
-                    .lineLimit(1)
-                Text(track.album)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(track.title)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(2)
+                    Text(track.artist)
+                        .font(.body)
+                        .lineLimit(1)
+                    Text(track.album)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .opacity(dimsMacSong ? 0.45 : 1)
             }
             .foregroundStyle(mode == .lastKnown ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The iPhone plays while the Mac is paused: the Mac's song greys out.
+    private var dimsMacSong: Bool {
+        switch mode {
+        case .onIPhone, .iPhonePlaysOther: true
+        case .live, .lastKnown: false
+        }
     }
 
     /// A small capsule above the title, saying where the music is.
