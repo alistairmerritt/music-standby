@@ -49,7 +49,7 @@ struct HomeView: View {
             .padding(.bottom, 32)
             .animation(.default, value: nowPlayingMode)
         }
-        // EXPERIMENT (22 November 2026): the song's artwork, blurred, behind
+        // The song’s artwork, blurred, behind
         // Home, as Apple Music's player does, with a dark band at the top
         // behind the title and the Mac's card.
         .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted) }
@@ -83,21 +83,22 @@ struct HomeView: View {
 
     // MARK: State
 
-    /// The artwork goes behind Home only while it's the Mac's song that plays
-    /// or is paused there, not while the phone has the music.
+    /// The artwork goes behind Home whenever there's a song, greyed (below)
+    /// when it isn't what's playing.
     private var showsArtworkBackground: Bool {
         guard attributes?.track != nil else { return false }
         switch nowPlayingMode {
-        case .live, .onIPhone, .iPhonePlaysOther: return HomeBackground.mutedStyle != .hide || nowPlayingMode == .live
-        case .lastKnown: return false
+        case .live: return true
+        case .onIPhone, .iPhonePlaysOther, .lastKnown: return HomeBackground.mutedStyle != .hide
         }
     }
 
-    /// While the phone has the music, the Mac's song is greyed out, and so is its background.
+    /// While the phone has the music, or the Mac can't be reached, the Mac's
+    /// song is greyed out, and so is its background.
     private var backgroundMuted: Bool {
         switch nowPlayingMode {
-        case .onIPhone, .iPhonePlaysOther: true
-        case .live, .lastKnown: false
+        case .onIPhone, .iPhonePlaysOther, .lastKnown: true
+        case .live: false
         }
     }
 

@@ -12,6 +12,8 @@ struct ConnectionCard: View {
     /// Offered when the Mac can't be reached. Nil hides the button.
     var reconnect: (() -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -24,7 +26,12 @@ struct ConnectionCard: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(macName)
                         .font(.headline)
-                        .lineLimit(1)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    // At the largest sizes the pill goes under the name, which
+                    // was squeezed to "Mac…" beside it (22 November 2026).
+                    if typeSize.isAccessibilitySize {
+                        StatusPill(text: label, color: tone.color, isWorking: tone == .working).padding(.top, 4)
+                    }
                     if let detail {
                         Text(detail)
                             .font(.subheadline)
@@ -33,7 +40,9 @@ struct ConnectionCard: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                StatusPill(text: label, color: tone.color, isWorking: tone == .working)
+                if !typeSize.isAccessibilitySize {
+                    StatusPill(text: label, color: tone.color, isWorking: tone == .working)
+                }
             }
             if needsAttention, let reconnect {
                 Button("Reconnect", action: reconnect)
