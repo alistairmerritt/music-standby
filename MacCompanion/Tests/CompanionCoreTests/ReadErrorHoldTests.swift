@@ -61,3 +61,37 @@ import StandByProtocol
         #expect(!h13)
     }
 }
+
+@Suite struct SlowMusicTests {
+    private func failure(_ detail: String?) -> MusicSnapshot {
+        MusicSnapshot(state: .error, capturedAt: Date(timeIntervalSince1970: 0), detail: detail)
+    }
+
+    @Test func aTimeoutIsSlowMusic() {
+        #expect(failure("AppleEvent timed out. (-1712)").isMusicSlow)
+    }
+
+    @Test func otherFailuresAreNot() {
+        #expect(!failure("Connection is invalid. (-609)").isMusicSlow)
+        #expect(!failure(nil).isMusicSlow)
+        #expect(!MusicSnapshot(state: .playing, capturedAt: Date(timeIntervalSince1970: 0), detail: "(-1712)").isMusicSlow)
+    }
+
+    @Test func theHoldLastsThirtySecondsByDefault() {
+        var hold = ReadErrorHold()
+        let good = MusicSnapshot(state: .playing, capturedAt: Date(timeIntervalSince1970: 0),
+                                 track: MusicTrack(title: "A", artist: "B", album: "C", duration: 200))
+        let early = hold.holds(failure("AppleEvent timed out. (-1712)").at(1), lastGood: good)
+        let late = hold.holds(failure("AppleEvent timed out. (-1712)").at(29), lastGood: good)
+        let over = hold.holds(failure("AppleEvent timed out. (-1712)").at(31), lastGood: good)
+        #expect(early && late && !over)
+    }
+}
+
+private extension MusicSnapshot {
+    func at(_ t: Double) -> MusicSnapshot {
+        var copy = self
+        copy.capturedAt = Date(timeIntervalSince1970: t)
+        return copy
+    }
+}
