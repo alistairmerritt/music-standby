@@ -38,6 +38,16 @@ struct RootView: View {
 
     var body: some View {
         Group {
+            #if DEBUG
+            if let page = WidgetMockups.page { WidgetMockupsView(page: page) } else { content }
+            #else
+            content
+            #endif
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        Group {
             if !model.isDemo, onboarding.route != nil || model.pairedMac == nil {
                 OnboardingView(flow: onboarding)
             } else {
