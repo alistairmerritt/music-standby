@@ -72,8 +72,13 @@ private struct NowPlayingSection: View {
                         Progress(message: message, duration: duration)
                     }
                 } else {
-                    Notice(symbol: "music.note", title: companion.snapshot?.state == .error ? "Can’t read Music right now" : "Nothing playing",
-                           detail: companion.snapshot?.detail, action: nil)
+                    if companion.snapshot?.isMusicSlow == true {
+                        Notice(symbol: "hourglass", title: "Music is slow to respond",
+                               detail: "Quitting and reopening Music usually fixes this.", action: nil)
+                    } else {
+                        Notice(symbol: "music.note", title: companion.snapshot?.state == .error ? "Can’t read Music right now" : "Nothing playing",
+                               detail: companion.snapshot?.detail, action: nil)
+                    }
                 }
                 TransportControls(companion: companion)
             }
