@@ -11,6 +11,7 @@ struct MusicStandByApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .environment(appDelegate.onboarding)
                 .environment(appDelegate.reminders)
                 .task { await model.start() }
                 // A new pairing has a new relay record, without the tokens.
@@ -30,20 +31,27 @@ struct MusicStandByApp: App {
     }
 }
 
+/// The first run until it's done, then Home. The demo always shows Home.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(OnboardingCoordinator.self) private var onboarding
 
     var body: some View {
         Group {
-            if !model.hasSeenIntro {
-                IntroView()
-            } else if model.pairedMac == nil {
-                NavigationStack { PairingView() }
+            if !model.isDemo, onboarding.route != nil || model.pairedMac == nil {
+                OnboardingView(flow: onboarding)
             } else {
                 NavigationStack { HomeView() }
             }
         }
-        .animation(.default, value: model.hasSeenIntro)
-        .animation(.default, value: model.pairedMac)
+        .animation(.smooth, value: onboarding.route == nil)
+        .animation(.smooth, value: model.isDemo)
+        // Unpaired, or out of the demo: setup again, from wherever fits.
+        .onChange(of: model.pairedMac) { old, new in
+            if old != nil, new == nil, !model.isDemo { onboarding.restart(model) }
+        }
+        .onChange(of: model.isDemo) { _, inDemo in
+            if !inDemo { onboarding.restart(model) }
+        }
     }
 }

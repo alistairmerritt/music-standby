@@ -24,6 +24,7 @@ enum AppEnvironment {
 
     static func makeModel() -> AppModel {
         #if DEBUG
+        if let preview = OnboardingPreview.fromLaunchArguments() { return preview.makeModel() }
         if ScreenshotMode.isOn { return ScreenshotMode.makeModel() }
         #endif
         let container = SharedContainer.appGroup()
@@ -71,6 +72,16 @@ enum AppEnvironment {
         let phoneMusic = SystemMusicPhonePlayer()
         model.phonePlaysMusic = { phoneMusic.nowPlaying()?.isPlaying == true }
         return model
+    }
+
+    /// Where the first run keeps its progress: the App Group, or, in
+    /// development builds' previews and screenshots, their own suites.
+    static func onboardingDefaults() -> UserDefaults {
+        #if DEBUG
+        if OnboardingPreview.fromLaunchArguments() != nil { return UserDefaults(suiteName: OnboardingPreview.suite) ?? .standard }
+        if ScreenshotMode.isOn { return UserDefaults(suiteName: ScreenshotMode.suite) ?? .standard }
+        #endif
+        return UserDefaults(suiteName: AppGroup.identifier) ?? .standard
     }
 
     /// The opt-in reminder. Its token goes to the current pairing's relay.

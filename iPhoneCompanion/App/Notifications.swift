@@ -9,6 +9,11 @@ import UserNotifications
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     let model = AppEnvironment.makeModel()
+    /// The first run. A phone paired before it existed counts as done.
+    lazy var onboarding = OnboardingCoordinator(
+        progress: OnboardingProgress(defaults: AppEnvironment.onboardingDefaults(), alreadyPaired: model.pairedMac != nil && !model.isDemo),
+        model: model
+    )
     let reminders = AppEnvironment.makeReminders()
     let handBack = AppEnvironment.makeHandBack()
 
