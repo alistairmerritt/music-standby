@@ -22,7 +22,9 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 28) {
                 if isDemoLayout { demoBanner }
                 if !model.isDemo, !onboarding.progress.snapshot.playerHasShown { finishSetupBanner }
-                if let connectionNotice { connectionNotice }
+                ConnectionCard(macName: model.pairedMac?.name ?? "Your Mac", connection: connection, isDemo: isDemoLayout) {
+                    Task { await model.reconnect() }
+                }
 
                 NowPlayingPanel(attributes: attributes, mode: nowPlayingMode)
 
@@ -47,7 +49,6 @@ struct HomeView: View {
             .animation(.default, value: nowPlayingMode)
         }
         .navigationTitle("Second Chair")
-        .navigationSubtitle(connectionSummary)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Settings", systemImage: "gearshape") { showsSettings = true }
@@ -156,36 +157,6 @@ struct HomeView: View {
         if ScreenshotMode.isOn { return false }
         #endif
         return model.isDemo
-    }
-
-    // MARK: Connection
-
-    /// "MacBook Pro · Connected", under the title.
-    private var connectionSummary: Text {
-        let name = model.pairedMac?.name ?? "Your Mac"
-        if isDemoLayout { return Text("\(name) · Simulated") }
-        return Text("\(name) · \(connection.summary)")
-    }
-
-    /// Only when the Mac can't be reached: what to do, and Reconnect.
-    private var connectionNotice: Notice? {
-        guard !isDemoLayout else { return nil }
-        let reconnect = { Task { await model.reconnect() } }
-        return switch connection {
-        case .macOffline:
-            Notice(symbol: "moon.zzz", title: "\(model.pairedMac?.name ?? "Your Mac") is offline.",
-                   text: "Wake your Mac and check Second Chair is open on it.",
-                   button: "Reconnect") { _ = reconnect() }
-        case .disconnected:
-            Notice(symbol: "wifi.slash", title: "Not connected.",
-                   text: "Check this iPhone is online, then reconnect.",
-                   button: "Reconnect") { _ = reconnect() }
-        case .failed(let reason):
-            Notice(symbol: "exclamationmark.triangle", title: "Can’t connect.", text: reason,
-                   button: "Reconnect") { _ = reconnect() }
-        case .connected, .connecting, .reconnecting:
-            nil
-        }
     }
 
     // MARK: Banners

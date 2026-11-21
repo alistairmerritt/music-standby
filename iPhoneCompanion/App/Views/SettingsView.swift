@@ -20,6 +20,13 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                ConnectionCard(macName: model.pairedMac?.name ?? "Your Mac", connection: model.connection, isDemo: isDemoLayout) {
+                    Task { await model.reconnect() }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
             lockScreenSection
             if !isDemoLayout { continueListeningSection }
             macSection
@@ -101,8 +108,6 @@ struct SettingsView: View {
 
     private var macSection: some View {
         Section("Mac") {
-            LabeledContent("Name", value: model.pairedMac?.name ?? "")
-            LabeledContent("Status", value: statusText)
             if !isDemoLayout {
                 Button("Reconnect to Mac") {
                     Task { await model.reconnect() }
@@ -134,15 +139,6 @@ struct SettingsView: View {
             Text("Help")
         } footer: {
             Text(versionText)
-        }
-    }
-
-    /// The full state, reason included, as Home's summary leaves it short.
-    private var statusText: String {
-        switch model.connection {
-        case .failed(let reason): reason
-        case .macOffline: "Mac Offline"
-        default: model.connection.summary
         }
     }
 
