@@ -141,3 +141,12 @@ public enum SnapshotParser {
         return (value * 1000).rounded() / 1000
     }
 }
+
+extension MusicSnapshot {
+    /// Music didn't answer in time (-1712): busy, rather than refusing or
+    /// gone. Seen on 21 November 2026 with a Music that had run for 8 days;
+    /// quitting and reopening Music fixed it.
+    public var isMusicSlow: Bool {
+        state == .error && (detail?.hasSuffix("(-1712)") ?? false)
+    }
+}
