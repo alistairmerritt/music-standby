@@ -203,12 +203,15 @@ private struct ShowOnLockScreenButton: View {
 
     var body: some View {
         Menu {
-            Button("Stop Showing", systemImage: "eye.slash") {
+            Button("Stop Showing", systemImage: "eye.slash", role: .destructive) {
                 Task { await model.stopNowPlaying() }
             }
             .disabled(!sessionIsActive)
         } label: {
-            Label("Show on Lock Screen", systemImage: "lock.iphone")
+            // "Refresh" once the app has a session: it may be showing already,
+            // and asking again is how a hidden player comes back.
+            Label(sessionIsActive ? "Refresh Lock Screen" : "Show on Lock Screen",
+                  systemImage: sessionIsActive ? "arrow.clockwise" : "lock.iphone")
                 .frame(maxWidth: .infinity)
         } primaryAction: {
             Task { await model.activateNowPlaying() }

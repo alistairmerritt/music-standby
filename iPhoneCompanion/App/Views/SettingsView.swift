@@ -50,11 +50,13 @@ struct SettingsView: View {
 
     private var lockScreenSection: some View {
         Section {
-            Button("Show on Lock Screen") {
+            // "Refresh" once the app has a session: it may be showing already,
+            // and asking again is how a hidden player comes back.
+            Button(model.sessionController.isActive ? "Refresh Lock Screen" : "Show on Lock Screen") {
                 Task { await model.activateNowPlaying() }
             }
             .disabled(model.attributes == nil)
-            Button("Stop Showing") {
+            Button("Stop Showing", role: .destructive) {
                 Task { await model.stopNowPlaying() }
             }
             .disabled(!model.sessionController.isActive)
@@ -82,7 +84,7 @@ struct SettingsView: View {
         }
     }
 
-    private var continueListeningSection: some View {
+    @ViewBuilder private var continueListeningSection: some View {
         Section {
             if let status = continueListening {
                 LabeledContent("Status", value: status.title)
@@ -95,14 +97,20 @@ struct SettingsView: View {
                     }
                 }
             }
-            Toggle("Automatically Add to Library", isOn: $addsToLibrary)
         } header: {
             Text("Continue Listening")
         } footer: {
-            VStack(alignment: .leading, spacing: 8) {
-                if let detail = continueListening?.detail { Text(detail) }
-                Text("When you continue from iPhone to Mac, Second Chair can add the playlist or album to your Apple Music library if your Mac needs it. It stays there until you remove it. With this off, your Mac plays the song’s station instead.")
-            }
+            if let detail = continueListening?.detail { Text(detail) }
+        }
+        // Its own section, so the heading says when it applies: only Continue
+        // on Mac, only an Apple Music playlist or album not in the library
+        // (21 November 2026; was "Automatically Add to Library").
+        Section {
+            Toggle("Add Playlists and Albums to Library", isOn: $addsToLibrary)
+        } header: {
+            Text("When Continuing on Mac")
+        } footer: {
+            Text("Your Mac can only continue a playlist or album that’s in your library. With this on, Second Chair adds it when needed, and it stays in your library. With this off, your Mac plays the song’s station instead.")
         }
     }
 
