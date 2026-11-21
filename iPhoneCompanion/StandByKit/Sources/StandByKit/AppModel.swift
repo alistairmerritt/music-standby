@@ -438,6 +438,8 @@ public final class AppModel {
         if updated.track == nil, let previous = attributes?.track { updated.track = previous }
         let previousArtworkID = attributes?.track?.artworkReference
         attributes = updated
+        // The Continue Listening widget's picture. Not the demo's songs.
+        if !isDemo { WidgetSnapshot.publish(updated) }
         let artworkID = updated.track?.artworkReference
         if artworkID != previousArtworkID {
             if let artworkID {
