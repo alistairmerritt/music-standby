@@ -18,7 +18,7 @@ struct DemoRecord: Identifiable {
 
     static let welcome: [DemoRecord] = [
         DemoRecord(id: "low-sun", title: "Low Sun", artist: "Drift Hotel", duration: 214, wall: (Color(hex: 0xBC5B3B), Color(hex: 0x472316))),
-        DemoRecord(id: "rooftop-season", title: "Rooftop Season", artist: "Tavi Rhodes", duration: 188, wall: (Color(hex: 0xB59071), Color(hex: 0x6B4F38))),
+        DemoRecord(id: "rooftop-season", title: "Rooftop Season", artist: "Remy Saint", duration: 188, wall: (Color(hex: 0xB59071), Color(hex: 0x6B4F38))),
         DemoRecord(id: "small-hours", title: "Small Hours", artist: "Fen Lights", duration: 252, wall: (Color(hex: 0x8B7756), Color(hex: 0x352D21))),
         DemoRecord(id: "ticket-hall", title: "Ticket Hall", artist: "Polly Atlas", duration: 178, wall: (Color(hex: 0xA27314), Color(hex: 0x3E2C08))),
     ]
@@ -86,6 +86,8 @@ struct NowPlayingPicture: View {
         ZStack {
             LinearGradient(colors: [wall.top, wall.bottom], startPoint: .top, endPoint: .bottom)
             artwork.resizable().scaledToFill().blur(radius: 40).opacity(0.45)
+                .id(title)
+                .transition(.opacity)
             platter.padding(16)
         }
         .clipShape(.rect(cornerRadius: 30, style: .continuous))
@@ -99,14 +101,22 @@ struct NowPlayingPicture: View {
 
     private var platter: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                cover.frame(width: 58, height: 58)
-                VStack(alignment: .leading, spacing: 1) {
-                    Label(source, systemImage: "laptopcomputer").font(.footnote).foregroundStyle(.white.opacity(0.6)).labelStyle(.titleAndIcon)
-                    Text(title).font(.headline).foregroundStyle(.white).lineLimit(1)
-                    Text(artist).font(.subheadline).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+            // A change of song: the old song fades out fully before the new
+            // one fades in, so the titles never show through each other
+            // (a tester saw "Low SunSeason", 21 November 2026).
+            ZStack(alignment: .leading) {
+                HStack(spacing: 12) {
+                    cover.frame(width: 58, height: 58)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Label(source, systemImage: "laptopcomputer").font(.footnote).foregroundStyle(.white.opacity(0.6)).labelStyle(.titleAndIcon)
+                        Text(title).font(.headline).foregroundStyle(.white).lineLimit(1)
+                        Text(artist).font(.subheadline).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .id(title)
+                .transition(.asymmetric(insertion: .opacity.animation(.easeIn(duration: 0.3).delay(0.3)),
+                                        removal: .opacity.animation(.easeOut(duration: 0.25))))
             }
             VStack(spacing: 4) {
                 GeometryReader { proxy in
@@ -230,21 +240,35 @@ struct MacPicture: View {
             switch part {
             case .menuBar:
                 EmptyView()
+            // As Mac 0.3.9's menu draws them (21 November 2026): setup as one
+            // card at a time, and a status footer with the gear.
             case .pairButton:
-                connectedLine
-                row(MacMenuText.iPhone, MacMenuText.notPaired)
-                macButton(MacMenuText.pairIPhone, prominent: false, pointed: true)
-            case .pairingCode:
-                Text("• • •  • • •").font(.system(.title2, design: .monospaced).weight(.semibold)).foregroundStyle(.secondary)
-                Text(MacMenuText.typeThisOnIPhone).font(.caption).foregroundStyle(.secondary)
-            case .allow:
-                Text(MacMenuText.wantsToShow("iPhone")).font(.callout).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    macButton(MacMenuText.allow, prominent: true, pointed: true)
-                    macButton(MacMenuText.dontAllow, prominent: false, pointed: false)
+                card {
+                    Text("Pair your iPhone.").font(.callout.weight(.semibold))
+                    Text("Open Second Chair on your iPhone, then pair it with this Mac.").font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    macButton(MacMenuText.pairIPhone, prominent: true, pointed: true)
                 }
+                footer(paired: false)
+            case .pairingCode:
+                card {
+                    Label("iPhone pairing code", systemImage: "iphone").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("• • •  • • •").font(.system(.title2, design: .monospaced).weight(.semibold)).foregroundStyle(.secondary)
+                    Text(MacMenuText.typeThisOnIPhone).font(.caption).foregroundStyle(.secondary)
+                }
+                footer(paired: false)
+            case .allow:
+                card {
+                    Text(MacMenuText.wantsToShow("iPhone")).font(.callout.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        macButton(MacMenuText.dontAllow, prominent: false, pointed: false)
+                        macButton(MacMenuText.allow, prominent: true, pointed: true)
+                    }
+                }
+                footer(paired: false)
             case .play(let title, let artist, let playing):
-                Text(MacMenuText.onThisMac).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(MacMenuText.onThisMac.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                 HStack(spacing: 10) {
                     songArtwork.frame(width: 50, height: 50)
                     VStack(alignment: .leading, spacing: 1) {
@@ -267,19 +291,31 @@ struct MacPicture: View {
                     Image(systemName: "forward.fill")
                 }
                 .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                footer(paired: true)
             case .connectToMusic:
-                Text(MacMenuText.continueListening).font(.callout.weight(.semibold))
-                Text(MacMenuText.connectToMusicNote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                macButton(MacMenuText.connectToMusic, prominent: false, pointed: true)
+                card {
+                    Text("Continue Listening isn’t set up.").font(.callout.weight(.semibold))
+                    HStack {
+                        macButton(MacMenuText.connectToMusic, prominent: false, pointed: true)
+                        Spacer(minLength: 0)
+                        Text("Not Now").font(.caption).foregroundStyle(Color.accentColor).lineLimit(1).fixedSize()
+                    }
+                }
+                footer(paired: true)
             case .musicCode:
-                Text(MacMenuText.continueListening).font(.callout.weight(.semibold))
-                Text(MacMenuText.musicCodeNote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("• • • •").font(.system(.title2, design: .monospaced).weight(.semibold)).foregroundStyle(.secondary)
-                macButton(MacMenuText.cancel, prominent: false, pointed: false)
+                card {
+                    Label("Music connection code", systemImage: "music.note.house").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(MacMenuText.musicCodeNote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text("• • • •").font(.system(.title2, design: .monospaced).weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        macButton(MacMenuText.cancel, prominent: false, pointed: false)
+                    }
+                }
             case .connectedToMusic:
-                Text(MacMenuText.continueListening).font(.callout.weight(.semibold))
                 Label(MacMenuText.connectedToMusicNote, systemImage: "checkmark.circle.fill")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                footer(paired: true)
             }
         }
         .padding(12)
@@ -288,6 +324,25 @@ struct MacPicture: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.12)))
         .shadow(color: .black.opacity(0.25), radius: 10, y: 6)
         .padding(.bottom, 14)
+    }
+
+    /// One setup card, as in the Mac's menu.
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) { content() }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.secondary.opacity(0.12), in: .rect(cornerRadius: 10))
+    }
+
+    /// "● Online · iPhone paired" and the gear, the menu's last line.
+    private func footer(paired: Bool) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(.green).frame(width: 6, height: 6)
+            Text(paired ? "Online · iPhone paired" : "Online · No iPhone paired").font(.caption2).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Image(systemName: "gearshape").font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.top, 2)
     }
 
     /// Music's window, with Second Chair selected under Devices, where the four digits go.
@@ -323,17 +378,11 @@ struct MacPicture: View {
         }
     }
 
-    private func row(_ name: String, _ value: String) -> some View {
-        HStack(spacing: 6) { Text(name); Text(value).foregroundStyle(.secondary) }.font(.callout)
-    }
-
-    private var connectedLine: some View {
-        HStack(spacing: 6) { Circle().fill(.green).frame(width: 7, height: 7); Text(MacMenuText.connected) }.font(.callout)
-    }
-
     private func macButton(_ title: String, prominent: Bool, pointed: Bool) -> some View {
         Text(title)
             .font(.callout)
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 12).padding(.vertical, 4)
             .foregroundStyle(prominent ? .white : .primary)
             .background(prominent ? Color.accentColor : Color.primary.opacity(0.1), in: .rect(cornerRadius: 6))

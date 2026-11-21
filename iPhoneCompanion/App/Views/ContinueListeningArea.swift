@@ -223,16 +223,20 @@ struct Notice: View {
                 if let symbol {
                     Image(systemName: symbol).foregroundStyle(.secondary)
                 }
+                // The button goes under the words, so they have the full
+                // width (the demo's banner wrapped to seven lines beside it,
+                // 21 November 2026).
                 VStack(alignment: .leading, spacing: 2) {
                     if let title { Text(title).font(.subheadline.weight(.semibold)) }
                     Text(text).font(.subheadline).foregroundStyle(.secondary)
+                    if let button, let action {
+                        Button(button, action: action)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .padding(.top, 8)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if let button, let action {
-                    Button(button, action: action)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
             }
             .padding(14)
             .background(.fill.quaternary, in: .rect(cornerRadius: 14))
