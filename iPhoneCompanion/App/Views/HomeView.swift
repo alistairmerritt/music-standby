@@ -52,7 +52,7 @@ struct HomeView: View {
         // EXPERIMENT (22 November 2026): the song's artwork, blurred, behind
         // Home, as Apple Music's player does, with a dark band at the top
         // behind the title and the Mac's card.
-        .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style) }
+        .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted) }
         .environment(\.colorScheme, showsArtworkBackground && model.artwork != nil && HomeBackground.style != .none ? .dark : colorScheme)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationTitle("Second Chair")
@@ -86,7 +86,19 @@ struct HomeView: View {
     /// The artwork goes behind Home only while it's the Mac's song that plays
     /// or is paused there, not while the phone has the music.
     private var showsArtworkBackground: Bool {
-        attributes?.track != nil && nowPlayingMode == .live
+        guard attributes?.track != nil else { return false }
+        switch nowPlayingMode {
+        case .live, .onIPhone, .iPhonePlaysOther: return HomeBackground.mutedStyle != .hide || nowPlayingMode == .live
+        case .lastKnown: return false
+        }
+    }
+
+    /// While the phone has the music, the Mac's song is greyed out, and so is its background.
+    private var backgroundMuted: Bool {
+        switch nowPlayingMode {
+        case .onIPhone, .iPhonePlaysOther: true
+        case .live, .lastKnown: false
+        }
     }
 
     private var connection: ConnectionState {
@@ -278,6 +290,19 @@ struct HomeBackground: View {
 
     let artwork: CGImage?
     let style: Style
+    /// Greyed and darker, as the artwork is while the iPhone has the music.
+    var muted = false
+
+    enum MutedStyle: String { case grey, hide }
+    /// `-homeBackgroundMuted grey|hide` in development builds; grey by default.
+    static var mutedStyle: MutedStyle {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let at = arguments.firstIndex(of: "-homeBackgroundMuted"), arguments.count > at + 1,
+           let style = MutedStyle(rawValue: arguments[at + 1]) { return style }
+        #endif
+        return .grey
+    }
 
     /// `-homeBackground artwork|colour|none` in development builds; artwork by default.
     static var style: Style {
@@ -298,10 +323,10 @@ struct HomeBackground: View {
                         .resizable()
                         .scaledToFill()
                         .blur(radius: 70, opaque: true)
-                        .saturation(1.25)
+                        .saturation(muted ? 0 : 1.25)
                         // Pale covers stay readable under white text.
                         .brightness(-0.12)
-                        .overlay(Color.black.opacity(0.35))
+                        .overlay(Color.black.opacity(muted ? 0.5 : 0.35))
                 case .colour:
                     let wall = ArtworkColours.wall(for: artwork)
                     LinearGradient(colors: [wall.top, wall.bottom], startPoint: .top, endPoint: .bottom)
@@ -317,6 +342,7 @@ struct HomeBackground: View {
             .ignoresSafeArea()
             .transition(.opacity)
             .animation(.smooth(duration: 0.6), value: ObjectIdentifier(artwork))
+            .animation(.smooth(duration: 0.6), value: muted)
         } else {
             Color(.systemBackground).ignoresSafeArea()
         }
