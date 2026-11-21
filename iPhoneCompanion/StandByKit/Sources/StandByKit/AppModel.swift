@@ -1,6 +1,9 @@
 import CoreGraphics
 import Foundation
 import Observation
+import os
+
+private let diagnosticsLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "diagnostics")
 
 public struct DiagnosticEntry: Identifiable, Sendable {
     public let id = UUID()
@@ -537,6 +540,9 @@ public final class AppModel {
     }
 
     private func record(_ message: String) {
+        // Also to the device log, so background runs (the reminder, Shortcuts)
+        // can be read over a cable, not only in Diagnostics.
+        diagnosticsLog.notice("\(message, privacy: .public)")
         log.insert(DiagnosticEntry(date: now(), message: message), at: 0)
         if log.count > 100 { log.removeLast() }
     }

@@ -11,7 +11,13 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     /// Opens the Music app, where Continue on iPhone leaves the song.
     nonisolated static let appURL = URL(string: "music://")!
 
-    private let player = MPMusicPlayerController.systemMusicPlayer
+    /// Made on first use, never at init. Touching the system player makes
+    /// iOS launch the Music app in the background, and Music then takes the
+    /// Lock Screen's Now Playing slot. The app is made at every launch,
+    /// including the background ones from the reminder and the Show in Now
+    /// Playing automation, so an eager player hid Second Chair's player each
+    /// time (21 November 2026, seen in the device log).
+    private lazy var player = MPMusicPlayerController.systemMusicPlayer
     /// The Apple Music playlist or album `appleMusicSource()` found last,
     /// for `addToLibrary`.
     private var lastFound: FoundContainer?
