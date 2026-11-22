@@ -4,6 +4,10 @@ Everything to fill in on App Store Connect for version 1.0, in the order its pag
 Written 16 November 2026, against the app's code and madewithmerritt.com/second-chair/. The
 first build for review is TestFlight 202611161444, version 1.0.
 
+**Updated 23 November 2026:** the subtitle, description and review notes are now the
+final wording from the app's owner. See "Checks before submitting" under App Review
+Information for what to settle first.
+
 Contact details for App Review (name, phone, email) aren't kept here: this repository is
 public.
 
@@ -23,7 +27,7 @@ public.
 | Field | Value |
 | --- | --- |
 | Name | Second Chair *(already set on the app record made for TestFlight; check it reads "Second Chair")* |
-| Subtitle (30) | Your Mac's music on iPhone |
+| Subtitle (30) | Apple Music, across devices *(27; see check 1 below. The earlier choice was "Your Mac's music on iPhone")* |
 | Primary language | English (Australia), to match the app's spelling ("recognises", "catalogue") |
 | Category | Music; secondary: Utilities |
 | Content rights | Contains third-party content: **Yes**, and has the rights: **Yes**. It shows the song names and artwork from the person's own Music app and Apple Music, for them alone, as a remote does. It ships no music or artwork of its own; the demo's songs and covers are invented |
@@ -68,30 +72,34 @@ Music playing on your Mac, on your iPhone's Lock Screen and in StandBy. Play, pa
 
 ### Description (4000)
 
+Plain text: App Store descriptions don't support bold, so the headings are plain lines.
+
 ```
-Second Chair puts the music playing on your Mac on your iPhone's Lock Screen and in StandBy, and lets you control it from there.
+Music on your Mac. Now Playing on your iPhone.
 
-It needs Second Chair for Mac, a free download from madewithmerritt.com, running on your Mac alongside the Music app.
+Second Chair brings music playing on your Mac to your iPhone's native Now Playing, including the Lock Screen, Control Centre, StandBy and Apple Watch.
 
-Press it here. It happens there.
-• See the song, artwork and progress from your Mac on your iPhone's Lock Screen, in StandBy, in Control Centre and on your Apple Watch.
-• Play, pause, skip and scrub. The music keeps playing on your Mac.
-• Change the volume of Music on your Mac from the app.
-• When the song changes on your Mac, your iPhone keeps up by itself.
-• Player gone from your Lock Screen or StandBy? An optional reminder brings it back when your Mac starts playing again.
+Play, pause, skip and control your Mac's music without being at your desk. When the song changes on your Mac, your iPhone follows, even when you're away from home.
 
 Take your music with you. Then bring it back.
-• Continue on iPhone picks up the song from your Mac in Apple Music on your iPhone, from the same point, with your playlist, album, station or Up Next queue, shuffled or not.
-• Continue on Mac sends what your iPhone is playing back to your Mac, from the same point. Your playlist, album or shuffled library carries on there too.
-• Continue Listening works with Shortcuts, so your music can move between devices without you lifting a finger.
 
-Requirements
-• An iPhone with iOS 27.
-• A Mac with Apple silicon and macOS 27, running Music and Second Chair for Mac.
-• An internet connection on both. One iPhone per Mac.
-• Continue Listening needs an Apple Music subscription on your iPhone, and a one-time connection on your Mac.
+Continue Listening lets you move playback between your Mac and iPhone, picking up where you left off.
 
-No accounts, no ads and no tracking.
+Your playlists, albums, stations and playback settings can come along too, with some differences depending on how you're listening.
+
+Make it your own.
+
+Use Apple Shortcuts to bring your music between devices as part of your routine. Continue listening on your iPhone when you connect to CarPlay, or return to your Mac when you reconnect your headphones.
+
+What you'll need
+
+Second Chair works with Apple's Music app on your Mac. You'll need the free Second Chair Mac companion, available from madewithmerritt.com/second-chair.
+
+Both devices need an internet connection. Continue Listening also requires an Apple Music subscription on your iPhone.
+
+Designed for iOS 27 and macOS 27, with an Apple silicon Mac.
+
+Second Chair is an independent project and isn't affiliated with Apple.
 ```
 
 ### Keywords (100)
@@ -131,28 +139,47 @@ same day.
 ### Notes (4000)
 
 ```
-Second Chair shows the music playing in the Music app on a person's Mac as Now Playing on their iPhone: on the Lock Screen, in StandBy, in Control Centre and on Apple Watch. Its controls go back to the Mac. It is the iPhone half of a pair: Second Chair for Mac is a free, notarised download from https://madewithmerritt.com/second-chair/. There is no account or sign-in.
+Second Chair is a paid iPhone companion application for Apple's Music app on macOS. The Mac companion is provided free of charge.
+Mac companion: https://madewithmerritt.com/second-chair/
+Setup instructions: https://madewithmerritt.com/second-chair/getting-started/
+Second Chair has no user accounts or sign-in. It requires a compatible Mac running the free companion application for live remote playback.
+To test the full experience:
 
-To review without a Mac, use the built-in demo:
-1. Open Second Chair and tap Continue.
-2. On Pair with Mac, tap Try a Demo. A simulated Mac called "Demo Mac" plays three invented songs. Nothing plays aloud.
-3. Tap Show in Now Playing.
-4. Lock the iPhone. The Lock Screen shows the demo song with its artwork; play, pause, skip and scrub work there and in Control Centre. With the iPhone locked, on its side and charging, it shows in StandBy.
-5. Leave Demo, at the top of the app, goes back to pairing.
+1. Install and open Second Chair on an Apple silicon Mac running macOS 27.
+2. Allow it to control Music when prompted.
+3. Open Second Chair on the iPhone.
+4. In the Mac menu bar, choose Pair iPhone…
+5. Enter the six-digit code on the iPhone and approve the pairing request on the Mac.
+6. Start playing music in the Mac's Music app.
+7. Verify that the track appears in the iPhone's native Now Playing interface and that playback controls operate Music on the Mac.
 
-What the demo can't show:
-- Continue Listening moves the song from the Mac to Apple Music on the iPhone and back. It needs the real Mac, so the demo only describes it. The attached video shows it with a real Mac.
-- The optional reminder ("Remind When Music Starts") comes from the server, so it's hidden in the demo.
-
-Permissions:
-- Apple Music (media library) access is asked for only when the person uses Continue Listening, which plays the song in Apple Music on the iPhone.
-- Continue on Mac adds an Apple Music playlist or album to the person's library only if they turn on "Automatically Add to Library" under Continue Listening (off by default), because the Mac can only play one from the library.
-- Notifications are asked for only when the person turns on the reminder. The reminder, and the alert for Continue from iPhone (asked for at the Mac), are time-sensitive, so they show during a Focus.
-
-Background: the app's remote-notification background mode lets the Mac's "Continue from iPhone" start the hand-over while the app isn't open. Now Playing updates reach the Lock Screen through the Now Playing push type of Apple's remote media session.
-
-Privacy: no accounts, ads, analytics or tracking. Policy: https://madewithmerritt.com/privacy/#second-chair
+Continue Listening: This feature moves actual playback between devices. It requires an Apple Music subscription on the iPhone and a separate connection to Music on the Mac.
+In the Mac app, choose Connect to Music… and enter the displayed four-digit code in the Music app's Devices sidebar. Then use Continue on iPhone or Continue on Mac to transfer playback.
+Without a Mac: The iPhone app includes Try a Demo, which allows reviewers to explore the interface without pairing a computer. The demo is illustrative and does not replace a live hardware test.
+External services: Second Chair uses a developer-operated relay and Apple's push notification service to communicate playback information and controls between the two devices. Apple Music services are used for playback and catalogue information.
+Tested hardware: MacBook Pro (2021 and 2025), MacBook Air (2025), and iPhone 13, 15 and 16.
+Please refer to the supplied demonstration video for the complete pairing and playback experience.
 ```
+
+### Checks before submitting (23 November 2026)
+
+Checked against the code on `feature/widgets` and `feature/mac-menu-redesign`.
+
+1. **The subtitle uses "Apple Music".** Guideline 5.2.5 limits Apple trademarks in metadata,
+   and the subtitle is the riskiest place for one. If it's rejected: "Your Mac’s music, on
+   iPhone" (27).
+2. **"Try a Demo" is now "Explore the Demo"** in the redesigned first run (PR #27). Match the
+   build that's submitted.
+3. **Pairing:** the reviewer clicks ♪ in the menu bar first, then **Pair iPhone…**. **Connect
+   to Music…** is exact; the app says "In Music, choose Second Chair under Devices and type the
+   four-digit code."
+4. **The notes refer to a demonstration video**, so it must be attached (shot list below).
+5. **The permissions paragraph from the earlier notes is gone:** Apple Music access only for
+   Continue Listening, notifications only for the reminder, the remote-notification background
+   mode, and the Add to Library setting (off by default). Worth adding back briefly.
+6. **"Designed for macOS 27":** the Mac app runs on macOS 14 or later (Apple silicon only);
+   fine as what it's tested on.
+7. Not checked: Apple Watch, and the tested-hardware list.
 
 ### Review video
 
