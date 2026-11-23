@@ -278,12 +278,14 @@ private struct ContinueButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.medium))
-            .foregroundStyle(prominent ? Color.white : Color.accentColor)
+            // Greyed out, the quiet style's words go grey too: blue on the
+            // faded grey was hard to read (Alistair, 23 November 2026).
+            .foregroundStyle(prominent ? Color.white : isEnabled ? Color.accentColor : Color.primary.opacity(0.4))
             .padding(.horizontal, 20)
             .frame(minHeight: 50)
-            .background(Capsule().fill(prominent ? Color.accentColor : Color.primary.opacity(0.12)))
+            .background(Capsule().fill(prominent ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.12 : 0.07)))
             .contentShape(Capsule())
-            .opacity(isEnabled ? 1 : 0.45)
+            .opacity(isEnabled || !prominent ? 1 : 0.45)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.smooth(duration: 0.2), value: configuration.isPressed)
     }
