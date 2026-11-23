@@ -26,9 +26,6 @@ struct NowPlayingPanel: View {
     @Environment(\.openURL) private var openURL
     let attributes: MacPlaybackAttributes?
     let mode: NowPlayingMode
-    /// A hand-over started on Home, which the artwork shows.
-    var handoff: HandoffPhase? = nil
-    var landings = 0
 
     var body: some View {
         if let attributes, let track = attributes.track {
@@ -88,7 +85,7 @@ struct NowPlayingPanel: View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
                              : AnyLayout(HStackLayout(alignment: .center, spacing: 16))
         layout {
-            HandoffArtwork(phase: handoff, landings: landings, cornerRadius: 10) {
+            HandoffArtwork {
                 Artwork(image: model.artwork, size: stacked ? 180 : 120)
             }
                 // Greyed while the iPhone plays and the Mac is paused: this is

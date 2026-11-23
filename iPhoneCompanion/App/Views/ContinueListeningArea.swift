@@ -20,14 +20,10 @@ struct ContinueListeningArea: View {
     let setUp: () -> Void
     /// Both directions quiet, when Home's accent is elsewhere (Open Apple Music).
     var quiet = false
-    /// Shared with the artwork, which shows the music moving.
-    var handoff: Binding<HandoffPhase?> = .constant(nil)
-    var landings: Binding<Int> = .constant(0)
 
     private typealias Direction = HandoffDirection
     @State private var working: Direction?
     @State private var result: (text: String, isFailure: Bool)?
-    @State private var successes = 0
 
     private var macPlaying: Bool { model.attributes?.isPlaying == true }
     private var phonePlaying: Bool {
@@ -99,7 +95,6 @@ struct ContinueListeningArea: View {
         .animation(.smooth(duration: 0.4), value: ButtonSet(order: order, quiet: quiet))
         .animation(.smooth(duration: 0.3), value: result?.text)
         .onChange(of: [macPlaying, phonePlaying]) { result = nil }
-        .sensoryFeedback(.success, trigger: successes)
         #if DEBUG
         .onChange(of: DemoHandover.shared.autoRuns) {
             Task { await run(DemoHandover.shared.autoDirection) }
@@ -170,7 +165,7 @@ struct ContinueListeningArea: View {
     private func run(_ direction: Direction) async {
         working = direction
         result = nil
-        handoff.wrappedValue = .moving(direction)
+        HandoffMoment.shared.begin(direction)
         let outcome: (text: String, isFailure: Bool)?
         #if DEBUG
         if ScreenshotMode.isOn {
@@ -182,20 +177,14 @@ struct ContinueListeningArea: View {
         outcome = direction == .toPhone ? await continueHere() : await sendBack()
         #endif
         result = outcome
-        let landed = outcome == nil || outcome?.isFailure == false
-        if landed {
-            successes += 1
-            handoff.wrappedValue = .landed(direction)
-            landings.wrappedValue += 1
+        // The ripple and the firm tap when it lands (HandoffMoment).
+        if outcome == nil || outcome?.isFailure == false {
+            HandoffMoment.shared.land(direction)
         } else {
-            handoff.wrappedValue = nil
+            HandoffMoment.shared.fail()
         }
         here = player.nowPlaying()
         working = nil
-        if landed {
-            try? await Task.sleep(for: .seconds(1))
-            if handoff.wrappedValue == .landed(direction) { handoff.wrappedValue = nil }
-        }
     }
 
     private func continueHere() async -> (text: String, isFailure: Bool)? {

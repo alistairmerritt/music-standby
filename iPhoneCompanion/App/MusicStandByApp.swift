@@ -51,7 +51,9 @@ struct RootView: View {
             if !model.isDemo, onboarding.route != nil || model.pairedMac == nil {
                 OnboardingView(flow: onboarding)
             } else {
+                // The hand-over's light and ripple cover all of Home, title included.
                 NavigationStack { HomeView() }
+                    .modifier(HandoffEffect())
             }
         }
         .animation(.smooth, value: onboarding.route == nil)

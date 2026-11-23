@@ -16,9 +16,6 @@ struct HomeView: View {
     @State private var canPlayCatalog: Bool?
     @Environment(\.openURL) private var openURL
     @State private var showsSettings = false
-    /// A hand-over started on Home, and how many have landed: the artwork shows them.
-    @State private var handoff: HandoffPhase?
-    @State private var handoffLandings = 0
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -30,7 +27,7 @@ struct HomeView: View {
                     Task { await model.reconnect() }
                 }
 
-                NowPlayingPanel(attributes: attributes, mode: nowPlayingMode, handoff: handoff, landings: handoffLandings)
+                NowPlayingPanel(attributes: attributes, mode: nowPlayingMode)
 
                 VStack(spacing: 14) {
                     if isDemoLayout {
@@ -42,8 +39,7 @@ struct HomeView: View {
                         ContinueListeningArea(player: phoneMusic, here: $phoneNowPlaying, status: continueListening,
                                               allowAppleMusic: allowAppleMusic,
                                               setUp: { onboarding.resume(.continueMusic) },
-                                              quiet: nowPlayingMode == .onIPhone,
-                                              handoff: $handoff, landings: $handoffLandings)
+                                              quiet: nowPlayingMode == .onIPhone)
                     }
                     // Apple Music has the Lock Screen while it plays the Mac's
                     // song here, so the Mac's player has nothing to show; Stop
@@ -65,6 +61,7 @@ struct HomeView: View {
         .background {
             HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted)
                 .animation(.easeInOut(duration: 0.8), value: backgroundMuted)
+                .modifier(HandoffBackgroundRipple())
         }
         .environment(\.colorScheme, showsArtworkBackground && model.artwork != nil && HomeBackground.style != .none ? .dark : colorScheme)
         .toolbarBackground(.hidden, for: .navigationBar)

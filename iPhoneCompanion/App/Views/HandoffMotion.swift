@@ -1,3 +1,5 @@
+import CoreHaptics
+import Observation
 import SwiftUI
 
 /// Which way the music moves in a hand-over started on Home.
@@ -23,123 +25,251 @@ enum HandoffPhase: Equatable {
     }
 }
 
-/// The two ideas being compared (23 November 2026). Development builds pick one
-/// with `-handoffStyle flight|ripple`.
-enum HandoffStyle: String {
-    /// The artwork lifts while the music moves, then a copy of it flies between
-    /// the Mac's card and the artwork, and the artwork settles with a bounce.
-    case flight
-    /// Rings pulse from the artwork while the music moves, outwards towards the
-    /// Mac or inwards to the iPhone, and the artwork settles with a bounce.
-    case ripple
+/// A hand-over in the spirit of Apple's HomePod and AirDrop ones (as filmed in
+/// 2020–21, researched 23 November 2026). It all comes from the top of the
+/// screen, where the Mac's card and the Dynamic Island are, the way Apple's
+/// start where the other device is:
+/// - while the music moves, light gathers at the top edge and taps build up,
+///   as they do bringing an iPhone to a HomePod;
+/// - when it lands, a ripple of light runs through the whole screen, outwards
+///   from the top for Continue on iPhone and back into it for Continue on Mac,
+///   with one firm tap, as AirDrop's does when two iPhones meet.
+@MainActor
+@Observable
+final class HandoffMoment {
+    static let shared = HandoffMoment()
 
-    static var current: HandoffStyle {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if let at = arguments.firstIndex(of: "-handoffStyle"), arguments.count > at + 1,
-           let style = HandoffStyle(rawValue: arguments[at + 1]) { return style }
-        #endif
-        return .ripple
+    private(set) var phase: HandoffPhase?
+    /// Goes up by one each time a hand-over lands; plays the ripple.
+    private(set) var landings = 0
+    /// The direction of the last landing, for the ripple.
+    private(set) var landedDirection: HandoffDirection = .toPhone
+
+    @ObservationIgnored private let haptics = HandoffHaptics()
+
+    func begin(_ direction: HandoffDirection) {
+        phase = .moving(direction)
+        haptics.build()
+    }
+
+    func land(_ direction: HandoffDirection) {
+        landedDirection = direction
+        phase = .landed(direction)
+        landings += 1
+        haptics.land()
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            if phase == .landed(direction) { phase = nil }
+        }
+    }
+
+    func fail() {
+        phase = nil
+        haptics.stop()
     }
 }
 
-/// The artwork's part in a hand-over. `landings` goes up by one each time
-/// a hand-over lands, which plays the settle.
-struct HandoffArtwork<Content: View>: View {
-    let phase: HandoffPhase?
-    let landings: Int
-    let cornerRadius: CGFloat
-    @ViewBuilder let content: () -> Content
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let style = HandoffStyle.current
+// MARK: The whole screen
 
-    private var lifts: Bool { style == .flight && phase?.isMoving == true && !reduceMotion }
+/// Goes around Home's navigation, so the light covers the title too. The
+/// ripple itself bends only Home's background (`HandoffBackgroundRipple`):
+/// SwiftUI's shaders can't redraw the parts of Home that UIKit draws (the
+/// navigation and the scroll view), and show a placeholder instead.
+struct HandoffEffect: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let moment = HandoffMoment.shared
+
+    func body(content: Content) -> some View {
+        let toMac = moment.landedDirection == .toMac
+        content
+            .overlay {
+                if !reduceMotion {
+                    Color.clear
+                        .keyframeAnimator(initialValue: 0.0, trigger: moment.landings) { view, progress in
+                            view.overlay { LightBand(progress: progress, outwards: !toMac) }
+                        } keyframes: { _ in
+                            LinearKeyframe(0.0, duration: 0.01)
+                            CubicKeyframe(1.0, duration: 1.1)
+                        }
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .top) {
+                if moment.phase?.isMoving == true, !reduceMotion {
+                    TopEdgeLight()
+                        .transition(.opacity.animation(.easeOut(duration: 0.4)))
+                }
+            }
+            .animation(.easeInOut(duration: 0.35), value: moment.phase?.isMoving)
+    }
+}
+
+/// Home's background, bent by the ripple as the music lands.
+struct HandoffBackgroundRipple: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let moment = HandoffMoment.shared
+
+    func body(content: Content) -> some View {
+        let toMac = moment.landedDirection == .toMac
+        content
+            .keyframeAnimator(initialValue: 0.0, trigger: moment.landings) { view, progress in
+                view.visualEffect { view, proxy in
+                    view.layerEffect(
+                        ShaderLibrary.handoffRipple(
+                            .float2(proxy.size),
+                            // The Dynamic Island, at the top of the screen.
+                            .float2(proxy.size.width / 2, -24),
+                            .float(progress),
+                            .float(toMac ? -1 : 1)),
+                        maxSampleOffset: CGSize(width: 24, height: 24),
+                        isEnabled: !reduceMotion && progress > 0 && progress < 1)
+                }
+            } keyframes: { _ in
+                LinearKeyframe(0.0, duration: 0.01)
+                CubicKeyframe(1.0, duration: 1.1)
+            }
+    }
+}
+
+/// A band of light that runs through the whole screen from the top edge: down
+/// and out as the music arrives, back up into the top as it leaves.
+private struct LightBand: View {
+    let progress: Double
+    let outwards: Bool
 
     var body: some View {
-        content()
-            .scaleEffect(lifts ? 1.05 : 1)
-            .offset(y: lifts ? -6 : 0)
-            .shadow(color: .white.opacity(lifts ? 0.3 : 0), radius: lifts ? 22 : 0)
-            .background {
-                if style == .ripple, let phase, phase.isMoving, !reduceMotion {
-                    RippleRings(inward: phase.direction == .toPhone, cornerRadius: cornerRadius)
-                        .transition(.opacity)
-                }
-            }
-            .overlay {
-                if style == .flight, !reduceMotion {
-                    FlightCopy(toMac: phase?.direction == .toMac, trigger: landings, content: content)
-                }
-            }
-            .keyframeAnimator(initialValue: 1.0, trigger: landings) { view, scale in
-                view.scaleEffect(reduceMotion ? 1 : scale)
-            } keyframes: { _ in
-                CubicKeyframe(0.94, duration: 0.12)
-                SpringKeyframe(1.0, duration: 0.5, spring: .bouncy)
-            }
-            .animation(.spring(response: 0.45, dampingFraction: 0.75), value: phase)
+        GeometryReader { proxy in
+            let reach = hypot(proxy.size.width / 2, proxy.size.height) + 140
+            let travelled = outwards ? progress : 1 - progress
+            let front = max(0.001, travelled)
+            let width = 0.09
+            let strength = sin(progress * .pi)
+            Rectangle()
+                .fill(RadialGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: max(0, front - width)),
+                    .init(color: .white.opacity(0.55), location: front),
+                    .init(color: .clear, location: min(1, front + width * 0.6)),
+                    .init(color: .clear, location: 1),
+                ], center: UnitPoint(x: 0.5, y: -24 / max(proxy.size.height, 1)), startRadius: 0, endRadius: reach))
+                .opacity(strength)
+                .blendMode(.plusLighter)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
-/// Rings that pulse from the artwork while the music moves.
-private struct RippleRings: View {
-    let inward: Bool
-    let cornerRadius: CGFloat
-
+/// Light gathering at the top edge, around the Dynamic Island, breathing
+/// while the music moves.
+private struct TopEdgeLight: View {
     var body: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
+            let breath = 0.65 + 0.35 * sin(t * 2 * .pi / 1.4)
             ZStack {
-                ForEach(0..<3, id: \.self) { ring in
-                    let cycle = (t / 1.5 + Double(ring) / 3).truncatingRemainder(dividingBy: 1)
-                    let p = inward ? 1 - cycle : cycle
-                    RoundedRectangle(cornerRadius: cornerRadius + 24 * p)
-                        .strokeBorder(.white.opacity(0.55 * (1 - p)), lineWidth: 2)
-                        .scaleEffect(1 + 0.55 * p)
-                }
+                Ellipse()
+                    .fill(RadialGradient(colors: [.white.opacity(0.9), .white.opacity(0.25), .clear],
+                                         center: .center, startRadius: 0, endRadius: 170))
+                    .frame(width: 360, height: 220)
+                    .blur(radius: 26)
+                    .opacity(0.55 * breath)
+                Capsule()
+                    .fill(.white)
+                    .frame(width: 150, height: 40)
+                    .blur(radius: 18)
+                    .opacity(0.8 * breath)
             }
+            .offset(y: -120)
         }
-        .blur(radius: 0.6)
+        .blendMode(.plusLighter)
+        .ignoresSafeArea()
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
-/// A copy of the artwork that flies between the Mac's card, above, and the
-/// artwork when a hand-over lands. Invisible otherwise.
-private struct FlightCopy<Content: View>: View {
-    let toMac: Bool
-    let trigger: Int
+// MARK: The artwork
+
+/// The artwork's part: it settles with a small dip and bounce when the music lands.
+struct HandoffArtwork<Content: View>: View {
     @ViewBuilder let content: () -> Content
-
-    private struct Flight {
-        var y: CGFloat = 0
-        var scale: CGFloat = 1
-        var opacity: Double = 0
-    }
-
-    /// About the distance up to the Mac's card.
-    private let rise: CGFloat = -170
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let moment = HandoffMoment.shared
 
     var body: some View {
         content()
-            .keyframeAnimator(initialValue: Flight(), trigger: trigger) { view, f in
-                view.scaleEffect(f.scale).offset(y: f.y).opacity(f.opacity)
+            .keyframeAnimator(initialValue: 1.0, trigger: moment.landings) { view, scale in
+                view.scaleEffect(reduceMotion ? 1 : scale)
             } keyframes: { _ in
-                KeyframeTrack(\.y) {
-                    LinearKeyframe(toMac ? 0 : rise, duration: 0.01)
-                    CubicKeyframe(toMac ? rise : 0, duration: 0.6)
-                }
-                KeyframeTrack(\.scale) {
-                    LinearKeyframe(toMac ? 1 : 0.25, duration: 0.01)
-                    CubicKeyframe(toMac ? 0.25 : 1, duration: 0.6)
-                }
-                KeyframeTrack(\.opacity) {
-                    LinearKeyframe(toMac ? 0.9 : 0, duration: 0.01)
-                    LinearKeyframe(toMac ? 0.6 : 0.9, duration: 0.3)
-                    LinearKeyframe(0, duration: 0.3)
-                }
+                LinearKeyframe(1.0, duration: 0.15)
+                CubicKeyframe(0.93, duration: 0.12)
+                SpringKeyframe(1.0, duration: 0.55, spring: .bouncy)
             }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+    }
+}
+
+// MARK: Haptics
+
+/// Taps that build while the music moves, as bringing an iPhone to a HomePod
+/// does, then one firm tap when it lands.
+@MainActor
+private final class HandoffHaptics {
+    private var engine: CHHapticEngine?
+    private var building: CHHapticAdvancedPatternPlayer?
+
+    private func ready() -> CHHapticEngine? {
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return nil }
+        if engine == nil {
+            engine = try? CHHapticEngine()
+            engine?.isAutoShutdownEnabled = true
+        }
+        try? engine?.start()
+        return engine
+    }
+
+    func build() {
+        stop()
+        guard let engine = ready() else { return }
+        // Taps closer together and stronger over 2.4 s; a hand-over takes 1–3 s.
+        var events: [CHHapticEvent] = []
+        var time = 0.0, gap = 0.34
+        while time < 2.4 {
+            let progress = Float(time / 2.4)
+            events.append(CHHapticEvent(eventType: .hapticTransient, parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.25 + 0.5 * progress),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3 + 0.3 * progress),
+            ], relativeTime: time))
+            time += gap
+            gap = max(0.12, gap * 0.85)
+        }
+        guard let pattern = try? CHHapticPattern(events: events, parameters: []),
+              let player = try? engine.makeAdvancedPlayer(with: pattern) else { return }
+        building = player
+        try? player.start(atTime: CHHapticTimeImmediate)
+    }
+
+    func land() {
+        stop()
+        guard let engine = ready() else { return }
+        let events = [
+            CHHapticEvent(eventType: .hapticTransient, parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.55),
+            ], relativeTime: 0),
+            CHHapticEvent(eventType: .hapticContinuous, parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.45),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.2),
+            ], relativeTime: 0.02, duration: 0.18),
+        ]
+        guard let pattern = try? CHHapticPattern(events: events, parameters: []),
+              let player = try? engine.makePlayer(with: pattern) else { return }
+        try? player.start(atTime: CHHapticTimeImmediate)
+    }
+
+    func stop() {
+        try? building?.stop(atTime: CHHapticTimeImmediate)
+        building = nil
     }
 }
