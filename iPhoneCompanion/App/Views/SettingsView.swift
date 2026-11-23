@@ -17,6 +17,8 @@ struct SettingsView: View {
     /// Off unless turned on (17 November 2026), as adding changes the
     /// library: the Mac can only play a playlist or album that's in it.
     @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
+    /// The Live Activity card (experiment, 23 November 2026). On unless turned off.
+    @AppStorage(LiveActivityController.enabledKey, store: LiveActivityController.defaults) private var showsControls = true
 
     var body: some View {
         Form {
@@ -60,8 +62,10 @@ struct SettingsView: View {
                 Task { await model.stopNowPlaying() }
             }
             .disabled(!model.sessionController.isActive)
-            // The notification comes from the relay, which the demo doesn't use.
+            // The card and the notification come from the relay, which the demo doesn't use.
             if !isDemoLayout {
+                Toggle("Show Controls When Music Starts", isOn: $showsControls)
+                    .onChange(of: showsControls) { LiveActivityController.shared.sync() }
                 Toggle("Notify When Music Resumes", isOn: Binding(
                     get: { reminders.isEnabled },
                     set: { enabled in Task { await reminders.setEnabled(enabled) } }
@@ -72,7 +76,11 @@ struct SettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
                 if !isDemoLayout {
-                    Text("Get a notification when your Mac starts playing after a break. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
+                    Text("When your Mac starts playing after a break, its song and controls appear on your Lock Screen and in StandBy, without opening Second Chair.")
+                    if showsControls && !LiveActivityController.systemAllows {
+                        Text("Live Activities are turned off for Second Chair in Settings.").foregroundStyle(.red)
+                    }
+                    Text("With controls off, get a notification instead. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
                 }
                 // iOS shows a session only once the app has asked while open, so a
                 // dismissed player stays hidden until the next launch re-requests it.

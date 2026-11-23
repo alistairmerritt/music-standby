@@ -1,5 +1,6 @@
 import ActivityKit
 import Foundation
+import Observation
 import StandByKit
 
 /// The app's side of the Live Activity card (experiment, 23 November 2026).
@@ -21,27 +22,72 @@ final class LiveActivityController {
 
     private typealias Card = Activity<MacPlaybackActivityAttributes>
     private var client: () -> RelayClient? = { nil }
+    private var isShowing: () -> Bool = { true }
     private var started = false
+    /// What the relay was last told: nil until the first sync.
+    private var relayHasToken: Bool?
+
+    /// Settings' "Show Controls When Music Starts". On unless turned off.
+    static let enabledKey = "liveActivityCardEnabled"
+    static var defaults: UserDefaults { UserDefaults(suiteName: AppGroup.identifier) ?? .standard }
+    static var isEnabled: Bool { defaults.object(forKey: enabledKey) as? Bool ?? true }
+    /// iOS's own switch: Settings › Second Chair › Live Activities.
+    static var systemAllows: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+
+    /// Whether the relay should start the card: the setting is on, showing
+    /// is on (Stop Showing stops the card too), and iOS allows it.
+    private var wanted: Bool { Self.isEnabled && isShowing() && Self.systemAllows }
     /// Cards already being followed, by iOS's id.
     private var following: Set<String> = []
 
-    func start(client: @escaping () -> RelayClient?) {
+    func start(client: @escaping () -> RelayClient?, model: AppModel) {
         guard !started else { return }
         started = true
         self.client = client
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+        isShowing = { [weak model] in model?.isNowPlayingEnabled ?? true }
+        if !Self.systemAllows {
             LockScreenRecord.add("Live Activities are off for Second Chair in Settings, so the relay will send the reminder")
-            return
         }
         Task { await observeStartTokens() }
         Task { await observeNewCards() }
         for card in Card.activities { follow(card) }
+        watchShowing(model)
+        sync()
+    }
+
+    /// Stop Showing (from Settings or Shortcuts) stops the card; showing again restarts it.
+    private func watchShowing(_ model: AppModel) {
+        withObservationTracking {
+            _ = model.isNowPlayingEnabled
+        } onChange: { [weak self, weak model] in
+            Task { @MainActor in
+                guard let self, let model else { return }
+                self.sync()
+                self.watchShowing(model)
+            }
+        }
     }
 
     /// The pairing changed: its relay record has no token yet.
     func uploadStartToken() {
-        guard let token = Card.pushToStartToken else { return }
-        Task { try? await client()?.registerActivityStartToken(token.hexString) }
+        relayHasToken = nil
+        sync()
+    }
+
+    /// Tells the relay whether to start the card, after the setting, showing
+    /// or the pairing changed. Turned off, any card on screen goes too.
+    func sync() {
+        let wanted = wanted
+        guard wanted != relayHasToken else { return }
+        relayHasToken = wanted
+        if wanted {
+            guard let token = Card.pushToStartToken else { return }   // sent when iOS gives it
+            Task { await sendStartToken(token) }
+        } else {
+            LockScreenRecord.add("Live Activity: the card is off (\(Self.isEnabled ? (isShowing() ? "Live Activities are off in Settings" : "Stop Showing") : "the setting is off")); the relay sends the reminder instead")
+            Task { try? await client()?.removeActivityStartToken() }
+            endAll(because: "the card was turned off")
+        }
     }
 
     /// The Mac's player is back on screen, so the card is no longer needed.
@@ -59,8 +105,10 @@ final class LiveActivityController {
     }
 
     private func observeStartTokens() async {
-        if let token = Card.pushToStartToken { await sendStartToken(token) }
-        for await token in Card.pushToStartTokenUpdates { await sendStartToken(token) }
+        for await token in Card.pushToStartTokenUpdates where wanted {
+            relayHasToken = true
+            await sendStartToken(token)
+        }
     }
 
     private func sendStartToken(_ token: Data) async {
