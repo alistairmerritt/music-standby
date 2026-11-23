@@ -48,8 +48,13 @@ public struct MusicSnapshot: Equatable, Sendable {
     public var detail: String?
     /// Music's `sound volume`, 0–100. Nil when the read didn't include it.
     public var volume: Int?
-    /// Music's AirPlay devices, in its order. Nil when the read didn't include them.
-    public var outputs: [AudioOutput]?
+    /// Music's AirPlay devices: this Mac first, then by name, then by id. Nil
+    /// when the read didn't include them. Music lists the same devices in a
+    /// different order from one read to the next, and that order counted as a
+    /// change: a paused Mac pushed the phone every 15–25 s (23 November 2026).
+    public var outputs: [AudioOutput]? {
+        didSet { outputs = outputs.map(Self.ordered) }
+    }
 
     public init(state: PlaybackState, position: TimeInterval = 0, capturedAt: Date, track: MusicTrack? = nil, detail: String? = nil,
                 volume: Int? = nil, outputs: [AudioOutput]? = nil) {
@@ -59,7 +64,20 @@ public struct MusicSnapshot: Equatable, Sendable {
         self.track = track
         self.detail = detail
         self.volume = volume
-        self.outputs = outputs
+        self.outputs = outputs.map(Self.ordered)
+    }
+
+    /// A fixed order for the same set of devices, whatever order Music gives.
+    static func ordered(_ outputs: [AudioOutput]) -> [AudioOutput] {
+        outputs.sorted { a, b in
+            let aMac = a.kind == .computer, bMac = b.kind == .computer
+            if aMac != bMac { return aMac }
+            switch a.name.localizedStandardCompare(b.name) {
+            case .orderedAscending: return true
+            case .orderedDescending: return false
+            case .orderedSame: return a.id < b.id
+            }
+        }
     }
 
     public static func notRunning(at date: Date) -> MusicSnapshot {

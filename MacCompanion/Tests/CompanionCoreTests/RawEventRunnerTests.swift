@@ -145,9 +145,9 @@ import Testing
         #expect(parsed.volume == 65)
         #expect(parsed.outputs == [
             AudioOutput(id: "name:Alistair's MacBook Pro", name: "Alistair's MacBook Pro", kind: .computer, isSelected: true),
-            AudioOutput(id: "e4:6e:91:c0:a6:d2", name: "Living Room", kind: .homePod, isSelected: false),
             AudioOutput(id: "12:89:91:41:fe:be", name: "Bedroom Apple TV", kind: .appleTV, isSelected: false, isAvailable: false),
-        ])
+            AudioOutput(id: "e4:6e:91:c0:a6:d2", name: "Living Room", kind: .homePod, isSelected: false),
+        ])   // the Mac first, then by name, whatever Music's order (23 November 2026)
     }
 
     @Test func anOlderSnapshotWithoutVolumeOrOutputsStillParses() {

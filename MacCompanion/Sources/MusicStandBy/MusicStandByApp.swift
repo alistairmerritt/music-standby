@@ -13,6 +13,7 @@ struct MusicStandByApp: App {
     @State private var launchAtLogin = LaunchAtLogin()
 
     init() {
+        if let folder = MenuRender.folder { MenuRender.run(into: folder) }
         // The build's own relay (MSBRelayHost in Info.plist), unless `relayURL`
         // in defaults names another; see RelayEndpoint. Neither: the mock.
         let relay = RelayEndpoint.current().map {
