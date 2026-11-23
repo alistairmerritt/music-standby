@@ -1399,21 +1399,16 @@ describe("live activity (experiment)", () => {
     expect(await response.json()).toEqual({ error: { code: "nothing_playing" } });
   });
 
-  it("asked fresh, push-starts the Now Playing session again under the same ID, with the card", async () => {
-    const { mac, phoneToken, sessionID } = await playingSetup();
+  it("asked fresh, ends the Now Playing session and push-starts a new one with the card", async () => {
+    const { phoneToken, sessionID } = await playingSetup();
     await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
     const before = (await pushes(phoneToken)).length;
     expect((await call("POST", "/v1/activity/start", { token: phoneToken, body: { fresh: true } })).status).toBe(204);
     const sent = (await pushes(phoneToken)).slice(before);
-    expect(sent.map((p) => p.event)).toEqual(["start", "activity-start"]);
+    expect(sent.map((p) => p.event)).toEqual(["end", "start", "activity-start"]);
     expect(sent[0].sessionID).toBe(sessionID);
+    expect(sent[1].sessionID).not.toBe(sessionID);   // the same ID came back on screen (24 November 2026)
     expect(sent.filter((p) => p.event === "reminder")).toHaveLength(0);
-    // The old token is gone: nothing goes to it until the restarted session sends its own.
-    const next = playback({ track: smallHours });
-    mac.send({ type: "state", message: next });
-    const state = await waitForRevision(phoneToken, next.revision);
-    expect(state.sessionID).toBe(sessionID);
-    expect((await pushes(phoneToken)).slice(before).filter((p) => p.event === "update")).toHaveLength(0);
   });
 
   it("stops updating a card the phone has ended", async () => {

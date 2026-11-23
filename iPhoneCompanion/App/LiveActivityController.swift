@@ -132,6 +132,7 @@ final class LiveActivityController {
         case .nowPlaying, .automatic:
             // Now Playing first; the card goes once iOS has taken the request.
             if !before.usesNowPlaying {
+                await waitForRelaySession(model)
                 await model.activateNowPlaying()
                 if model.sessionController.lastPrimaryError == nil {
                     endAll(because: "Player Display is \(display.title), and Now Playing is back")
@@ -139,6 +140,23 @@ final class LiveActivityController {
             }
             sync()   // Now Playing alone: the relay stops starting the card, and any card ends
             return nil
+        }
+    }
+
+    /// Coming back from Live Activity, the relay may have started a new Now
+    /// Playing session (a new ID) moments ago. Showing the player before the
+    /// app has that ID started one under the old ID, which nothing updated:
+    /// StandBy stuck on an old song (24 November 2026). So it waits, up to 5 s.
+    private func waitForRelaySession(_ model: AppModel) async {
+        guard let state = try? await client()?.fetchSession(timeout: 5), let id = state.sessionID else { return }
+        if model.attributes?.id == id { return }
+        LockScreenRecord.add("Player Display: waiting for the Mac’s current player before showing Now Playing")
+        await model.reconnect()
+        for _ in 0..<25 where model.attributes?.id != id {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        if model.attributes?.id != id {
+            LockScreenRecord.add("Player Display: the Mac’s current player didn’t arrive in 5 s; showing Now Playing anyway")
         }
     }
 

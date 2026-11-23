@@ -613,32 +613,15 @@ export class Pairing extends DurableObject<Env> {
     // No session: the Mac has been stopped or paused too long, so there's nothing to show.
     let session = await this.ctx.storage.get<Session>("session");
     if (!session) throw new HttpError(409, "nothing_playing");
-    if (body?.fresh) await this.restartHiddenSession(session, playback);
+    // A new session ID: the same one, push-started again, came back on screen
+    // beside the card (iOS remembered it as the player it showed; 24 November
+    // 2026). The app waits for the new ID before it shows Now Playing again.
+    if (body?.fresh) {
+      await this.endSession("phone_display_mode");
+      session = await this.startSession(playback, false);
+    }
     if (!(await this.startActivity(session, playback))) throw new HttpError(502, "activity_refused");
     return empty();
-  }
-
-  /**
-   * The phone has just ended its Now Playing session (Player Display set to
-   * Live Activity). Push-starts it again under the same ID: a pushed session
-   * stays hidden but keeps waking the extension that caches the card's
-   * artwork. The same ID matters: a new one raced the app on 24 November
-   * 2026, which switched back to Now Playing 4 s later still holding the old
-   * ID, and showed a player nothing updated. The old session's token is
-   * dropped; the restarted session's extension sends its own.
-   */
-  private async restartHiddenSession(session: Session, playback: PlaybackMessage): Promise<void> {
-    const tokens = await this.tokens();
-    if (tokens.session?.sessionID === session.sessionID) {
-      delete tokens.session;
-      await this.ctx.storage.put("tokens", tokens);
-    }
-    await this.ctx.storage.delete("dismissed");
-    if (!tokens.start) return;
-    await this.push("start", tokens.start, await this.attributes(session, playback));
-    session.pushedRevision = playback.revision;
-    await this.ctx.storage.put("session", session);
-    console.log(`session ${short(session.sessionID)}: push-started again, hidden (Player Display: Live Activity)`);
   }
 
   /** `announce`: try the card, or the reminder, as for music starting. */
