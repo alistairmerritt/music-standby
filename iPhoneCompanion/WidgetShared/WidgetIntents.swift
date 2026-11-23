@@ -15,6 +15,9 @@ final class WidgetActions {
     var continueOnIPhone: (() async throws -> Void)?
     var continueOnMac: (() async throws -> Void)?
     var showOnLockScreen: (() async -> Void)?
+    /// The Live Activity card's buttons (experiment, 23 November 2026).
+    var playOrPauseOnMac: (() async throws -> Void)?
+    var nextOnMac: (() async throws -> Void)?
 }
 
 /// A message for Shortcuts, Siri or the system to show when an action fails.

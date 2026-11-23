@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         AppDependencyManager.shared.add(dependency: self.model)
         // The widget's and the controls' buttons run in this process.
         WidgetActions.shared.install(model: model)
+        // The Live Activity card (experiment): its tokens go to the relay. iOS
+        // also launches the app in the background after starting a card.
+        LiveActivityController.shared.start(client: AppEnvironment.pairedClient)
         // Every launch: the device token goes to the relay for Continue from
         // iPhone whatever the reminder setting, and it can change.
         application.registerForRemoteNotifications()
@@ -36,6 +39,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         HandoverProbe.runQueueProbesIfAsked()
         HandoverProbe.runHandoverIfAsked(model: model)
         ScreenshotMode.start(model: model)
+        LiveActivityController.shared.startDemoIfAsked()
         #endif
         return true
     }

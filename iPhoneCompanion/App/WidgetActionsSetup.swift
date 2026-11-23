@@ -33,6 +33,18 @@ extension WidgetActions {
             case .macDidNotStart: throw WidgetActionError(message: "Your Mac didn’t respond. Try again.")
             }
         }
+        // The Live Activity card's buttons (experiment): straight to the relay,
+        // as the Shortcuts actions do.
+        playOrPauseOnMac = {
+            do { _ = try await ShortcutRemote.run { try await $0.playOrPause() } } catch let error as ShortcutError {
+                throw WidgetActionError(message: error.message)
+            }
+        }
+        nextOnMac = {
+            do { _ = try await ShortcutRemote.run { try await $0.run(.next) } } catch let error as ShortcutError {
+                throw WidgetActionError(message: error.message)
+            }
+        }
         // The app is on screen by now: the request for the player is granted.
         showOnLockScreen = { await model.activateNowPlaying() }
     }

@@ -183,6 +183,32 @@ public struct RelayClient: CommandSender, SessionReading, Sendable {
         _ = try await perform(try makeRequest(RelayPath.sessionToken(id: sessionID), method: "DELETE"))
     }
 
+    // MARK: Live Activity card (experiment, 23 November 2026)
+
+    /// Lets the relay start the card when the Mac plays after a break.
+    public func registerActivityStartToken(_ hex: String) async throws {
+        var request = try makeRequest(RelayPath.activityStartToken, method: "PUT")
+        try attach(ActivityTokenBody(token: hex), to: &request)
+        _ = try await perform(request)
+    }
+
+    /// Turns the card off: the relay sends the reminder instead.
+    public func removeActivityStartToken() async throws {
+        _ = try await perform(try makeRequest(RelayPath.activityStartToken, method: "DELETE"))
+    }
+
+    /// The token iOS gave a card the relay started, for its updates.
+    public func registerActivityToken(_ hex: String, activityID: String) async throws {
+        var request = try makeRequest(RelayPath.activityToken, method: "PUT")
+        try attach(ActivityTokenBody(activityID: activityID, token: hex), to: &request)
+        _ = try await perform(request)
+    }
+
+    /// The card has gone: ended by the app, swiped away, or ended by iOS.
+    public func removeActivityToken(activityID: String) async throws {
+        _ = try await perform(try makeRequest(RelayPath.activityToken(id: activityID), method: "DELETE"))
+    }
+
     /// Turns reminders on: the app's ordinary push token, for "Music playing" alerts.
     public func registerAlertToken(_ hex: String) async throws {
         var request = try makeRequest(RelayPath.alertToken, method: "PUT")
@@ -358,4 +384,10 @@ extension RelayClient: ArtworkFetching {
 
 private struct AlertTokenRegistration: Encodable {
     let token: String
+}
+
+/// The card's token bodies (experiment): small enough not to need the shared protocol yet.
+private struct ActivityTokenBody: Encodable {
+    var activityID: String?
+    var token: String
 }

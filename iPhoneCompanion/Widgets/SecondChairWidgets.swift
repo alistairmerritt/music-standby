@@ -7,5 +7,6 @@ struct SecondChairWidgets: WidgetBundle {
         ContinueListeningWidget()
         ContinueOnIPhoneControl()
         ShowOnLockScreenControl()
+        MacPlaybackLiveActivity()
     }
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { APNsPushSender, makeHandBackAlert, makeHandBackWake, makePush, makeReminder, tokenIsDead, type APNsEnvironment, type EnvironmentStore, type ProviderToken, type ProviderTokenStore } from "../src/push";
+import { APNsPushSender, makeActivityEnd, makeActivityStart, makeActivityUpdate, makeHandBackAlert, makeHandBackWake, makePush, makeReminder, tokenIsDead, type APNsEnvironment, type EnvironmentStore, type ProviderToken, type ProviderTokenStore } from "../src/push";
 import type { NowPlayingAttributes } from "../src/protocol";
 
 const attributes: NowPlayingAttributes = {
@@ -296,5 +296,27 @@ describe("APNsPushSender", () => {
       expect(seen[1]).not.toBe(seen[0]);
       expect(store.saved?.token).toBe(seen[1].replace("bearer ", ""));
     });
+  });
+});
+
+describe("Live Activity pushes (experiment)", () => {
+  const content = { title: "Low Sun", artist: "Drift Hotel", album: "Golden Hour", artworkID: "", isPlaying: true, elapsed: 3, capturedAt: 1_794_000_000, duration: 214, canGoNext: true };
+  const sender = new APNsPushSender({ keyP8: "", keyID: "K", teamID: "T", topic: "com.example.App.push-type.nowplaying", environment: "development" });
+
+  it("uses the liveactivity push type on the app's liveactivity topic, at the push's priority", () => {
+    const update = makeActivityUpdate("aa", "id", content, 5, 1_794_000_000_000);
+    const headers = sender.activityHeaders(update, "jwt");
+    expect(headers["apns-push-type"]).toBe("liveactivity");
+    expect(headers["apns-topic"]).toBe("com.example.App.push-type.liveactivity");
+    expect(headers["apns-priority"]).toBe("5");
+    expect(sender.activityHeaders(makeActivityStart("aa", { activityID: "id", macName: "Mac" }, content), "jwt")["apns-priority"]).toBe("10");
+  });
+
+  it("gives an update a stale date, and an end an immediate dismissal", () => {
+    const update = makeActivityUpdate("aa", "id", content, 10, 1_794_000_000_000);
+    expect(update.payload.aps).toEqual({ event: "update", timestamp: 1_794_000_000, "content-state": content, "stale-date": 1_794_000_000 + 1800 });
+    const end = makeActivityEnd("aa", "id", content, 1_794_000_000_000);
+    expect(end.payload.aps["dismissal-date"]).toBe(1_794_000_000);
+    expect(end.payload.aps.alert).toBeUndefined();
   });
 });

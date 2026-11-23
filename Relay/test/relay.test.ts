@@ -1137,3 +1137,149 @@ describe("retention", () => {
     }
   });
 });
+
+describe("live activity (experiment)", () => {
+  const startToken = "a1".repeat(32);
+  const alertToken = "ef".repeat(32);
+  const activityToken = "b2".repeat(32);
+  const lowSun = { id: "pid:0000000000000001", title: "Low Sun", artist: "Drift Hotel", album: "Golden Hour", duration: 214, artworkID: "c".repeat(64) };
+  const smallHours = { id: "pid:0000000000000002", title: "Small Hours", artist: "Fen Lights", album: "Lit Windows", duration: 252 };
+  const activityPushes = async (phoneToken: string) => (await pushes(phoneToken)).filter((p) => String(p.event).startsWith("activity-"));
+
+  async function pauseFor(pairingID: string, minutes: number) {
+    await editStorage(pairingID, async (storage) => {
+      const s = (await storage.get<any>("session"))!;
+      await storage.put("session", { ...s, pausedSince: Date.now() - minutes * 60_000 });
+    });
+  }
+
+  /** Playing Low Sun, paused for 9 minutes, then playing again: the card starts. */
+  async function cardStarted() {
+    const setup = await playingSetup();
+    const { mac, pairingID, phoneToken } = setup;
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
+    const paused = playback({ state: "paused", isPlaying: false, track: lowSun });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 9);
+    const resumed = playback({ track: lowSun, elapsedTime: 40 });
+    mac.send({ type: "state", message: resumed });
+    await waitForRevision(phoneToken, resumed.revision);
+    const start = (await activityPushes(phoneToken)).find((p) => p.event === "activity-start");
+    return { ...setup, start, activityID: start?.sessionID as string };
+  }
+
+  it("stores and removes the phone's push-to-start token", async () => {
+    const { phoneToken } = await pairedSetup();
+    expect((await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: "nothex" } })).status).toBe(400);
+    expect((await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } })).status).toBe(204);
+    expect((await call("DELETE", "/v1/tokens/activity-start", { token: phoneToken })).status).toBe(204);
+  });
+
+  it("starts the card instead of the reminder when the Mac plays after a break", async () => {
+    const { phoneToken, start } = await cardStarted();
+    expect(start).toBeDefined();
+    expect(start.priority).toBe(10);
+    const aps = start.payload.aps;
+    expect(aps.event).toBe("start");
+    expect(aps["attributes-type"]).toBe("MacPlaybackActivityAttributes");
+    expect(aps.attributes).toEqual({ activityID: start.sessionID, macName: "Studio Mac" });
+    expect(aps.alert).toEqual({ title: "Music playing on Studio Mac", body: "Play, pause and skip from your Lock Screen." });
+    expect(aps.sound).toBeUndefined();
+    expect(aps["input-push-token"]).toBe(1);
+    expect(aps["stale-date"]).toBe(aps.timestamp + 30 * 60);
+    expect(aps["content-state"]).toMatchObject({
+      title: "Low Sun", artist: "Drift Hotel", album: "Golden Hour", artworkID: "c".repeat(64),
+      isPlaying: true, elapsed: 40, duration: 214, canGoNext: true,
+    });
+    expect(typeof aps["content-state"].capturedAt).toBe("number");
+    expect((await pushes(phoneToken)).filter((p) => p.event === "reminder")).toHaveLength(0);
+  });
+
+  it("falls back to the reminder for a phone without the card", async () => {
+    const { mac, pairingID, phoneToken } = await playingSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    const paused = playback({ state: "paused", isPlaying: false });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 9);
+    const resumed = playback();
+    mac.send({ type: "state", message: resumed });
+    await waitForRevision(phoneToken, resumed.revision);
+    expect(await activityPushes(phoneToken)).toHaveLength(0);
+    expect((await pushes(phoneToken)).filter((p) => p.event === "reminder")).toHaveLength(1);
+  });
+
+  it("updates the card for what it shows, once the phone sends its token", async () => {
+    const { mac, phoneToken, activityID } = await cardStarted();
+    expect((await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID: "other", token: activityToken } })).status).toBe(409);
+    expect((await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } })).status).toBe(204);
+    const before = (await activityPushes(phoneToken)).length;
+
+    // A seek on the same song: nothing the card shows changes.
+    const seek = playback({ track: lowSun, elapsedTime: 90 });
+    mac.send({ type: "state", message: seek });
+    await waitForRevision(phoneToken, seek.revision);
+    expect(await activityPushes(phoneToken)).toHaveLength(before);
+
+    // Another song: an update at once, to the card's own token.
+    const next = playback({ track: smallHours });
+    mac.send({ type: "state", message: next });
+    await waitForRevision(phoneToken, next.revision);
+    const sent = (await activityPushes(phoneToken)).slice(before);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].event).toBe("activity-update");
+    expect(sent[0].priority).toBe(10);
+    expect(sent[0].payload.aps["content-state"]).toMatchObject({ title: "Small Hours", artist: "Fen Lights", artworkID: "", isPlaying: true });
+
+    // Pause: shown as paused.
+    const paused = playback({ state: "paused", isPlaying: false, track: smallHours });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    const last = (await activityPushes(phoneToken)).at(-1);
+    expect(last.event).toBe("activity-update");
+    expect(last.payload.aps["content-state"].isPlaying).toBe(false);
+  });
+
+  it("catches the card up when its token arrives after a change", async () => {
+    const { mac, phoneToken, activityID } = await cardStarted();
+    const next = playback({ track: smallHours });
+    mac.send({ type: "state", message: next });
+    await waitForRevision(phoneToken, next.revision);
+    const before = (await activityPushes(phoneToken)).length;   // no token yet: nothing sent
+    await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } });
+    const sent = (await activityPushes(phoneToken)).slice(before);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].payload.aps["content-state"].title).toBe("Small Hours");
+  });
+
+  it("replaces the card after the next break, ending the old one", async () => {
+    const { mac, pairingID, phoneToken, activityID } = await cardStarted();
+    await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } });
+    const paused = playback({ state: "paused", isPlaying: false, track: lowSun });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 20);
+    const again = playback({ track: lowSun });
+    mac.send({ type: "state", message: again });
+    await waitForRevision(phoneToken, again.revision);
+    const [end, start] = (await activityPushes(phoneToken)).slice(-2);
+    expect(end.event).toBe("activity-end");
+    expect(end.sessionID).toBe(activityID);
+    expect(end.payload.aps["dismissal-date"]).toBe(end.payload.aps.timestamp);
+    expect(start.event).toBe("activity-start");
+    expect(start.sessionID).not.toBe(activityID);
+  });
+
+  it("stops updating a card the phone has ended", async () => {
+    const { mac, phoneToken, activityID } = await cardStarted();
+    await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } });
+    expect((await call("DELETE", `/v1/tokens/activity/${activityID}`, { token: phoneToken })).status).toBe(204);
+    const before = (await activityPushes(phoneToken)).length;
+    const next = playback({ track: smallHours });
+    mac.send({ type: "state", message: next });
+    await waitForRevision(phoneToken, next.revision);
+    expect(await activityPushes(phoneToken)).toHaveLength(before);
+  });
+});
