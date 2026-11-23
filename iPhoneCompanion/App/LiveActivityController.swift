@@ -130,7 +130,7 @@ final class LiveActivityController {
         LockScreenRecord.add("Live Activity: following the card for “\(card.content.state.title)” (\(card.activityState))")
         // Started while Second Chair is on screen: the player is already up
         // (the app asked for it when it opened), so the card would be a second one.
-        if UIApplication.shared.applicationState == .active, isShowing(), card.activityState == .active {
+        if UIApplication.shared.applicationState == .active, isShowing(), card.activityState == .active, id != "demo" {
             following.remove(card.id)
             Task {
                 await card.end(nil, dismissalPolicy: .immediate)

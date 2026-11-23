@@ -52,6 +52,8 @@ extension MacPlaybackActivityAttributes.ContentState {
 
 /// Play or pause on the Mac, from the card. A `LiveActivityIntent` runs in
 /// the app's process, where `WidgetActions` is filled in, without opening it.
+/// On a locked phone iOS asks for Face ID first, as Apple documents. An
+/// `AudioPlaybackIntent` was tried on 23 Nov 2026 and asked too.
 struct ActivityPlayPauseOnMacIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Play or Pause on Mac"
     static let description: IntentDescription? = IntentDescription("Pauses Music on your computer if it’s playing, and plays it if it isn’t.")
