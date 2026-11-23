@@ -277,17 +277,16 @@ import StandByProtocol
         #expect(r.music.volume == 100, "clamped to 0…1")
     }
 
-    @Test func outputFromThePhoneSwitchesMusicToThatDeviceAlone() async throws {
+    /// States carry no AirPlay devices (choosing one from the phone was
+    /// dropped, 23 November 2026); the command still works for an id.
+    @Test func statesCarryNoOutputsAndSelectOutputStillWorks() async throws {
         let r = await rig()
         let first = try #require(await states(r.relay).last)
-        let homePod = try #require(first.outputs?.first { $0.kind == .homePod })
-        #expect(first.outputs?.filter(\.isSelected).map(\.name) == ["Test Mac"])
-        #expect(first.outputs?.first { $0.name == "Bedroom Apple TV" }?.isAvailable == false)
-        let id = await r.relay.simulate(.selectOutput(homePod.id))
+        #expect(first.outputs == nil)
+        let id = await r.relay.simulate(.selectOutput("f2:b6:61:a7:54:f9"))
         await eventually { await r.relay.ack(for: id) != nil }
         #expect(await r.relay.ack(for: id)?.accepted == true)
         #expect(r.music.selectedOutputs == ["Study HomePod"])
-        await eventually { await states(r.relay).last?.outputs?.filter(\.isSelected).map(\.name) == ["Study HomePod"] }
         let unknown = await r.relay.simulate(.selectOutput("00:11:22:33:44:55"))
         await eventually { await r.relay.ack(for: unknown) != nil }
         #expect(await r.relay.ack(for: unknown)?.error?.code == .invalidRequest)

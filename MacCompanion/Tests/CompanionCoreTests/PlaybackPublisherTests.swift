@@ -38,50 +38,49 @@ import StandByProtocol
         #expect(p.ingest(snap(.playing, 30, at: 1020.5), artworkID: nil) == nil)
     }
 
-    @Test func volumeAndOutputChangesAreSent() throws {
+    @Test func volumeChangesAreSent() throws {
         var p = publisher()
         var snapshot = snap(.playing, 10, at: 1000)
         snapshot.volume = 50
-        snapshot.outputs = [AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: true)]
         let first = try must(p.ingest(snapshot, artworkID: nil))
         #expect(first.volume == 0.5)
-        #expect(first.outputs?.first?.name == "Mac")
         var same = snap(.playing, 11, at: 1001)
         same.volume = 50
-        same.outputs = snapshot.outputs
         #expect(p.ingest(same, artworkID: nil) == nil)
         var quieter = snap(.playing, 12, at: 1002)
         quieter.volume = 30
-        quieter.outputs = snapshot.outputs
         #expect(try must(p.ingest(quieter, artworkID: nil)).volume == 0.3)
-        var moved = snap(.playing, 13, at: 1003)
-        moved.volume = 30
-        moved.outputs = [AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: false)]
-        #expect(p.ingest(moved, artworkID: nil) != nil)
     }
 
-    /// Music lists the same AirPlay devices in a different order from one
-    /// read to the next; a paused Mac sent each reorder (23 November 2026).
-    @Test func reorderedOutputsAreNotAChange() throws {
+    /// The phone doesn't use AirPlay devices any more (choosing one was
+    /// dropped), and Music lists them in a different order from one read to
+    /// the next: a paused Mac sent the phone each reorder (23 November 2026).
+    @Test func airPlayDevicesAreNotSentAndDontMakeAMessage() throws {
         let mac = AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: true)
         let kitchen = AudioOutput(id: "aa:01", name: "HomePod", kind: .homePod, isSelected: false)
-        let bedroom = AudioOutput(id: "aa:02", name: "HomePod", kind: .homePod, isSelected: false)
         let lounge = AudioOutput(id: "aa:03", name: "Apple TV", kind: .appleTV, isSelected: false)
         var p = publisher()
         var first = snap(.paused, 60, at: 1000)
-        first.outputs = [kitchen, mac, lounge, bedroom]
-        let sent = try must(p.ingest(first, artworkID: nil))
-        #expect(sent.outputs?.map(\.id) == ["name:Mac", "aa:03", "aa:01", "aa:02"])
-        for (i, order) in [[bedroom, lounge, mac, kitchen], [lounge, kitchen, bedroom, mac]].enumerated() {
-            var again = snap(.paused, 60, at: 1005 + Double(i) * 5)
-            again.outputs = order
-            #expect(p.ingest(again, artworkID: nil) == nil)
-        }
-        var chosen = snap(.paused, 60, at: 1020)
+        first.outputs = [kitchen, mac, lounge]
+        #expect(try must(p.ingest(first, artworkID: nil)).outputs == nil)
+        var reordered = snap(.paused, 60, at: 1005)
+        reordered.outputs = [lounge, kitchen, mac]
+        #expect(p.ingest(reordered, artworkID: nil) == nil)
+        var chosen = snap(.paused, 60, at: 1010)
         var loungeOn = lounge
         loungeOn.isSelected = true
-        chosen.outputs = [bedroom, loungeOn, mac, kitchen]
-        #expect(p.ingest(chosen, artworkID: nil) != nil)
+        chosen.outputs = [mac, loungeOn, kitchen]
+        #expect(p.ingest(chosen, artworkID: nil) == nil)
+    }
+
+    @Test func snapshotsOrderAirPlayDevices() {
+        let mac = AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: true)
+        let a = AudioOutput(id: "aa:01", name: "HomePod", kind: .homePod, isSelected: false)
+        let b = AudioOutput(id: "aa:02", name: "HomePod", kind: .homePod, isSelected: false)
+        let tv = AudioOutput(id: "aa:03", name: "Apple TV", kind: .appleTV, isSelected: false)
+        var snapshot = snap(.paused, 60, at: 1000)
+        snapshot.outputs = [b, tv, mac, a]
+        #expect(snapshot.outputs?.map(\.id) == ["name:Mac", "aa:03", "aa:01", "aa:02"])
     }
 
     @Test func seekIsSent() {

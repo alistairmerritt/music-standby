@@ -72,7 +72,9 @@ public struct PlaybackPublisher: Sendable {
             revision: revision, state: snapshot.state, elapsedTime: track == nil ? 0 : snapshot.position,
             capturedAt: StandByWire.wirePrecision(snapshot.capturedAt), track: track, canGoNext: canSkip, canGoPrevious: canSkip,
             listeningSessionID: session, detail: snapshot.detail,
-            volume: snapshot.volume.map { Double($0) / 100 }, outputs: snapshot.outputs,
+            // No AirPlay devices: choosing one from the phone was dropped, and
+            // the list only cost the phone pushes (23 November 2026).
+            volume: snapshot.volume.map { Double($0) / 100 }, outputs: nil,
             upNext: track == nil ? nil : queue?.upNext, musicConnection: musicConnection,
             playlist: track == nil ? nil : queue?.playlist, album: track == nil ? nil : queue?.album,
             shuffledLibrary: track == nil ? nil : queue?.shuffledLibrary, fromAppleMusic: track == nil ? nil : queue?.fromAppleMusic,
