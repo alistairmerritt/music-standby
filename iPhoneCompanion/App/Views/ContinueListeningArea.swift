@@ -83,21 +83,15 @@ struct ContinueListeningArea: View {
         VStack(spacing: 14) {
             // A problem shows only when there is something to continue.
             if showsContinueOnPhone || showsContinueOnMac, let note { note }
-            // Moving back comes first while the iPhone has the music. When the
-            // first button changes, as in a hand-over, the set is a new block:
-            // the old one fades out quickly and the new one fades in just
-            // after, so they never cross (23 November 2026). A button added or
-            // taken away below it (Continue on Mac when the Mac pauses) fades
-            // by itself, and the first one stays put.
-            VStack(spacing: 14) {
-                ForEach(order, id: \.self) { direction in
-                    action(direction, prominent: direction == order.first)
-                        .transition(.opacity)
-                }
+            // Moving back comes first while the iPhone has the music. The
+            // buttons are slots, not directions: through a hand-over the first
+            // button stays the same button and morphs, its words, symbol and
+            // colour changing in place, rather than one button fading out for
+            // another to fade in (Alistair, 23 November 2026: "much more fluid").
+            ForEach(Array(order.enumerated()), id: \.offset) { slot, direction in
+                action(direction, prominent: slot == 0)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
-            .id(ButtonSet(first: order.first, quiet: quiet))
-            .transition(.asymmetric(insertion: .opacity.animation(.smooth(duration: 0.35).delay(0.12)),
-                                    removal: .opacity.animation(.easeOut(duration: 0.12))))
             if let result {
                 Text(result.text)
                     .font(.footnote)
@@ -107,21 +101,18 @@ struct ContinueListeningArea: View {
                     .transition(.opacity)
             }
         }
-        .animation(.smooth(duration: 0.35), value: order)
-        .animation(.smooth(duration: 0.35), value: quiet)
-        .animation(.smooth(duration: 0.3), value: result?.text)
+        // One spring for all of it, the same as the panel's, with no delays.
+        .animation(.smooth(duration: 0.45), value: order)
+        .animation(.smooth(duration: 0.45), value: quiet)
+        .animation(.smooth(duration: 0.45), value: toMacEnabled)
+        .animation(.smooth(duration: 0.45), value: working)
+        .animation(.smooth(duration: 0.45), value: result?.text)
         .onChange(of: [macPlaying, phonePlaying]) { result = nil }
         #if DEBUG
         .onChange(of: DemoHandover.shared.autoRuns) {
             Task { await run(DemoHandover.shared.autoDirection) }
         }
         #endif
-    }
-
-    /// What makes a set of buttons different enough to fade between.
-    private struct ButtonSet: Hashable {
-        let first: Direction?
-        let quiet: Bool
     }
 
     /// The buttons shown, the one to use most likely first.
@@ -157,14 +148,18 @@ struct ContinueListeningArea: View {
                 HStack(spacing: 8) {
                     if working == direction {
                         ProgressView()
-                        Text(toPhone ? "Continuing on iPhone…" : "Continuing on Mac…")
+                            .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     } else {
-                        Label(title, systemImage: symbol)
+                        Image(systemName: symbol)
+                            .contentTransition(.symbolEffect(.replace))
+                            .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     }
+                    Text(working == direction ? (toPhone ? "Continuing on iPhone…" : "Continuing on Mac…") : title)
+                        .contentTransition(.interpolate)
                 }
                 .frame(maxWidth: .infinity)
             }
-            .modifier(ContinueButtonStyle(prominent: prominent && !quiet))
+            .buttonStyle(ContinueButtonStyle(prominent: prominent && !quiet))
             .disabled(working != nil || (direction == .toMac && !toMacEnabled))
             .accessibilityHint(detail)
             if result == nil {
@@ -173,9 +168,9 @@ struct ContinueListeningArea: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                    .contentTransition(.interpolate)
                     .accessibilityHidden(true)
                     .opacity(direction == .toMac && !toMacEnabled ? 0.5 : 1)
-                    .animation(.smooth(duration: 0.3), value: toMacEnabled)
             }
         }
     }
@@ -265,15 +260,24 @@ struct ContinueListeningArea: View {
 }
 
 /// The one accent on Home, or its quieter second.
-private struct ContinueButtonStyle: ViewModifier {
+/// Drawn rather than the system's bordered styles, so that a button going
+/// from the accent to the quiet style blends its colour instead of switching
+/// (23 November 2026).
+private struct ContinueButtonStyle: ButtonStyle {
     let prominent: Bool
+    @Environment(\.isEnabled) private var isEnabled
 
-    func body(content: Content) -> some View {
-        if prominent {
-            content.buttonStyle(.borderedProminent).controlSize(.large)
-        } else {
-            content.buttonStyle(.bordered).controlSize(.large)
-        }
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.medium))
+            .foregroundStyle(prominent ? Color.white : Color.accentColor)
+            .padding(.horizontal, 20)
+            .frame(minHeight: 50)
+            .background(Capsule().fill(prominent ? Color.accentColor : Color.primary.opacity(0.12)))
+            .contentShape(Capsule())
+            .opacity(isEnabled ? 1 : 0.45)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.smooth(duration: 0.2), value: configuration.isPressed)
     }
 }
 
