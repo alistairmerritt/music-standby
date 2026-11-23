@@ -63,7 +63,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // The reminder wakes the app too, which
         // shows the player now rather than at a tap.
         if ReminderPush.isReminder(userInfo) {
+            LockScreenRecord.add("Reminder woke the app in the background (app \(application.applicationState == .active ? "on screen" : "not on screen"))")
             let shown = await model.activateNowPlaying(waitingForTheMacFor: .seconds(10))
+            LockScreenRecord.add("…the wake \(shown ? "had the Mac’s song" : "got no song from the Mac in 10 s")"
+                                 + "; iOS \(model.primaryWasRefused ? "refused the player (\(model.sessionController.lastPrimaryError ?? "?"))" : "took the request"))")
             return shown ? .newData : .noData
         }
         guard let request = HandBackResponder.request(from: userInfo) else { return .noData }
@@ -78,6 +81,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// Answered at once, on the thread UIKit asked on.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        if notification.request.content.threadIdentifier == Self.reminderThread {
+            LockScreenRecord.add("Reminder arrived with Second Chair open; its banner was hidden")
+        }
         completionHandler(notification.request.content.threadIdentifier == HandBackRequest.threadID ? [.banner, .list] : [])
     }
 
@@ -100,6 +106,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Task { @MainActor in
             switch thread {
             case Self.reminderThread:
+                LockScreenRecord.add("Reminder tapped")
                 await self.model.activateNowPlaying()
             case HandBackRequest.threadID:
                 if acts, let request {

@@ -22,7 +22,11 @@ struct MusicStandByApp: App {
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     switch phase {
-                    case .active: Task { await model.sceneDidBecomeActive() }
+                    case .active: Task {
+                        await model.sceneDidBecomeActive()
+                        LockScreenRecord.add("Second Chair came to the front; iOS \(model.primaryWasRefused ? "refused the player" : "took the request")"
+                                             + (model.isNowPlayingEnabled ? "" : " (showing is off)"))
+                    }
                     case .background: Task { await model.sceneDidEnterBackground() }
                     default: break
                     }

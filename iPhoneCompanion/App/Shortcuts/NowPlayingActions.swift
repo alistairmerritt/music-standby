@@ -24,15 +24,27 @@ struct ShowInNowPlayingIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<Bool> {
         guard model.pairedMac != nil else { throw ShortcutError(TransportError.notPaired) }
+        let canOpen = systemContext.currentMode.canContinueInForeground
+        LockScreenRecord.add("Show in Now Playing ran (\(canOpen ? "can open the app itself" : "can’t open the app itself"))")
         let reached = await model.activateNowPlaying(waitingForTheMacFor: Self.stateWait)
         // Shown from the background, unless another player holds the Lock
         // Screen: then iOS refuses the background request (error 5) and only
         // the app on screen can take it back (21 November 2026).
         let shown = reached && model.sessionController.lastError == nil && !model.primaryWasRefused
         shortcutLog.notice("Show in Now Playing: reached \(reached, privacy: .public), primary refused \(model.primaryWasRefused, privacy: .public), shown \(shown, privacy: .public), can open \(systemContext.currentMode.canContinueInForeground, privacy: .public)")
-        if shown { return .result(value: true) }
-        guard systemContext.currentMode.canContinueInForeground else {
-            if reached { return .result(value: false) }
+        LockScreenRecord.add("…Mac’s song \(reached ? "arrived" : "didn’t arrive in 10 s")"
+                             + (model.sessionController.lastError.map { "; session error \($0)" } ?? "")
+                             + "; iOS \(model.primaryWasRefused ? "refused the player (\(model.sessionController.lastPrimaryError ?? "?"))" : "took the request")")
+        if shown {
+            LockScreenRecord.add("…gave back Showing: true (the shortcut skips opening the app)")
+            return .result(value: true)
+        }
+        guard canOpen else {
+            if reached {
+                LockScreenRecord.add("…gave back Showing: false (the shortcut should open the app)")
+                return .result(value: false)
+            }
+            LockScreenRecord.add("…failed: the Mac couldn’t be reached")
             throw ShortcutError("Your Mac’s music couldn’t be reached. Check that your Mac is awake and Second Chair is open on it.")
         }
         shortcutLog.notice("Show in Now Playing: reached \(reached, privacy: .public), primary refused \(model.primaryWasRefused, privacy: .public); opening the app")
@@ -40,8 +52,10 @@ struct ShowInNowPlayingIntent: AppIntent {
             try await continueInForeground("Open Second Chair to show your Mac’s music?", alwaysConfirm: false)
         } catch {
             shortcutLog.error("Show in Now Playing: couldn’t open the app: \(String(describing: error), privacy: .public)")
+            LockScreenRecord.add("…couldn’t open the app: \(error.localizedDescription)")
             throw error
         }
+        LockScreenRecord.add("…opened the app")
         shortcutLog.notice("Show in Now Playing: in the foreground")
         await model.activateNowPlaying()
         return .result(value: model.sessionController.lastError == nil)
