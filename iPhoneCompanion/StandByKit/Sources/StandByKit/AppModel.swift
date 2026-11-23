@@ -429,6 +429,13 @@ public final class AppModel {
                     await endSession(.replaced)
                 }
                 assignedSessionID = id
+                // The relay's new session, at once: otherwise the attributes kept the
+                // old ID until the Mac's next change, and Player Display, switching
+                // back from Live Activity, waited for it in vain (24 November 2026).
+                if var current = attributes, current.id != id {
+                    current.id = id
+                    attributes = current
+                }
             }
         case .sessionEnded(let reason):
             await endSession(reason)

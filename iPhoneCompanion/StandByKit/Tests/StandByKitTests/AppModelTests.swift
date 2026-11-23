@@ -615,6 +615,18 @@ struct Harness {
         #expect(h.controller.activations.count == 1)
     }
 
+    @Test func aNewSessionIDReachesTheAttributesAtOnce() async {
+        let h = Harness()
+        h.model.usesNowPlaying = { false }
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        await eventually("applied") { h.model.attributes?.revision == 1 }
+        await h.transport.emit(.sessionAssigned("session-new"))
+        await eventually("new ID") { h.model.attributes?.id == "session-new" }
+    }
+
     @Test func foregroundDoesNotActivateBeforeAnyTrack() async {
         let h = Harness()
         let task = await h.run()
