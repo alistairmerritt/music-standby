@@ -56,7 +56,13 @@ struct ContinueListeningArea: View {
 
     // The rules as they were: offered, then open.
     /// Whenever the Mac's song can move.
-    private var showsContinueOnPhone: Bool { model.canContinueOnPhone }
+    private var showsContinueOnPhone: Bool {
+        #if DEBUG
+        // Screenshots of nothing playing hide the demo Mac's song, as a real Mac would have none.
+        if HomeScreenshot.nothingPlaying { return false }
+        #endif
+        return model.canContinueOnPhone
+    }
     /// While the phone plays, or when its paused song is one the Mac has; not
     /// for whatever Apple Music here last played long ago.
     private var showsContinueOnMac: Bool { phonePlaying || phoneSongInMacQueue }
