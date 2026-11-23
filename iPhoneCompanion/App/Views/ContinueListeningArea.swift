@@ -25,14 +25,21 @@ struct ContinueListeningArea: View {
     @State private var working: Direction?
     @State private var result: (text: String, isFailure: Bool)?
 
-    private var macPlaying: Bool { model.attributes?.isPlaying == true }
+    // Just after a hand-over lands, where the music went (HandoffMoment).
+    private var assumed: Bool? { HandoffMoment.shared.assumesPhonePlays }
+    private var macPlaying: Bool {
+        if let assumed { return !assumed }
+        return model.attributes?.isPlaying == true
+    }
     private var phonePlaying: Bool {
+        if let assumed { return assumed }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
         return here?.isPlaying == true
     }
     private var phoneSongInMacQueue: Bool {
+        if assumed == true { return true }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
@@ -40,6 +47,7 @@ struct ContinueListeningArea: View {
     }
     /// Any Apple Music song can go to the Mac: one its queue doesn't have goes as its station.
     private var phoneHasAppleMusicSong: Bool {
+        if assumed == true { return true }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
@@ -65,24 +73,31 @@ struct ContinueListeningArea: View {
     }
 
     private var toPhone: Bool { !blocked && status != .needsAppleMusic && showsContinueOnPhone && continueOnPhoneOpen }
-    private var toMac: Bool { !blocked && showsContinueOnMac && continueOnMacOpen }
+    /// Continue on Mac stays in place while it's on offer and only greys out
+    /// while the Mac plays, so pausing and playing the Mac doesn't make it come
+    /// and go and move everything below it (Alistair, 23 November 2026).
+    private var toMac: Bool { !blocked && showsContinueOnMac && phoneHasAppleMusicSong }
+    private var toMacEnabled: Bool { continueOnMacOpen }
 
     var body: some View {
         VStack(spacing: 14) {
             // A problem shows only when there is something to continue.
             if showsContinueOnPhone || showsContinueOnMac, let note { note }
-            // Moving back comes first while the iPhone has the music. A new
-            // set of buttons is a new block: the old one fades out quickly and
-            // the new one fades in a beat later, once the panel above has
-            // changed, so they never cross (23 November 2026).
+            // Moving back comes first while the iPhone has the music. When the
+            // first button changes, as in a hand-over, the set is a new block:
+            // the old one fades out quickly and the new one fades in just
+            // after, so they never cross (23 November 2026). A button added or
+            // taken away below it (Continue on Mac when the Mac pauses) fades
+            // by itself, and the first one stays put.
             VStack(spacing: 14) {
                 ForEach(order, id: \.self) { direction in
                     action(direction, prominent: direction == order.first)
+                        .transition(.opacity)
                 }
             }
-            .id(ButtonSet(order: order, quiet: quiet))
-            .transition(.asymmetric(insertion: .opacity.animation(.smooth(duration: 0.4).delay(0.3)),
-                                    removal: .opacity.animation(.easeOut(duration: 0.15))))
+            .id(ButtonSet(first: order.first, quiet: quiet))
+            .transition(.asymmetric(insertion: .opacity.animation(.smooth(duration: 0.35).delay(0.12)),
+                                    removal: .opacity.animation(.easeOut(duration: 0.12))))
             if let result {
                 Text(result.text)
                     .font(.footnote)
@@ -92,7 +107,8 @@ struct ContinueListeningArea: View {
                     .transition(.opacity)
             }
         }
-        .animation(.smooth(duration: 0.4), value: ButtonSet(order: order, quiet: quiet))
+        .animation(.smooth(duration: 0.35), value: order)
+        .animation(.smooth(duration: 0.35), value: quiet)
         .animation(.smooth(duration: 0.3), value: result?.text)
         .onChange(of: [macPlaying, phonePlaying]) { result = nil }
         #if DEBUG
@@ -104,7 +120,7 @@ struct ContinueListeningArea: View {
 
     /// What makes a set of buttons different enough to fade between.
     private struct ButtonSet: Hashable {
-        let order: [Direction]
+        let first: Direction?
         let quiet: Bool
     }
 
@@ -149,7 +165,7 @@ struct ContinueListeningArea: View {
                 .frame(maxWidth: .infinity)
             }
             .modifier(ContinueButtonStyle(prominent: prominent && !quiet))
-            .disabled(working != nil)
+            .disabled(working != nil || (direction == .toMac && !toMacEnabled))
             .accessibilityHint(detail)
             if result == nil {
                 Text(detail)
@@ -158,6 +174,8 @@ struct ContinueListeningArea: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .accessibilityHidden(true)
+                    .opacity(direction == .toMac && !toMacEnabled ? 0.5 : 1)
+                    .animation(.smooth(duration: 0.3), value: toMacEnabled)
             }
         }
     }
@@ -189,6 +207,9 @@ struct ContinueListeningArea: View {
             arrived()
         } else if !landed {
             HandoffMoment.shared.fail()
+        } else {
+            // It moved, then something failed (the Mac wouldn't pause): show what's real.
+            HandoffMoment.shared.forgetAssumption()
         }
         here = player.nowPlaying()
         working = nil

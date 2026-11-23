@@ -157,6 +157,8 @@ struct HomeView: View {
     /// Apple Music on this iPhone plays while the Mac doesn't (17 November
     /// 2026). Read once a second, like the rest of Home's view of it.
     private var iPhoneIsPlaying: Bool {
+        // Just after a hand-over lands, where the music went (HandoffMoment).
+        if let assumed = HandoffMoment.shared.assumesPhonePlays { return assumed }
         guard attributes?.isPlaying != true else { return false }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
@@ -166,6 +168,7 @@ struct HomeView: View {
 
     /// The iPhone plays the Mac's current song, as Continue on iPhone leaves it.
     private var iPhoneHasMacSong: Bool {
+        if HandoffMoment.shared.assumesPhonePlays == true { return true }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif

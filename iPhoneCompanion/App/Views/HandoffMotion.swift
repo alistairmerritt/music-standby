@@ -43,17 +43,36 @@ final class HandoffMoment {
     /// Goes up by one each time a hand-over lands; plays the ripple.
     private(set) var landings = 0
 
+    /// Where the music went, assumed from the moment it lands until Home has
+    /// seen it for itself: Apple Music here reports in a moment and the Mac's
+    /// pause comes through the relay, so Home went through three sets of
+    /// buttons in 1¼ s after the ripple (Alistair's recording, 23 November
+    /// 2026). Now it shows where the music went with the ripple, once.
+    private(set) var assumed: HandoffDirection?
+
+    /// While a hand-over has just landed: true if the iPhone plays the Mac's
+    /// song now, false if the Mac does; nil otherwise.
+    var assumesPhonePlays: Bool? { assumed.map { $0 == .toPhone } }
+
     @ObservationIgnored private let haptics = HandoffHaptics()
 
     func begin(_ direction: HandoffDirection) {
+        assumed = nil
         phase = .moving(direction)
         haptics.build()
     }
 
     func land(_ direction: HandoffDirection) {
         phase = .landed(direction)
+        assumed = direction
         landings += 1
+        let landing = landings
         haptics.land()
+        Task {
+            // Long enough for the Mac's state to come through the relay.
+            try? await Task.sleep(for: .seconds(5))
+            if landings == landing { assumed = nil }
+        }
         Task {
             try? await Task.sleep(for: .seconds(1.2))
             if phase == .landed(direction) { phase = nil }
@@ -62,7 +81,13 @@ final class HandoffMoment {
 
     func fail() {
         phase = nil
+        assumed = nil
         haptics.stop()
+    }
+
+    /// The hand-over said it didn't work after all: show what's real.
+    func forgetAssumption() {
+        assumed = nil
     }
 }
 
