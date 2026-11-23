@@ -27,3 +27,17 @@ APNS_TOPIC = "com.alistairmerritt.MusicStandBy.push-type.nowplaying"
 # default so a deployment can't expose them by accident; `npm run dev` and the
 # tests turn them on.
 DEV_ENDPOINTS = "0"
+# Experiment (23 November 2026, branch experiment/paused-keep-alive): while the
+# Mac is paused, push the paused state again every 5 minutes, for up to an hour,
+# to see whether iOS then keeps Second Chair on the Lock Screen and in StandBy
+# instead of handing them to Apple Music about 8 minutes in. "0" turns it off.
+PAUSED_KEEP_ALIVE_MS = "300000"
+
+# Saved logs (Workers Logs), so a reminder's "pairing: reminder → 200" line
+# can be found afterwards in the Cloudflare dashboard (Workers › the relay ›
+# Logs), not only while `wrangler tail` is running (23 November 2026). The
+# lines carry no names, song titles or tokens: session and request ids are
+# shortened.
+[observability]
+enabled = true
+

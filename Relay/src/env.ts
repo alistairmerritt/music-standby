@@ -19,6 +19,15 @@ export interface Env {
   ACK_TIMEOUT_MS?: string;
   DISCONNECT_GRACE_MS?: string;
   PAUSED_TIMEOUT_MS?: string;
+  /**
+   * Experiment (23 November 2026): while the Mac is paused, the paused state is
+   * pushed to the phone again this often, to see whether it stops iOS handing
+   * the Lock Screen and StandBy to Apple Music about 8 minutes into a pause.
+   * 0, the default, turns it off.
+   */
+  PAUSED_KEEP_ALIVE_MS?: string;
+  /** How far into a pause the keep-alive runs. Default 1 hour. */
+  PAUSED_KEEP_ALIVE_FOR_MS?: string;
   /** A Mac that plays after this long not playing sends the phone a reminder, if it asked for them. Default 8 minutes, about when iOS gives StandBy to the phone's own Apple Music. */
   REMIND_AFTER_MS?: string;
   /** Delay of the repeat update that keeps the phone's extension awake for new artwork. Default 700. */

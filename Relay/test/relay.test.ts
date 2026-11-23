@@ -731,6 +731,107 @@ describe("reminders", () => {
   });
 });
 
+describe("paused keep-alive (experiment)", () => {
+  // The tests run with PAUSED_KEEP_ALIVE_MS at 5 minutes; the deployed default is off.
+  const updates = async (phoneToken: string) => (await pushes(phoneToken)).filter((p) => p.event === "update");
+
+  async function pausedSetup() {
+    const setup = await playingSetup();
+    const paused = playback({ state: "paused", isPlaying: false });
+    setup.mac.send({ type: "state", message: paused });
+    await waitForRevision(setup.phoneToken, paused.revision);
+    return { ...setup, paused };
+  }
+
+  async function backdate(pairingID: string, pausedMinutesAgo: number, keptAliveMinutesAgo: number) {
+    await editStorage(pairingID, async (storage) => {
+      const s = (await storage.get<any>("session"))!;
+      await storage.put("session", { ...s, pausedSince: Date.now() - pausedMinutesAgo * 60_000, keptAliveAt: Date.now() - keptAliveMinutesAgo * 60_000 });
+    });
+  }
+
+  it("pushes the paused state again once it's due, and not before", async () => {
+    const { pairingID, phoneToken, paused } = await pausedSetup();
+    const before = (await updates(phoneToken)).length;
+    await backdate(pairingID, 4, 4);
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(before);
+
+    await backdate(pairingID, 6, 6);
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    const sent = await updates(phoneToken);
+    expect(sent).toHaveLength(before + 1);
+    expect(JSON.stringify(sent.at(-1).payload)).toContain(`"revision":${paused.revision}`);
+    expect(JSON.stringify(sent.at(-1).payload)).toContain(`"isPlaying":false`);
+
+    // Just sent: the next one waits another 5 minutes.
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(before + 1);
+  });
+
+  it("stops an hour into the pause", async () => {
+    const { pairingID, phoneToken } = await pausedSetup();
+    const before = (await updates(phoneToken)).length;
+    await backdate(pairingID, 61, 6);
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(before);
+  });
+
+  it("sends nothing while playing", async () => {
+    const { pairingID, phoneToken } = await playingSetup();
+    const before = (await updates(phoneToken)).length;
+    await editStorage(pairingID, async (storage) => {
+      const s = (await storage.get<any>("session"))!;
+      await storage.put("session", { ...s, keptAliveAt: Date.now() - 10 * 60_000 });
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(before);
+  });
+
+  it("stays quiet while the phone plays the song after Continue on iPhone, until the Mac plays again", async () => {
+    const { mac, pairingID, phoneToken } = await playingSetup();
+    const id = newCommandID();
+    const sent = call("POST", "/v1/commands", {
+      token: phoneToken,
+      headers: { "Idempotency-Key": id },
+      body: { command: { id, kind: "pause", issuedAt: new Date().toISOString(), reason: "continue_on_phone" } },
+    });
+    const command = await mac.next("command");
+    expect(command.command.reason).toBe("continue_on_phone");
+    const paused = playback({ state: "paused", isPlaying: false });
+    mac.send({ type: "ack", ack: { commandID: id, accepted: true, revision: paused.revision } });
+    await sent;
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+
+    const before = (await updates(phoneToken)).length;
+    await backdate(pairingID, 20, 20);
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(before);
+
+    // Back on the Mac, then paused there: the keep-alive applies again.
+    const resumed = playback();
+    mac.send({ type: "state", message: resumed });
+    await waitForRevision(phoneToken, resumed.revision);
+    const pausedAgain = playback({ state: "paused", isPlaying: false });
+    mac.send({ type: "state", message: pausedAgain });
+    await waitForRevision(phoneToken, pausedAgain.revision);
+    const later = (await updates(phoneToken)).length;
+    await backdate(pairingID, 6, 6);
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(later + 1);
+  });
+
+  it("sends nothing to a player that was swiped away", async () => {
+    const { pairingID, phoneToken, sessionID } = await pausedSetup();
+    await backdate(pairingID, 6, 6);
+    expect((await call("POST", "/v1/session/end", { token: phoneToken, body: { sessionID } })).status).toBe(204);
+    const before = (await updates(phoneToken)).length;
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    expect(await updates(phoneToken)).toHaveLength(before);
+  });
+});
+
 describe("connection loss", () => {
   it("keeps the session through a reconnect inside the grace period", async () => {
     const { mac, macToken, phoneToken, sessionID, state } = await playingSetup();
