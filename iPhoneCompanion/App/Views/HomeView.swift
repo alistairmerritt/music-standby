@@ -16,6 +16,9 @@ struct HomeView: View {
     @State private var canPlayCatalog: Bool?
     @Environment(\.openURL) private var openURL
     @State private var showsSettings = false
+    /// A hand-over started on Home, and how many have landed: the artwork shows them.
+    @State private var handoff: HandoffPhase?
+    @State private var handoffLandings = 0
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -27,7 +30,7 @@ struct HomeView: View {
                     Task { await model.reconnect() }
                 }
 
-                NowPlayingPanel(attributes: attributes, mode: nowPlayingMode)
+                NowPlayingPanel(attributes: attributes, mode: nowPlayingMode, handoff: handoff, landings: handoffLandings)
 
                 VStack(spacing: 14) {
                     if isDemoLayout {
@@ -39,25 +42,30 @@ struct HomeView: View {
                         ContinueListeningArea(player: phoneMusic, here: $phoneNowPlaying, status: continueListening,
                                               allowAppleMusic: allowAppleMusic,
                                               setUp: { onboarding.resume(.continueMusic) },
-                                              quiet: nowPlayingMode == .onIPhone)
+                                              quiet: nowPlayingMode == .onIPhone,
+                                              handoff: $handoff, landings: $handoffLandings)
                     }
                     // Apple Music has the Lock Screen while it plays the Mac's
                     // song here, so the Mac's player has nothing to show; Stop
                     // Showing is still in Settings (23 November 2026).
                     if nowPlayingMode != .onIPhone {
                         ShowOnLockScreenButton(enabled: attributes != nil && isLive, sessionIsActive: sessionIsActive)
+                            .transition(.opacity)
                     }
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
             .padding(.bottom, 32)
-            .animation(.default, value: nowPlayingMode)
+            .animation(.smooth(duration: 0.45), value: nowPlayingMode)
         }
         // The song’s artwork, blurred, behind
         // Home, as Apple Music's player does, with a dark band at the top
         // behind the title and the Mac's card.
-        .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted) }
+        .background {
+            HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted)
+                .animation(.easeInOut(duration: 0.8), value: backgroundMuted)
+        }
         .environment(\.colorScheme, showsArtworkBackground && model.artwork != nil && HomeBackground.style != .none ? .dark : colorScheme)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationTitle("Second Chair")
@@ -74,8 +82,16 @@ struct HomeView: View {
             // Apple Music here has no change notice worth the wiring; once a
             // second is plenty for which handoff to offer.
             var tick = 0
+            // A change counts once it has held for two seconds, so Apple
+            // Music settling during a hand-over doesn't flicker the buttons
+            // (23 November 2026). A hand-over on Home sets it straight away.
+            var lastRead: PhoneNowPlaying?
+            var steadyReads = 0
             while !Task.isCancelled {
-                phoneNowPlaying = phoneMusic.nowPlaying()
+                let fresh = phoneMusic.nowPlaying()
+                steadyReads = Self.sameMusic(fresh, lastRead) ? steadyReads + 1 : 0
+                lastRead = fresh
+                if tick == 0 || steadyReads >= 2 || Self.sameMusic(fresh, phoneNowPlaying) { phoneNowPlaying = fresh }
                 let access = phoneMusic.access
                 // The subscription once access is allowed, then every five minutes.
                 if access != appleMusicAccess || tick % 300 == 0 { canPlayCatalog = await phoneMusic.canPlayCatalog() }
@@ -87,6 +103,11 @@ struct HomeView: View {
     }
 
     // MARK: State
+
+    /// Same song, same playing or paused: only the position differs.
+    private static func sameMusic(_ a: PhoneNowPlaying?, _ b: PhoneNowPlaying?) -> Bool {
+        a?.isPlaying == b?.isPlaying && a?.catalogID == b?.catalogID && a?.title == b?.title
+    }
 
     /// The artwork goes behind Home whenever there's a song, greyed (below)
     /// when it isn't what's playing.

@@ -20,8 +20,11 @@ struct ContinueListeningArea: View {
     let setUp: () -> Void
     /// Both directions quiet, when Home's accent is elsewhere (Open Apple Music).
     var quiet = false
+    /// Shared with the artwork, which shows the music moving.
+    var handoff: Binding<HandoffPhase?> = .constant(nil)
+    var landings: Binding<Int> = .constant(0)
 
-    private enum Direction { case toPhone, toMac }
+    private typealias Direction = HandoffDirection
     @State private var working: Direction?
     @State private var result: (text: String, isFailure: Bool)?
     @State private var successes = 0
@@ -72,24 +75,55 @@ struct ContinueListeningArea: View {
         VStack(spacing: 14) {
             // A problem shows only when there is something to continue.
             if showsContinueOnPhone || showsContinueOnMac, let note { note }
-            // Moving back comes first while the iPhone has the music.
-            if phonePlaying {
-                if toMac { action(.toMac, prominent: true) }
-                if toPhone { action(.toPhone, prominent: !toMac) }
-            } else {
-                if toPhone { action(.toPhone, prominent: true) }
-                if toMac { action(.toMac, prominent: !toPhone) }
+            // Moving back comes first while the iPhone has the music. A new
+            // set of buttons is a new block: the old one fades out quickly and
+            // the new one fades in a beat later, once the panel above has
+            // changed, so they never cross (23 November 2026).
+            VStack(spacing: 14) {
+                ForEach(order, id: \.self) { direction in
+                    action(direction, prominent: direction == order.first)
+                }
             }
+            .id(ButtonSet(order: order, quiet: quiet))
+            .transition(.asymmetric(insertion: .opacity.animation(.smooth(duration: 0.4).delay(0.3)),
+                                    removal: .opacity.animation(.easeOut(duration: 0.15))))
             if let result {
                 Text(result.text)
                     .font(.footnote)
                     .foregroundStyle(result.isFailure ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                    .transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.4), value: ButtonSet(order: order, quiet: quiet))
+        .animation(.smooth(duration: 0.3), value: result?.text)
         .onChange(of: [macPlaying, phonePlaying]) { result = nil }
         .sensoryFeedback(.success, trigger: successes)
+        #if DEBUG
+        .onChange(of: DemoHandover.shared.autoRuns) {
+            Task { await run(DemoHandover.shared.autoDirection) }
+        }
+        #endif
+    }
+
+    /// What makes a set of buttons different enough to fade between.
+    private struct ButtonSet: Hashable {
+        let order: [Direction]
+        let quiet: Bool
+    }
+
+    /// The buttons shown, the one to use most likely first.
+    private var order: [Direction] {
+        var shown: [Direction] = []
+        if phonePlaying {
+            if toMac { shown.append(.toMac) }
+            if toPhone { shown.append(.toPhone) }
+        } else {
+            if toPhone { shown.append(.toPhone) }
+            if toMac { shown.append(.toMac) }
+        }
+        return shown
     }
 
     private func action(_ direction: Direction, prominent: Bool) -> some View {
@@ -136,11 +170,32 @@ struct ContinueListeningArea: View {
     private func run(_ direction: Direction) async {
         working = direction
         result = nil
-        let outcome = direction == .toPhone ? await continueHere() : await sendBack()
+        handoff.wrappedValue = .moving(direction)
+        let outcome: (text: String, isFailure: Bool)?
+        #if DEBUG
+        if ScreenshotMode.isOn {
+            outcome = await DemoHandover.shared.run(direction, model: model)
+        } else {
+            outcome = direction == .toPhone ? await continueHere() : await sendBack()
+        }
+        #else
+        outcome = direction == .toPhone ? await continueHere() : await sendBack()
+        #endif
         result = outcome
-        if outcome == nil || outcome?.isFailure == false { successes += 1 }
+        let landed = outcome == nil || outcome?.isFailure == false
+        if landed {
+            successes += 1
+            handoff.wrappedValue = .landed(direction)
+            landings.wrappedValue += 1
+        } else {
+            handoff.wrappedValue = nil
+        }
         here = player.nowPlaying()
         working = nil
+        if landed {
+            try? await Task.sleep(for: .seconds(1))
+            if handoff.wrappedValue == .landed(direction) { handoff.wrappedValue = nil }
+        }
     }
 
     private func continueHere() async -> (text: String, isFailure: Bool)? {
