@@ -12,6 +12,9 @@ import UIKit
 //
 // The 23 November backdrop (the cover blurred under a black wash) made the
 // card read as a dark slab. It's gone: nothing is drawn behind the content.
+// 24 November, after seeing it beside Apple's player: the Mac's name moved
+// above the title with no symbol, greys matched to Apple's, bigger buttons,
+// no cover when there's no artwork, and the remaining time right-aligned.
 
 /// The card's artwork: from the cache the Now Playing extension fills, or the
 /// demo's bundled covers. A Live Activity can't use the network, and its
@@ -24,23 +27,19 @@ enum MacPlaybackCardArtwork {
     }
 }
 
-/// The type the card uses everywhere. White, like the Lock Screen's own clock
-/// and text, since the card sits on the wallpaper with no fill behind it; a
-/// soft shadow keeps it legible on a pale wallpaper without a container.
+/// The type the card uses everywhere, matched by eye to Apple's own Lock
+/// Screen player (24 Nov 2026): a white title, a grey artist, and a dimmer
+/// grey for where it's playing and the times. iOS draws its own glass plate
+/// behind a clear tint, so there's no shadow.
 enum MacPlaybackCardInk {
     static let primary = Color.white
-    static let secondary = Color.white.opacity(0.8)
-    static let tertiary = Color.white.opacity(0.62)
-    static let track = Color.white.opacity(0.24)
+    static let secondary = Color.white.opacity(0.6)
+    static let tertiary = Color.white.opacity(0.45)
+    static let bar = Color.white.opacity(0.6)
 }
 
-private struct LegibleOnWallpaper: ViewModifier {
-    func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(0.34), radius: 8, y: 1)
-    }
-}
-
-/// The Lock Screen and StandBy card.
+/// The Lock Screen and StandBy card. With no artwork (not cached yet), there's
+/// no cover at all rather than an empty box.
 struct MacPlaybackCardView: View {
     let attributes: MacPlaybackActivityAttributes
     let state: MacPlaybackActivityAttributes.ContentState
@@ -54,22 +53,21 @@ struct MacPlaybackCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 14) {
-                MacPlaybackCardCover(image: artwork, size: 68)
+            HStack(alignment: .center, spacing: 12) {
+                if let artwork { MacPlaybackCardCover(image: artwork, size: 60) }
                 MacPlaybackCardTitles(attributes: attributes, state: state, titleSize: 17)
-                Spacer(minLength: 6)
-                MacPlaybackCardButtons(state: state, size: 40)
+                Spacer(minLength: 4)
+                MacPlaybackCardButtons(state: state, glyph: 30)
             }
             MacPlaybackCardProgress(state: state)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 14)
-        .modifier(LegibleOnWallpaper())
     }
 }
 
-/// Song, artist, and where it's playing: "MacBook Pro" with a Mac symbol,
-/// subtle but always there, since the card stands for the Mac's playback.
+/// Where it's playing (the Mac's name), then the song and artist: Apple's
+/// order, with the source small and dim on top.
 struct MacPlaybackCardTitles: View {
     let attributes: MacPlaybackActivityAttributes
     let state: MacPlaybackActivityAttributes.ContentState
@@ -77,81 +75,58 @@ struct MacPlaybackCardTitles: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
+            Text(attributes.macName)
+                .font(.system(size: titleSize - 4, weight: .medium))
+                .foregroundStyle(MacPlaybackCardInk.tertiary)
+                .padding(.bottom, 1)
             Text(state.hasSong ? state.title : "Nothing playing")
                 .font(.system(size: titleSize, weight: .semibold))
                 .foregroundStyle(MacPlaybackCardInk.primary)
             if state.hasSong {
                 Text(state.artist)
-                    .font(.system(size: titleSize - 2))
+                    .font(.system(size: titleSize))
                     .foregroundStyle(MacPlaybackCardInk.secondary)
             }
-            Label {
-                Text(attributes.macName)
-            } icon: {
-                Image(systemName: "laptopcomputer")
-            }
-            .labelStyle(SourceLabelStyle())
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(MacPlaybackCardInk.tertiary)
-            .padding(.top, 3)
         }
         .lineLimit(1)
         .accessibilityElement(children: .combine)
     }
 }
 
-private struct SourceLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) {
-            configuration.icon.font(.system(size: 11, weight: .medium))
-            configuration.title
-        }
-    }
-}
-
 struct MacPlaybackCardCover: View {
-    let image: UIImage?
+    let image: UIImage
     let size: CGFloat
 
     var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Rectangle().fill(.white.opacity(0.14))
-                    .overlay(Image(systemName: "music.note").font(.system(size: size * 0.34)).foregroundStyle(MacPlaybackCardInk.secondary))
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(.rect(cornerRadius: size * 0.17, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: size * 0.17, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
-        }
+        Image(uiImage: image).resizable().scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(.rect(cornerRadius: size * 0.17, style: .continuous))
     }
 }
 
-/// Play/pause and next, as a tight cluster on the trailing edge. The targets
-/// are full size even where the glyphs are small. On a locked phone iOS asks
-/// for Face ID before running them (Apple's rule for widget and Live
-/// Activity buttons; seen 23 Nov 2026).
+/// Play/pause and next on the trailing edge, at about the size of Apple's
+/// own transport glyphs. On a locked phone iOS asks for Face ID before
+/// running them (Apple's rule for widget and Live Activity buttons; seen
+/// 23 Nov 2026).
 struct MacPlaybackCardButtons: View {
     let state: MacPlaybackActivityAttributes.ContentState
-    let size: CGFloat
+    /// The play/pause glyph's point size; next is drawn a little smaller, as Apple does.
+    let glyph: CGFloat
 
     var body: some View {
         HStack(spacing: 0) {
             Button(intent: ActivityPlayPauseOnMacIntent()) {
                 Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: size * 0.52))
-                    .frame(width: size, height: size)
+                    .font(.system(size: glyph))
+                    .frame(width: glyph * 1.6, height: glyph * 1.8)
                     .contentShape(.rect)
                     .contentTransition(.symbolEffect(.replace))
             }
             .accessibilityLabel(state.isPlaying ? "Pause on Mac" : "Play on Mac")
             Button(intent: ActivityNextOnMacIntent()) {
                 Image(systemName: "forward.fill")
-                    .font(.system(size: size * 0.42))
-                    .frame(width: size, height: size)
+                    .font(.system(size: glyph * 0.82))
+                    .frame(width: glyph * 1.6, height: glyph * 1.8)
                     .contentShape(.rect)
             }
             .disabled(!state.canGoNext)
@@ -188,21 +163,29 @@ struct MacPlaybackCardProgress: View {
             }
         }
         .progressViewStyle(.linear)
-        .tint(MacPlaybackCardInk.primary.opacity(0.9))
+        .tint(MacPlaybackCardInk.bar)
         .labelsHidden()
     }
 
     private var times: some View {
-        HStack {
-            if state.isPlaying {
-                Text(timerInterval: range, countsDown: false)
-                Spacer()
-                Text("−") + Text(timerInterval: range, countsDown: true)
-            } else {
-                Text(Self.clock(state.elapsed))
-                Spacer()
-                Text("−" + Self.clock(max(state.duration - state.elapsed, 0)))
+        // A timer text takes all the width it's offered and draws at its
+        // leading edge, so each side gets half and the remaining time is
+        // aligned to the trailing edge explicitly (it sat mid-card before).
+        HStack(spacing: 0) {
+            Group {
+                if state.isPlaying { Text(timerInterval: range, countsDown: false) } else { Text(Self.clock(state.elapsed)) }
             }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if state.isPlaying {
+                    Text("−") + Text(timerInterval: range, countsDown: true)
+                } else {
+                    Text("−" + Self.clock(max(state.duration - state.elapsed, 0)))
+                }
+            }
+            .multilineTextAlignment(.trailing)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.system(size: 11, weight: .medium).monospacedDigit())
         .foregroundStyle(MacPlaybackCardInk.tertiary)

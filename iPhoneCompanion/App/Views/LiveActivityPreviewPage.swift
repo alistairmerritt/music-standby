@@ -53,8 +53,12 @@ struct LiveActivityPreviewPage: View {
         .environment(\.colorScheme, .dark)
     }
 
-    private func cover(_ state: MacPlaybackActivityAttributes.ContentState, _ size: CGFloat) -> some View {
-        MacPlaybackCardCover(image: MacPlaybackCardArtwork.image(for: state.artworkID, pixels: 156), size: size)
+    @ViewBuilder private func cover(_ state: MacPlaybackActivityAttributes.ContentState, _ size: CGFloat) -> some View {
+        if let image = MacPlaybackCardArtwork.image(for: state.artworkID, pixels: 156) {
+            MacPlaybackCardCover(image: image, size: size)
+        } else if size < 30 {
+            Image(systemName: "music.note").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+        }
     }
 
     private func compactIsland(_ state: MacPlaybackActivityAttributes.ContentState) -> some View {
@@ -78,7 +82,7 @@ struct LiveActivityPreviewPage: View {
                 cover(state, 52)
                 MacPlaybackCardTitles(attributes: attributes, state: state, titleSize: 15)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                MacPlaybackCardButtons(state: state, size: 38)
+                MacPlaybackCardButtons(state: state, glyph: 24)
             }
             MacPlaybackCardProgress(state: state).padding(.horizontal, 4)
         }

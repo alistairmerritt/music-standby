@@ -22,9 +22,12 @@ struct MacPlaybackLiveActivity: Widget {
             let artwork = MacPlaybackCardArtwork.image(for: state.artworkID, pixels: 156)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    MacPlaybackCardCover(image: artwork, size: 52)
-                        .padding(.leading, 2)
-                        .frame(maxHeight: .infinity, alignment: .center)
+                    // No artwork cached: no cover, rather than an empty box.
+                    if let artwork {
+                        MacPlaybackCardCover(image: artwork, size: 52)
+                            .padding(.leading, 2)
+                            .frame(maxHeight: .infinity, alignment: .center)
+                    }
                 }
                 DynamicIslandExpandedRegion(.center) {
                     MacPlaybackCardTitles(attributes: context.attributes, state: state, titleSize: 15)
@@ -32,7 +35,7 @@ struct MacPlaybackLiveActivity: Widget {
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    MacPlaybackCardButtons(state: state, size: 38)
+                    MacPlaybackCardButtons(state: state, glyph: 24)
                         .frame(maxHeight: .infinity, alignment: .center)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
@@ -41,16 +44,25 @@ struct MacPlaybackLiveActivity: Widget {
                         .padding(.top, 6)
                 }
             } compactLeading: {
-                MacPlaybackCardCover(image: artwork, size: 22)
+                islandMark(artwork)
             } compactTrailing: {
                 Image(systemName: state.isPlaying ? "waveform" : "pause.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .symbolEffect(.variableColor.iterative, isActive: state.isPlaying)
                     .foregroundStyle(.white)
             } minimal: {
-                MacPlaybackCardCover(image: artwork, size: 22)
+                islandMark(artwork)
             }
             .keylineTint(.white.opacity(0.4))
+        }
+    }
+
+    /// The compact and minimal island's mark: the cover, or a note without one.
+    @ViewBuilder private func islandMark(_ artwork: UIImage?) -> some View {
+        if let artwork {
+            MacPlaybackCardCover(image: artwork, size: 22)
+        } else {
+            Image(systemName: "music.note").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
         }
     }
 }
