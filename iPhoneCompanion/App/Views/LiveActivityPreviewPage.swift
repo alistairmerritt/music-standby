@@ -66,9 +66,14 @@ struct LiveActivityPreviewPage: View {
                     Text(state.artist).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                MacPlaybackCardButtons(state: state, size: 40)
+                Image(systemName: "laptopcomputer").font(.system(size: 17)).foregroundStyle(.secondary)
             }
-            MacPlaybackCardProgress(state: state).padding(.horizontal, 4)
+            HStack(spacing: 4) {
+                Text("Show in Now Playing")
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+            }
+            .font(.system(size: 13)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 18).padding(.vertical, 16)

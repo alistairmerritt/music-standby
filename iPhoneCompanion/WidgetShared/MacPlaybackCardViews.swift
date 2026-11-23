@@ -74,32 +74,54 @@ struct MacPlaybackCardView: View {
         }
     }
 
+    /// Alistair's layout (23 Nov 2026): the Mac's name, the song and a Mac
+    /// symbol; then "Second Chair" and "Show in Now Playing", which is what a tap does (it opens
+    /// Second Chair, which brings the Mac's player back and ends the card).
+    /// No buttons for now: on a locked phone iOS asks for Face ID before
+    /// running them. `MacPlaybackCardButtons` and `MacPlaybackCardProgress`
+    /// are kept for when they come back.
+    /// Over the artwork, a neutral grey (the system's picks up the cover's
+    /// colour); on iOS's background, the system's.
+    private var secondaryInk: Color { backdrop == nil ? Color.secondary : Color.white.opacity(0.62) }
+
     private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                MacPlaybackCardCover(image: artwork, size: 56)
-                VStack(alignment: .leading, spacing: 1) {
-                    Label(attributes.macName, systemImage: "laptopcomputer")
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                MacPlaybackCardCover(image: artwork, size: 64)
+                VStack(alignment: .leading, spacing: 2) {
+                    // The Mac that's playing, in the eyebrow's capitals.
+                    Text(attributes.macName.uppercased())
+                        .font(.system(size: 11, weight: .medium)).tracking(0.6)
+                        .foregroundStyle(secondaryInk).lineLimit(1)
                         .padding(.bottom, 2)
-                    Text(state.hasSong ? state.title : "Nothing playing").font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                    Text(state.hasSong ? state.title : "Nothing playing")
+                        .font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     if state.hasSong {
-                        Text(state.artist).font(.system(size: 14)).foregroundStyle(.secondary).lineLimit(1)
+                        Text(state.artist).font(.system(size: 14)).foregroundStyle(secondaryInk).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
-                MacPlaybackCardButtons(state: state, size: 44)
+                Image(systemName: "laptopcomputer")
+                    .font(.system(size: 15)).foregroundStyle(secondaryInk)
+                    .accessibilityLabel(attributes.macName)
             }
-            MacPlaybackCardProgress(state: state)
-            // The tap opens Second Chair, which brings the Mac's player back
-            // (scrubber, volume, Control Centre) and ends the card.
-            Text("Tap for the full player")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, -4)
+            .padding(.bottom, 12)
+            Rectangle().fill(secondaryInk.opacity(0.5)).frame(height: 0.5)
+            HStack(spacing: 8) {
+                Text("Second Chair")
+                Spacer(minLength: 8)
+                HStack(spacing: 4) {
+                    Text("Show in Now Playing")
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .font(.system(size: 14))
+            .lineLimit(1)
+            .padding(.top, 11)
         }
         .foregroundStyle(.primary)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 }
 

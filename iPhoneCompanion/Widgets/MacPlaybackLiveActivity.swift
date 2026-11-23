@@ -18,8 +18,9 @@ struct MacPlaybackLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     MacPlaybackCardCover(image: artwork, size: 48).padding(.leading, 4)
                 }
+                // No buttons for now (see MacPlaybackCardView); the Mac instead.
                 DynamicIslandExpandedRegion(.trailing) {
-                    MacPlaybackCardButtons(state: state, size: 40)
+                    Image(systemName: "laptopcomputer").font(.system(size: 17)).foregroundStyle(.secondary).padding(.trailing, 6)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 1) {
@@ -29,7 +30,13 @@ struct MacPlaybackLiveActivity: Widget {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    MacPlaybackCardProgress(state: state).padding(.horizontal, 4).padding(.top, 4)
+                    HStack(spacing: 4) {
+                        Text("Show in Now Playing")
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+                    }
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 6).padding(.top, 4)
                 }
             } compactLeading: {
                 MacPlaybackCardCover(image: artwork, size: 22)
