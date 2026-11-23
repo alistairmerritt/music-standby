@@ -52,7 +52,7 @@ public enum PlayerDisplay: String, CaseIterable, Identifiable, Sendable {
     public var summary: String {
         switch self {
         case .automatic:
-            "Use Now Playing. When your Mac starts playing after a break, also show a Live Activity, in case iOS has replaced Now Playing. Opening Second Chair brings Now Playing back and closes the Live Activity."
+            "Prefer Now Playing, with a Live Activity when your Mac resumes after a break. Opening Second Chair restores Now Playing."
         case .nowPlaying:
             "Use Apple’s full music player on your Lock Screen, in the Dynamic Island and StandBy, and on Apple Watch. If iOS replaces it, open Second Chair to bring it back."
         case .liveActivity:

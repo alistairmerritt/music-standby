@@ -1385,6 +1385,12 @@ describe("live activity (experiment)", () => {
     expect((await pushes(phoneToken)).filter((p) => p.event === "reminder")).toHaveLength(0);
   });
 
+  it("only the phone may ask for the card", async () => {
+    const { macToken } = await playingSetup();
+    expect((await call("POST", "/v1/activity/start", { body: {} })).status).toBe(401);
+    expect((await call("POST", "/v1/activity/start", { token: macToken, body: {} })).status).toBe(404);
+  });
+
   it("refuses when nothing is playing", async () => {
     const { phoneToken } = await pairedSetup();
     await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
