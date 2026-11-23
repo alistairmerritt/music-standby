@@ -10,7 +10,7 @@ extension WidgetActions {
             var macConnected = true
             let outcome = try await ShortcutRemote.run { remote in
                 macConnected = try await remote.read().macConnected
-                return await remote.handover().continueOnPhone(with: player)
+                return await remote.handover().continueOnPhone(with: player, from: .widget)
             }
             switch outcome {
             case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere: return
@@ -24,7 +24,7 @@ extension WidgetActions {
             let player = SystemMusicPhonePlayer()
             let outcome = try await ShortcutRemote.run { remote in
                 try await remote.read()
-                return await remote.handover().sendBackToMac(with: player)
+                return await remote.handover().sendBackToMac(with: player, from: .widget)
             }
             switch outcome {
             case .sentBack, .sentAsStation: return

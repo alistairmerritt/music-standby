@@ -45,6 +45,48 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.stationSeeds.isEmpty, "83 songs still to come")
     }
 
+    /// Home's animation lands when the music moves, not when the hand-over
+    /// has finished pausing the Mac and adding a station (23 November 2026).
+    @Test func arrivalComesOnceTheSongPlaysHereAndBeforeTheMacPauses() async {
+        let (h, task) = await ready(playingFromAA())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsPlaylist = aaHere
+        var arrivals = 0
+        var playedWhenArrived = false
+        let outcome = await h.model.continueOnPhone(with: phone) {
+            arrivals += 1
+            playedWhenArrived = !phone.playlistAsked.isEmpty
+        }
+        #expect(outcome == .continued)
+        #expect(arrivals == 1)
+        #expect(playedWhenArrived)
+    }
+
+    /// Every hand-over goes in the Lock Screen Record with where it came from
+    /// (23 November 2026).
+    @Test func aHandOverIsRecordedWithItsSource() async {
+        let (h, task) = await ready(playingFromAA())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsPlaylist = aaHere
+        #expect(await h.model.continueOnPhone(with: phone, from: .shortcuts) == .continued)
+        let recent = LockScreenRecord.entries(in: WidgetSnapshot.defaults).prefix(20).map(\.message)
+        #expect(recent.contains { $0.hasPrefix("Continue on iPhone from Shortcuts: continued in ") })
+    }
+
+    @Test func noArrivalWhenTheSongDoesntStartHere() async {
+        let (h, task) = await ready(playingFromAA())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.starts = false
+        var arrivals = 0
+        let outcome = await h.model.continueOnPhone(with: phone) { arrivals += 1 }
+        #expect(outcome == .didNotStart)
+        #expect(arrivals == 0)
+        #expect(await h.transport.sent.isEmpty, "the Mac plays on")
+    }
+
     @Test func theMacsNextSongsWhenThePlaylistIsntHere() async {
         let (h, task) = await ready(playingFromAA())
         defer { task.cancel() }

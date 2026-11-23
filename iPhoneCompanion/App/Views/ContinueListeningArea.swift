@@ -21,19 +21,25 @@ struct ContinueListeningArea: View {
     /// Both directions quiet, when Home's accent is elsewhere (Open Apple Music).
     var quiet = false
 
-    private enum Direction { case toPhone, toMac }
+    private typealias Direction = HandoffDirection
     @State private var working: Direction?
     @State private var result: (text: String, isFailure: Bool)?
-    @State private var successes = 0
 
-    private var macPlaying: Bool { model.attributes?.isPlaying == true }
+    // Just after a hand-over lands, where the music went (HandoffMoment).
+    private var assumed: Bool? { HandoffMoment.shared.assumesPhonePlays }
+    private var macPlaying: Bool {
+        if let assumed { return !assumed }
+        return model.attributes?.isPlaying == true
+    }
     private var phonePlaying: Bool {
+        if let assumed { return assumed }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
         return here?.isPlaying == true
     }
     private var phoneSongInMacQueue: Bool {
+        if assumed == true { return true }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
@@ -41,6 +47,7 @@ struct ContinueListeningArea: View {
     }
     /// Any Apple Music song can go to the Mac: one its queue doesn't have goes as its station.
     private var phoneHasAppleMusicSong: Bool {
+        if assumed == true { return true }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
@@ -49,7 +56,13 @@ struct ContinueListeningArea: View {
 
     // The rules as they were: offered, then open.
     /// Whenever the Mac's song can move.
-    private var showsContinueOnPhone: Bool { model.canContinueOnPhone }
+    private var showsContinueOnPhone: Bool {
+        #if DEBUG
+        // Screenshots of nothing playing hide the demo Mac's song, as a real Mac would have none.
+        if HomeScreenshot.nothingPlaying { return false }
+        #endif
+        return model.canContinueOnPhone
+    }
     /// While the phone plays, or when its paused song is one the Mac has; not
     /// for whatever Apple Music here last played long ago.
     private var showsContinueOnMac: Bool { phonePlaying || phoneSongInMacQueue }
@@ -66,19 +79,24 @@ struct ContinueListeningArea: View {
     }
 
     private var toPhone: Bool { !blocked && status != .needsAppleMusic && showsContinueOnPhone && continueOnPhoneOpen }
-    private var toMac: Bool { !blocked && showsContinueOnMac && continueOnMacOpen }
+    /// Continue on Mac stays in place while it's on offer and only greys out
+    /// while the Mac plays, so pausing and playing the Mac doesn't make it come
+    /// and go and move everything below it (Alistair, 23 November 2026).
+    private var toMac: Bool { !blocked && showsContinueOnMac && phoneHasAppleMusicSong }
+    private var toMacEnabled: Bool { continueOnMacOpen }
 
     var body: some View {
         VStack(spacing: 14) {
             // A problem shows only when there is something to continue.
             if showsContinueOnPhone || showsContinueOnMac, let note { note }
-            // Moving back comes first while the iPhone has the music.
-            if phonePlaying {
-                if toMac { action(.toMac, prominent: true) }
-                if toPhone { action(.toPhone, prominent: !toMac) }
-            } else {
-                if toPhone { action(.toPhone, prominent: true) }
-                if toMac { action(.toMac, prominent: !toPhone) }
+            // Moving back comes first while the iPhone has the music. The
+            // buttons are slots, not directions: through a hand-over the first
+            // button stays the same button and morphs, its words, symbol and
+            // colour changing in place, rather than one button fading out for
+            // another to fade in (Alistair, 23 November 2026: "much more fluid").
+            ForEach(Array(order.enumerated()), id: \.offset) { slot, direction in
+                action(direction, prominent: slot == 0)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
             if let result {
                 Text(result.text)
@@ -86,23 +104,49 @@ struct ContinueListeningArea: View {
                     .foregroundStyle(result.isFailure ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                    .transition(.opacity)
             }
         }
+        // One spring for all of it, the same as the panel's, with no delays.
+        .animation(.smooth(duration: 0.45), value: order)
+        .animation(.smooth(duration: 0.45), value: quiet)
+        .animation(.smooth(duration: 0.45), value: toMacEnabled)
+        .animation(.smooth(duration: 0.45), value: working)
+        .animation(.smooth(duration: 0.45), value: result?.text)
         .onChange(of: [macPlaying, phonePlaying]) { result = nil }
-        .sensoryFeedback(.success, trigger: successes)
+        #if DEBUG
+        .onChange(of: DemoHandover.shared.autoRuns) {
+            Task { await run(DemoHandover.shared.autoDirection) }
+        }
+        #endif
+    }
+
+    /// The buttons shown, the one to use most likely first.
+    private var order: [Direction] {
+        var shown: [Direction] = []
+        if phonePlaying {
+            if toMac { shown.append(.toMac) }
+            if toPhone { shown.append(.toPhone) }
+        } else {
+            if toPhone { shown.append(.toPhone) }
+            if toMac { shown.append(.toMac) }
+        }
+        return shown
     }
 
     private func action(_ direction: Direction, prominent: Bool) -> some View {
         let toPhone = direction == .toPhone
         let title = toPhone ? "Continue on iPhone" : "Continue on Mac"
         let symbol = toPhone ? "iphone" : "laptopcomputer"
+        // "will pause" only when the other side is playing (Alistair, 23 November 2026).
         let detail: String = if toPhone {
-            model.macSongHasNoCatalogID
-                ? "Finds this song in Apple Music and picks up from the same point. Your Mac will pause."
-                : "Picks up here from the same point. Your Mac will pause."
+            (model.macSongHasNoCatalogID
+                ? "Finds this song in Apple Music and picks up from the same point."
+                : "Picks up here from the same point.")
+                + (macPlaying ? " Your Mac will pause." : "")
         } else {
             phoneSongInMacQueue
-                ? "Picks up on your Mac from the same point. Your iPhone will pause."
+                ? "Picks up on your Mac from the same point." + (phonePlaying ? " Your iPhone will pause." : "")
                 : "Picks up on your Mac. If your Mac can’t play this playlist or album, it plays the song’s station."
         }
         return VStack(spacing: 8) {
@@ -112,15 +156,19 @@ struct ContinueListeningArea: View {
                 HStack(spacing: 8) {
                     if working == direction {
                         ProgressView()
-                        Text(toPhone ? "Continuing on iPhone…" : "Continuing on Mac…")
+                            .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     } else {
-                        Label(title, systemImage: symbol)
+                        Image(systemName: symbol)
+                            .contentTransition(.symbolEffect(.replace))
+                            .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     }
+                    Text(working == direction ? (toPhone ? "Continuing on iPhone…" : "Continuing on Mac…") : title)
+                        .contentTransition(.interpolate)
                 }
                 .frame(maxWidth: .infinity)
             }
-            .modifier(ContinueButtonStyle(prominent: prominent && !quiet))
-            .disabled(working != nil)
+            .buttonStyle(ContinueButtonStyle(prominent: prominent && !quiet))
+            .disabled(working != nil || (direction == .toMac && !toMacEnabled))
             .accessibilityHint(detail)
             if result == nil {
                 Text(detail)
@@ -128,7 +176,9 @@ struct ContinueListeningArea: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                    .contentTransition(.interpolate)
                     .accessibilityHidden(true)
+                    .opacity(direction == .toMac && !toMacEnabled ? 0.5 : 1)
             }
         }
     }
@@ -136,15 +186,40 @@ struct ContinueListeningArea: View {
     private func run(_ direction: Direction) async {
         working = direction
         result = nil
-        let outcome = direction == .toPhone ? await continueHere() : await sendBack()
+        HandoffMoment.shared.begin(direction)
+        // The ripple and the firm tap land the moment the music moves, while
+        // the hand-over finishes off (HandoffMoment, 23 November 2026).
+        var landed = false
+        let arrived: @MainActor () -> Void = {
+            guard !landed else { return }
+            landed = true
+            HandoffMoment.shared.land(direction)
+        }
+        let outcome: (text: String, isFailure: Bool)?
+        #if DEBUG
+        if ScreenshotMode.isOn {
+            outcome = await DemoHandover.shared.run(direction, model: model, arrived: arrived)
+        } else {
+            outcome = direction == .toPhone ? await continueHere(arrived) : await sendBack(arrived)
+        }
+        #else
+        outcome = direction == .toPhone ? await continueHere(arrived) : await sendBack(arrived)
+        #endif
         result = outcome
-        if outcome == nil || outcome?.isFailure == false { successes += 1 }
+        if outcome == nil || outcome?.isFailure == false {
+            arrived()
+        } else if !landed {
+            HandoffMoment.shared.fail()
+        } else {
+            // It moved, then something failed (the Mac wouldn't pause): show what's real.
+            HandoffMoment.shared.forgetAssumption()
+        }
         here = player.nowPlaying()
         working = nil
     }
 
-    private func continueHere() async -> (text: String, isFailure: Bool)? {
-        switch await model.continueOnPhone(with: player) {
+    private func continueHere(_ arrived: @escaping @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
+        switch await model.continueOnPhone(with: player, arrived: arrived) {
         case .unavailable: ("This song couldn’t be found in Apple Music.", true)
         case .notAllowed: ("Allow access to Apple Music in Settings to continue listening on your iPhone.", true)
         case .didNotStart: ("Couldn’t start playback on your iPhone. Music is still playing on your Mac.", true)
@@ -155,8 +230,8 @@ struct ContinueListeningArea: View {
         }
     }
 
-    private func sendBack() async -> (text: String, isFailure: Bool)? {
-        let outcome = await model.sendBackToMac(with: player)
+    private func sendBack(_ arrived: @escaping @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
+        let outcome = await model.sendBackToMac(with: player, arrived: arrived)
         // Say only what's true now: headphones moving over can pause Apple Music here by themselves.
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
         return switch outcome {
@@ -193,15 +268,26 @@ struct ContinueListeningArea: View {
 }
 
 /// The one accent on Home, or its quieter second.
-private struct ContinueButtonStyle: ViewModifier {
+/// Drawn rather than the system's bordered styles, so that a button going
+/// from the accent to the quiet style blends its colour instead of switching
+/// (23 November 2026).
+private struct ContinueButtonStyle: ButtonStyle {
     let prominent: Bool
+    @Environment(\.isEnabled) private var isEnabled
 
-    func body(content: Content) -> some View {
-        if prominent {
-            content.buttonStyle(.borderedProminent).controlSize(.large)
-        } else {
-            content.buttonStyle(.bordered).controlSize(.large)
-        }
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.medium))
+            // Greyed out, the quiet style's words go grey too: blue on the
+            // faded grey was hard to read (Alistair, 23 November 2026).
+            .foregroundStyle(prominent ? Color.white : isEnabled ? Color.accentColor : Color.primary.opacity(0.4))
+            .padding(.horizontal, 20)
+            .frame(minHeight: 50)
+            .background(Capsule().fill(prominent ? Color.accentColor : Color.primary.opacity(isEnabled ? 0.12 : 0.07)))
+            .contentShape(Capsule())
+            .opacity(isEnabled || !prominent ? 1 : 0.45)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.smooth(duration: 0.2), value: configuration.isPressed)
     }
 }
 

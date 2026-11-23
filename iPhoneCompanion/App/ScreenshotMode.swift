@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import Observation
 import StandByKit
 import UIKit
 
@@ -30,8 +31,9 @@ enum ScreenshotMode {
     }
 
     /// `-screenshotOnIPhone`: Home as if Apple Music here played the Mac's
-    /// song, as after Continue on iPhone. Use with `-screenshotPaused`.
-    static var iPhonePlaying: Bool { ProcessInfo.processInfo.arguments.contains("-screenshotOnIPhone") }
+    /// song, as after Continue on iPhone. Use with `-screenshotPaused`. The
+    /// demo's Continue buttons change it, as a real hand-over would.
+    static var iPhonePlaying: Bool { DemoHandover.shared.phonePlaying }
 
     /// `-screenshotScroll ID`: Home scrolls to that section (`continueListening`, `lockScreen`).
     static var scrollTarget: String? {
@@ -69,6 +71,7 @@ enum ScreenshotMode {
     /// Shows the song in Now Playing once the simulated Mac has sent it.
     static func start(model: AppModel) {
         guard isOn, !showsIntro else { return }
+        DemoHandover.shared.startLoopIfAsked()
         Task {
             try? await Task.sleep(for: .seconds(1.5))
             // A fresh session, so nothing of the last launch's lingers.
@@ -98,4 +101,50 @@ enum ScreenshotMode {
         return Double(arguments[at + 1])
     }
 }
+
+/// Development builds' screenshots: a pretend hand-over, so Home's motion can
+/// be recorded in the simulator, which has no Apple Music (23 November 2026).
+/// `-motionDemo` hands over to the iPhone and back on a loop by itself.
+@MainActor
+@Observable
+final class DemoHandover {
+    static let shared = DemoHandover()
+
+    var phonePlaying = ProcessInfo.processInfo.arguments.contains("-screenshotOnIPhone")
+    /// Goes up for each automatic hand-over; `autoDirection` says which way.
+    private(set) var autoRuns = 0
+    private(set) var autoDirection: HandoffDirection = .toPhone
+
+    /// About as long as a real hand-over takes, then the music has moved.
+    /// Like a real one, it says when the music moves, then takes a moment
+    /// more to finish.
+    func run(_ direction: HandoffDirection, model: AppModel,
+             arrived: @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
+        try? await Task.sleep(for: .seconds(1.8))
+        arrived()
+        switch direction {
+        case .toPhone:
+            phonePlaying = true
+            await model.send(.pause)
+        case .toMac:
+            await model.send(.play)
+            phonePlaying = false
+        }
+        try? await Task.sleep(for: .seconds(0.8))
+        return nil
+    }
+
+    func startLoopIfAsked() {
+        guard ProcessInfo.processInfo.arguments.contains("-motionDemo") else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            while !Task.isCancelled {
+                autoDirection = phonePlaying ? .toMac : .toPhone
+                autoRuns += 1
+                try? await Task.sleep(for: .seconds(7))
+            }
+        }
+    }
+}
+
 #endif

@@ -39,13 +39,13 @@ struct ContinueOnIPhoneIntent: AppIntent {
         var macConnected = true
         var outcome = try await ShortcutRemote.run { remote in
             macConnected = try await remote.read().macConnected
-            return await remote.handover(record: Self.log).continueOnPhone(with: player, timeout: canOpen ? 6 : 10)
+            return await remote.handover(record: Self.log).continueOnPhone(with: player, timeout: canOpen ? 6 : 10, from: .shortcuts)
         }
         if outcome == .didNotStart, canOpen {
             try await continueInForeground("Open Second Chair to start the song on your iPhone?", alwaysConfirm: false)
             outcome = try await ShortcutRemote.run { remote in
                 try await remote.read()
-                return await remote.handover(record: Self.log).continueOnPhone(with: player)
+                return await remote.handover(record: Self.log).continueOnPhone(with: player, from: .shortcuts)
             }
         }
         let dialog: IntentDialog
@@ -78,7 +78,7 @@ struct ContinueOnMacIntent: AppIntent {
         let player = SystemMusicPhonePlayer()
         let outcome = try await ShortcutRemote.run { remote in
             try await remote.read()
-            return await remote.handover().sendBackToMac(with: player)
+            return await remote.handover().sendBackToMac(with: player, from: .shortcuts)
         }
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
         switch outcome {

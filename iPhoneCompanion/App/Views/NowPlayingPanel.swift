@@ -51,6 +51,7 @@ struct NowPlayingPanel: View {
                     // before the redesign, 17 November 2026).
                     .disabled(dimsMacSong)
                     .opacity(dimsMacSong ? 0.4 : 1)
+                    .transition(.blurReplace)
                 case .onIPhone:
                     // The song's controls are in Apple Music now, so the way
                     // there takes the remote's place, as Home's one accent;
@@ -69,6 +70,7 @@ struct NowPlayingPanel: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity)
                     }
+                    .transition(.blurReplace)
                 case .lastKnown:
                     EmptyView()
                 }
@@ -83,13 +85,17 @@ struct NowPlayingPanel: View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
                              : AnyLayout(HStackLayout(alignment: .center, spacing: 16))
         layout {
-            Artwork(image: model.artwork, size: stacked ? 180 : 120)
+            HandoffArtwork {
+                Artwork(image: model.artwork, size: stacked ? 180 : 120)
+            }
                 // Greyed while the iPhone plays and the Mac is paused: this is
                 // the Mac's song, not what's playing (Alistair, 21 November 2026).
                 .saturation(dimsMacSong ? 0 : 1)
                 .opacity(dimsMacSong ? 0.5 : 1)
             VStack(alignment: .leading, spacing: 4) {
-                if let label { label }
+                if let label {
+                    label.transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.title)
                         .font(.title3.weight(.semibold))

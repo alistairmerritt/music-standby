@@ -41,23 +41,30 @@ struct HomeView: View {
                                               setUp: { onboarding.resume(.continueMusic) },
                                               quiet: nowPlayingMode == .onIPhone)
                     }
-                    // Apple Music has the Lock Screen while it plays the Mac's
-                    // song here, so the Mac's player has nothing to show; Stop
-                    // Showing is still in Settings (23 November 2026).
-                    if nowPlayingMode != .onIPhone {
+                    // Only while the player is turned off (first run, or after
+                    // Stop Showing): opening Second Chair already shows it again
+                    // and asks iOS to put it first, so a Refresh here repeated
+                    // that. Refresh and Stop Showing stay in Settings
+                    // (Alistair, 23 November 2026).
+                    if !model.isNowPlayingEnabled, nowPlayingMode != .onIPhone {
                         ShowOnLockScreenButton(enabled: attributes != nil && isLive, sessionIsActive: sessionIsActive)
+                            .transition(.opacity)
                     }
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
             .padding(.bottom, 32)
-            .animation(.default, value: nowPlayingMode)
+            .animation(.smooth(duration: 0.45), value: nowPlayingMode)
         }
         // The song’s artwork, blurred, behind
         // Home, as Apple Music's player does, with a dark band at the top
         // behind the title and the Mac's card.
-        .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted) }
+        .background {
+            HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted)
+                .animation(.easeInOut(duration: 0.8), value: backgroundMuted)
+                .modifier(HandoffBackgroundRipple())
+        }
         .environment(\.colorScheme, showsArtworkBackground && model.artwork != nil && HomeBackground.style != .none ? .dark : colorScheme)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationTitle("Second Chair")
@@ -74,8 +81,16 @@ struct HomeView: View {
             // Apple Music here has no change notice worth the wiring; once a
             // second is plenty for which handoff to offer.
             var tick = 0
+            // A change counts once it has held for two seconds, so Apple
+            // Music settling during a hand-over doesn't flicker the buttons
+            // (23 November 2026). A hand-over on Home sets it straight away.
+            var lastRead: PhoneNowPlaying?
+            var steadyReads = 0
             while !Task.isCancelled {
-                phoneNowPlaying = phoneMusic.nowPlaying()
+                let fresh = phoneMusic.nowPlaying()
+                steadyReads = Self.sameMusic(fresh, lastRead) ? steadyReads + 1 : 0
+                lastRead = fresh
+                if tick == 0 || steadyReads >= 2 || Self.sameMusic(fresh, phoneNowPlaying) { phoneNowPlaying = fresh }
                 let access = phoneMusic.access
                 // The subscription once access is allowed, then every five minutes.
                 if access != appleMusicAccess || tick % 300 == 0 { canPlayCatalog = await phoneMusic.canPlayCatalog() }
@@ -87,6 +102,11 @@ struct HomeView: View {
     }
 
     // MARK: State
+
+    /// Same song, same playing or paused: only the position differs.
+    private static func sameMusic(_ a: PhoneNowPlaying?, _ b: PhoneNowPlaying?) -> Bool {
+        a?.isPlaying == b?.isPlaying && a?.catalogID == b?.catalogID && a?.title == b?.title
+    }
 
     /// The artwork goes behind Home whenever there's a song, greyed (below)
     /// when it isn't what's playing.
@@ -139,6 +159,8 @@ struct HomeView: View {
     /// Apple Music on this iPhone plays while the Mac doesn't (17 November
     /// 2026). Read once a second, like the rest of Home's view of it.
     private var iPhoneIsPlaying: Bool {
+        // Just after a hand-over lands, where the music went (HandoffMoment).
+        if let assumed = HandoffMoment.shared.assumesPhonePlays { return assumed }
         guard attributes?.isPlaying != true else { return false }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
@@ -148,6 +170,7 @@ struct HomeView: View {
 
     /// The iPhone plays the Mac's current song, as Continue on iPhone leaves it.
     private var iPhoneHasMacSong: Bool {
+        if HandoffMoment.shared.assumesPhonePlays == true { return true }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif

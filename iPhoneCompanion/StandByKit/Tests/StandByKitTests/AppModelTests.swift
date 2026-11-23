@@ -634,12 +634,27 @@ struct Harness {
         var phonePlays = true
         h.model.phonePlaysMusic = { phonePlays }
         let before = h.controller.primaryRequests
-        await h.model.sceneDidBecomeActive()
+        #expect(await h.model.sceneDidBecomeActive() == .deferredToPhone)
         #expect(h.controller.primaryRequests == before, "the phone's music keeps it")
         #expect(h.controller.isActive, "the session stays, and still updates")
         phonePlays = false
-        await h.model.sceneDidBecomeActive()
+        #expect(await h.model.sceneDidBecomeActive() == .requested(refused: nil))
         #expect(h.controller.primaryRequests == before + 1, "a paused phone: Second Chair asks, as before")
+    }
+
+    /// The Lock Screen Record said "iOS took the request" after Stop Showing,
+    /// when nothing was asked (23 November 2026).
+    @Test func foregroundAfterStopShowingAsksNothingAndSaysSo() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.play()
+        await h.model.stopNowPlaying()
+        let before = h.controller.primaryRequests
+        #expect(await h.model.sceneDidBecomeActive() == .notShowing)
+        #expect(h.controller.primaryRequests == before)
+        #expect(!h.controller.isActive)
     }
 
     @Test func foregroundStillAsksWhileTheMacPlaysToo() async {
