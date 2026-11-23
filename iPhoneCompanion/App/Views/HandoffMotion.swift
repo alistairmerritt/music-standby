@@ -31,9 +31,9 @@ enum HandoffPhase: Equatable {
 /// start where the other device is:
 /// - while the music moves, light gathers at the top edge and taps build up,
 ///   as they do bringing an iPhone to a HomePod;
-/// - when it lands, a ripple of light runs through the whole screen, outwards
-///   from the top for Continue on iPhone and back into it for Continue on Mac,
-///   with one firm tap, as AirDrop's does when two iPhones meet.
+/// - when it lands, a ripple of light runs down through the whole screen from
+///   the top, the same for Continue on iPhone and Continue on Mac (Alistair,
+///   23 November 2026: they shouldn't be opposites), with one firm tap, as AirDrop's does when two iPhones meet.
 @MainActor
 @Observable
 final class HandoffMoment {
@@ -42,8 +42,6 @@ final class HandoffMoment {
     private(set) var phase: HandoffPhase?
     /// Goes up by one each time a hand-over lands; plays the ripple.
     private(set) var landings = 0
-    /// The direction of the last landing, for the ripple.
-    private(set) var landedDirection: HandoffDirection = .toPhone
 
     @ObservationIgnored private let haptics = HandoffHaptics()
 
@@ -53,7 +51,6 @@ final class HandoffMoment {
     }
 
     func land(_ direction: HandoffDirection) {
-        landedDirection = direction
         phase = .landed(direction)
         landings += 1
         haptics.land()
@@ -80,13 +77,12 @@ struct HandoffEffect: ViewModifier {
     private let moment = HandoffMoment.shared
 
     func body(content: Content) -> some View {
-        let toMac = moment.landedDirection == .toMac
         content
             .overlay {
                 if !reduceMotion {
                     Color.clear
                         .keyframeAnimator(initialValue: 0.0, trigger: moment.landings) { view, progress in
-                            view.overlay { LightBand(progress: progress, outwards: !toMac) }
+                            view.overlay { LightBand(progress: progress) }
                         } keyframes: { _ in
                             LinearKeyframe(0.0, duration: 0.01)
                             CubicKeyframe(1.0, duration: 1.1)
@@ -110,7 +106,6 @@ struct HandoffBackgroundRipple: ViewModifier {
     private let moment = HandoffMoment.shared
 
     func body(content: Content) -> some View {
-        let toMac = moment.landedDirection == .toMac
         content
             .keyframeAnimator(initialValue: 0.0, trigger: moment.landings) { view, progress in
                 view.visualEffect { view, proxy in
@@ -120,7 +115,7 @@ struct HandoffBackgroundRipple: ViewModifier {
                             // The Dynamic Island, at the top of the screen.
                             .float2(proxy.size.width / 2, -24),
                             .float(progress),
-                            .float(toMac ? -1 : 1)),
+                            .float(1)),
                         maxSampleOffset: CGSize(width: 24, height: 24),
                         isEnabled: !reduceMotion && progress > 0 && progress < 1)
                 }
@@ -135,12 +130,11 @@ struct HandoffBackgroundRipple: ViewModifier {
 /// and out as the music arrives, back up into the top as it leaves.
 private struct LightBand: View {
     let progress: Double
-    let outwards: Bool
 
     var body: some View {
         GeometryReader { proxy in
             let reach = hypot(proxy.size.width / 2, proxy.size.height) + 140
-            let travelled = outwards ? progress : 1 - progress
+            let travelled = progress
             let front = max(0.001, travelled)
             let width = 0.09
             let strength = sin(progress * .pi)

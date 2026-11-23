@@ -4,9 +4,8 @@ using namespace metal;
 
 // Second Chair's hand-over ripple (23 November 2026): a band of light and a
 // gentle ripple travelling through the whole screen from `origin`, the
-// Dynamic Island. `direction` 1 runs outwards (Continue on iPhone: the music
-// arrives from the top); -1 runs back into the top (Continue on Mac: the
-// music leaves). `progress` goes from 0 to 1 over the animation.
+// Dynamic Island. `direction` 1 runs outwards, as both hand-overs do; -1
+// would run back into the top. `progress` goes from 0 to 1 over the animation.
 [[ stitchable ]] half4 handoffRipple(float2 position, SwiftUI::Layer layer, float2 size,
                                      float2 origin, float progress, float direction) {
     // Far enough to pass the furthest corner.
