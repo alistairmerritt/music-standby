@@ -1,10 +1,38 @@
 # iOS status
 
-Last updated 17 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
+Last updated 23 November 2026, on `main`. The newest work is at the top; older sections keep the branch names of the time, all merged into `main` since 15 November.
 
 **Renamed to Second Chair on 11 November 2026.** Only the names people see changed (Home Screen, screens, notifications); bundle identifiers, App IDs, the push topic and the Keychain group keep `MusicStandBy`. Entries below that predate the rename use the old name.
 
 **A real iPhone shows the Mac's Music and controls it through the deployed relay.** Since 10 November the app and extension have run against the real Mac companion and the relay on `workers.dev`, with real APNs pushes since 11 November (sections below). The first device runs, on 8 and 9 November, used the built-in mock transport: a remote media session appeared in landscape StandBy, and the extension sent HTTPS requests and read a shared Keychain item when its controls were tapped ("Observed on a physical iPhone").
+
+## Merged on 23 November 2026: first run V2, the redesign, widgets, hand-over motion
+
+Merged into `main` together, in this order: PR #27 (first run V2), #50 (Home redesign and Settings), #53 (Mac menu redesign, now Mac 0.3.10), #56 (widgets and controls), then `experiment/home-motion`. They had shipped from their branches: the last TestFlight before the merge was 202611232036, and Mac 0.3.10 (pre-release `mac-v0.3.10`).
+
+**iPhone, Home:**
+- Redesigned around the song: the Mac's card, a compact remote, the blurred artwork behind it (#50).
+- After Continue on iPhone: **Playing on iPhone**, with **Open Apple Music** as the main button and Continue on Mac below it.
+- The Continue buttons are drawn by the app and morph through a hand-over (words, symbol, colour and place) on one spring with the panel. Continue on Mac stays in place and greys out (grey words) while the Mac plays.
+- "Your Mac will pause." and "Your iPhone will pause." show only while that side is playing.
+- Show on Lock Screen is on Home only while the player is off. Opening the app already brings the player back; Refresh and Stop Showing are in Settings.
+
+**iPhone, the hand-over moment** (started in the app only):
+- Light gathers at the top edge, around the Dynamic Island, while the music moves, with taps that build (Core Haptics, haptics only).
+- When it lands, a band of light runs down through the screen and the background ripples (`HandoffRipple.metal`; it needs Xcode's Metal Toolchain), with one firm tap. It's the same both ways.
+- It lands when the music moves: `Handover`'s `arrived`, not when the hand-over has finished.
+- After landing, Home assumes where the music went for up to 5 s, so the buttons change once.
+- Reduce Motion turns the light and ripple off.
+
+**iPhone, other:**
+- The Continue Listening widget and two controls (#56).
+- Show in Now Playing gives back **Showing**.
+- **Lock Screen Record** in Settings › Diagnostics. It keeps the reminder, each Show in Now Playing run, each hand-over and where it came from, and what each foreground did, across launches.
+- A reminder that wakes the app no longer undoes Stop Showing.
+
+**Investigated, 23 November:** Apple Music pausing on the iPhone every 30 s or so. The cause was a Chrome tab on the Mac starting audio, which pulled the AirPods Max to the Mac; Second Chair was ruled out by test (`Records/INVESTIGATION-playback-pauses-23-nov.md`, outside the repo).
+
+**Not merged:** PR #58, the relay keep-alive experiment. It's deployed but untested.
 
 ## Every source carries over (17 November 2026, Mac 0.3.3)
 
