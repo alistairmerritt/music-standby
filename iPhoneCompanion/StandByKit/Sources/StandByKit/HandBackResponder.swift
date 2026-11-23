@@ -60,7 +60,7 @@ public final class HandBackResponder {
         do {
             let remote = try makeRemote()
             try await remote.read()
-            status = Self.status(for: await remote.handover().sendBackToMac(with: player))
+            status = Self.status(for: await remote.handover().sendBackToMac(with: player, from: .macRequest))
         } catch {
             status = .failed
         }

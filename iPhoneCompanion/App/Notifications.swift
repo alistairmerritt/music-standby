@@ -64,6 +64,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // shows the player now rather than at a tap.
         if ReminderPush.isReminder(userInfo) {
             LockScreenRecord.add("Reminder woke the app in the background (app \(application.applicationState == .active ? "on screen" : "not on screen"))")
+            // Stop Showing holds until you act: a tap on the reminder, Show on
+            // Lock Screen, or Show in Now Playing (23 November 2026). Waking
+            // used to turn showing back on by itself.
+            guard model.isNowPlayingEnabled else {
+                LockScreenRecord.add("…showing is off, so the wake left the player off")
+                return .noData
+            }
             let shown = await model.activateNowPlaying(waitingForTheMacFor: .seconds(10))
             LockScreenRecord.add("…the wake \(shown ? "had the Mac’s song" : "got no song from the Mac in 10 s")"
                                  + "; iOS \(model.primaryWasRefused ? "refused the player (\(model.sessionController.lastPrimaryError ?? "?"))" : "took the request"))")

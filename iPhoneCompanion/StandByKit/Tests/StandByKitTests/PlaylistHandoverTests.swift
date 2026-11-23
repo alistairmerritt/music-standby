@@ -63,6 +63,18 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(playedWhenArrived)
     }
 
+    /// Every hand-over goes in the Lock Screen Record with where it came from
+    /// (23 November 2026).
+    @Test func aHandOverIsRecordedWithItsSource() async {
+        let (h, task) = await ready(playingFromAA())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsPlaylist = aaHere
+        #expect(await h.model.continueOnPhone(with: phone, from: .shortcuts) == .continued)
+        let recent = LockScreenRecord.entries(in: WidgetSnapshot.defaults).prefix(20).map(\.message)
+        #expect(recent.contains { $0.hasPrefix("Continue on iPhone from Shortcuts: continued in ") })
+    }
+
     @Test func noArrivalWhenTheSongDoesntStartHere() async {
         let (h, task) = await ready(playingFromAA())
         defer { task.cancel() }

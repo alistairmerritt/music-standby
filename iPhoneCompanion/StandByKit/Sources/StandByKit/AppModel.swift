@@ -135,7 +135,23 @@ public final class AppModel {
     /// Runs whenever the scene becomes active, the only moment the system
     /// honours a request to become the primary session, and the recovery point
     /// for anything that couldn't happen in the background.
-    public func sceneDidBecomeActive() async {
+    /// What coming to the front did about the Lock Screen player, for the
+    /// Lock Screen Record (23 November 2026: it said "iOS took the request"
+    /// even when nothing was asked).
+    public enum ForegroundOutcome: Equatable, Sendable {
+        /// Asked iOS to make the Mac's player the main one; `refused` is iOS's
+        /// reason when it said no.
+        case requested(refused: String?)
+        /// Apple Music on this iPhone was playing and the Mac wasn't: nothing asked.
+        case deferredToPhone
+        /// The player is turned off (first run, or Stop Showing): nothing asked.
+        case notShowing
+        /// Showing is on, but there's no song or session to show yet.
+        case nothingToShow
+    }
+
+    @discardableResult
+    public func sceneDidBecomeActive() async -> ForegroundOutcome {
         if pairedMac != nil { await transport.connect() }
         pushTokens = registrar.current()
         await uploadTokens()
@@ -148,11 +164,15 @@ public final class AppModel {
         // the Mac's paused song in Control Centre whenever Second Chair was
         // open (17 November 2026). StandBy already preferred the phone's.
         let deferToPhone = phonePlaysMusic() && attributes?.isPlaying != true
+        guard isNowPlayingEnabled else { return .notShowing }
         if shouldShowSession, let attributes {
             await activate(with: attributes, requestingPrimary: !deferToPhone)
         } else if sessionController.isActive, !deferToPhone {
             await sessionController.requestPrimary()
+        } else if !sessionController.isActive {
+            return .nothingToShow
         }
+        return deferToPhone ? .deferredToPhone : .requested(refused: sessionController.lastPrimaryError)
     }
 
     /// Whether Apple Music on this iPhone is playing. The app sets it; Second
@@ -322,8 +342,9 @@ public final class AppModel {
     /// `arrived` runs the moment the music starts here, before the rest of
     /// the hand-over finishes.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                                from source: HandoverSource = .app,
                                 arrived: (@MainActor () -> Void)? = nil) async -> ContinueOutcome {
-        await handover.continueOnPhone(with: player, timeout: timeout, arrived: arrived)
+        await handover.continueOnPhone(with: player, timeout: timeout, from: source, arrived: arrived)
     }
 
     /// How many songs ahead in the Mac's queue this catalogue ID is: 0 for
@@ -337,8 +358,9 @@ public final class AppModel {
     /// `arrived` runs the moment the Mac is seen playing, before the rest of
     /// the hand-over finishes.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                              from source: HandoverSource = .app,
                               arrived: (@MainActor () -> Void)? = nil) async -> SendBackOutcome {
-        await handover.sendBackToMac(with: player, timeout: timeout, arrived: arrived)
+        await handover.sendBackToMac(with: player, timeout: timeout, from: source, arrived: arrived)
     }
 
     /// The handover steps, reading the Mac through this model's transport.

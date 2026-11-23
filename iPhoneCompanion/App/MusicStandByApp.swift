@@ -23,9 +23,15 @@ struct MusicStandByApp: App {
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     switch phase {
                     case .active: Task {
-                        await model.sceneDidBecomeActive()
-                        LockScreenRecord.add("Second Chair came to the front; iOS \(model.primaryWasRefused ? "refused the player" : "took the request")"
-                                             + (model.isNowPlayingEnabled ? "" : " (showing is off)"))
+                        let outcome = await model.sceneDidBecomeActive()
+                        let what = switch outcome {
+                        case .requested(refused: nil): "asked iOS for the Mac’s player; iOS didn’t refuse"
+                        case .requested(refused: let reason?): "asked iOS for the Mac’s player; iOS refused (\(reason))"
+                        case .deferredToPhone: "Apple Music here was playing, so nothing was asked"
+                        case .notShowing: "showing is off, so nothing was asked"
+                        case .nothingToShow: "no song from the Mac yet, so nothing was asked"
+                        }
+                        LockScreenRecord.add("Second Chair came to the front; \(what)")
                     }
                     case .background: Task { await model.sceneDidEnterBackground() }
                     default: break

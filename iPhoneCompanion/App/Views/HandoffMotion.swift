@@ -242,6 +242,10 @@ private final class HandoffHaptics {
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return nil }
         if engine == nil {
             engine = try? CHHapticEngine()
+            // Taps only, never sound, so the engine has no reason to touch
+            // audio while Apple Music plays (23 November 2026, investigating
+            // pauses; Apple's documentation doesn't say whether it would).
+            engine?.playsHapticsOnly = true
             engine?.isAutoShutdownEnabled = true
         }
         try? engine?.start()

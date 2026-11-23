@@ -5,6 +5,15 @@ import Foundation
 /// action, which runs without the app's connection, passes in the relay's
 /// state as read at that moment (`MacRemote`). Moved out of `AppModel` on 12
 /// November 2026, so both use the same steps.
+/// Where a hand-over was started from, for the Lock Screen Record.
+public enum HandoverSource: String, Sendable {
+    case app = "the app"
+    case widget = "a widget or control"
+    case shortcuts = "Shortcuts"
+    case macRequest = "the Mac’s Continue from iPhone"
+    case unknown = "somewhere unknown"
+}
+
 @MainActor
 public struct Handover {
     /// Called once, the moment the music moves: when it starts on the phone,
@@ -61,16 +70,26 @@ public struct Handover {
     /// song this phone took, where it stopped), it has nothing new, and
     /// Apple Music here, which has played on since, carries on instead.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                                from source: HandoverSource = .unknown,
                                 arrived: (@MainActor () -> Void)? = nil) async -> ContinueOutcome {
         arrival.call = arrived
         defer { arrival.call = nil }
+        let started = now()
         let outcome = await performContinueOnPhone(with: player, timeout: timeout)
+        // Every hand-over, with where it came from (23 November 2026: six ran in
+        // three minutes, and nothing said who started them).
+        LockScreenRecord.add("Continue on iPhone from \(source.rawValue): \(outcome) in \(Self.seconds(since: started, now: now()))",
+                             at: now(), in: widgetDefaults)
         // The widget shows the song as on the iPhone, with Continue on Mac.
         switch outcome {
         case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere: WidgetSnapshot.markOnIPhone(true, in: widgetDefaults)
         case .unavailable, .notAllowed, .didNotStart: break
         }
         return outcome
+    }
+
+    static func seconds(since start: Date, now: Date) -> String {
+        String(format: "%.1f s", now.timeIntervalSince(start))
     }
 
     private func performContinueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> ContinueOutcome {
@@ -290,10 +309,14 @@ public struct Handover {
     /// playlist: the Mac plays the playlist from the song, which is quicker
     /// than many skips and carries on after the 25 songs it sent.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                              from source: HandoverSource = .unknown,
                               arrived: (@MainActor () -> Void)? = nil) async -> SendBackOutcome {
         arrival.call = arrived
         defer { arrival.call = nil }
+        let started = now()
         let outcome = await performSendBackToMac(with: player, timeout: timeout)
+        LockScreenRecord.add("Continue on Mac from \(source.rawValue): \(outcome) in \(Self.seconds(since: started, now: now()))",
+                             at: now(), in: widgetDefaults)
         if outcome == .sentBack || outcome == .sentAsStation { WidgetSnapshot.markOnIPhone(false, in: widgetDefaults) }
         return outcome
     }
