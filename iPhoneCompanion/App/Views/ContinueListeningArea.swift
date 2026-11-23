@@ -132,13 +132,15 @@ struct ContinueListeningArea: View {
         let toPhone = direction == .toPhone
         let title = toPhone ? "Continue on iPhone" : "Continue on Mac"
         let symbol = toPhone ? "iphone" : "laptopcomputer"
+        // "will pause" only when the other side is playing (Alistair, 23 November 2026).
         let detail: String = if toPhone {
-            model.macSongHasNoCatalogID
-                ? "Finds this song in Apple Music and picks up from the same point. Your Mac will pause."
-                : "Picks up here from the same point. Your Mac will pause."
+            (model.macSongHasNoCatalogID
+                ? "Finds this song in Apple Music and picks up from the same point."
+                : "Picks up here from the same point.")
+                + (macPlaying ? " Your Mac will pause." : "")
         } else {
             phoneSongInMacQueue
-                ? "Picks up on your Mac from the same point. Your iPhone will pause."
+                ? "Picks up on your Mac from the same point." + (phonePlaying ? " Your iPhone will pause." : "")
                 : "Picks up on your Mac. If your Mac can’t play this playlist or album, it plays the song’s station."
         }
         return VStack(spacing: 8) {
