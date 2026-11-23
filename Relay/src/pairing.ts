@@ -86,6 +86,8 @@ interface Session {
   macAway?: boolean;
   /** The artwork the phone was last pushed, to know when an update brings new artwork. */
   pushedArtworkID?: string;
+  /** During a pause: when the phone was last pushed the paused state, by an update or the keep-alive. */
+  keptAliveAt?: number;
 }
 
 interface PushTokens {
@@ -186,6 +188,19 @@ export class Pairing extends DurableObject<Env> {
    */
   private get remindAfter(): number {
     return Number(this.env.REMIND_AFTER_MS ?? 8 * 60_000);
+  }
+  /** 0, the default, turns the paused keep-alive off; see `keepAlive`. */
+  private get keepAliveEvery(): number {
+    return Number(this.env.PAUSED_KEEP_ALIVE_MS ?? 0);
+  }
+  private get keepAliveFor(): number {
+    return Number(this.env.PAUSED_KEEP_ALIVE_FOR_MS ?? 60 * 60_000);
+  }
+  /** When the next keep-alive is due, or undefined when none is. */
+  private keepAliveDue(session: Session): number | undefined {
+    if (this.keepAliveEvery <= 0 || session.pausedSince === undefined) return undefined;
+    const due = (session.keptAliveAt ?? session.pausedSince) + this.keepAliveEvery;
+    return due < session.pausedSince + this.keepAliveFor ? due : undefined;
   }
   /** How long a background hand-back push gets before the notification. */
   private get handBackNotifyAfter(): number {
@@ -490,6 +505,7 @@ export class Pairing extends DurableObject<Env> {
     const restarted = state === "playing" && session.pausedSince !== undefined && Date.now() - session.pausedSince >= this.remindAfter;
     session.listeningSessionID = message.listeningSessionID ?? session.listeningSessionID;
     session.pausedSince = state === "playing" ? undefined : (session.pausedSince ?? Date.now());
+    if (state === "playing") delete session.keptAliveAt;
     if (message.track) session.lastTrack = message.track;
     const wasAway = session.macAway === true;
     delete session.macAway;
@@ -576,6 +592,7 @@ export class Pairing extends DurableObject<Env> {
     const ok = await this.push("update", token, attributes);
     if (ok) {
       session.pushedRevision = message.revision;
+      if (session.pausedSince !== undefined) session.keptAliveAt = Date.now();
       const artwork = attributes.track?.artworkID || undefined;
       const newArtwork = artwork !== undefined && artwork !== session.pushedArtworkID;
       session.pushedArtworkID = artwork;
@@ -1046,6 +1063,26 @@ export class Pairing extends DurableObject<Env> {
 
   // MARK: Timers
 
+  /**
+   * Pushes the paused state again, unchanged, during a pause (experiment, 23
+   * November 2026). iOS gives the Lock Screen and StandBy to Apple Music about
+   * 8 minutes into a pause, and only the app on screen wins them back; this
+   * tests whether a session that keeps hearing from the relay is kept. Runs
+   * only while a session exists, so a player swiped away or stopped from the
+   * app (both end the session) gets nothing more.
+   */
+  private async keepAlive(session: Session): Promise<void> {
+    session.keptAliveAt = Date.now();
+    await this.ctx.storage.put("session", session);
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    if (!playback || stateOf(playback) === "playing") return;
+    const tokens = await this.tokens();
+    const token = tokens.session?.sessionID === session.sessionID ? tokens.session.token : undefined;
+    if (!token) return;
+    console.log(`session ${short(session.sessionID)}: keep-alive, paused ${Math.round((Date.now() - session.pausedSince!) / 60_000)} min`);
+    await this.push("update", token, await this.attributes(session, playback));
+  }
+
   async alarm(): Promise<void> {
     const now = Date.now();
     const abandonedAt = await this.abandonedAt();
@@ -1063,6 +1100,9 @@ export class Pairing extends DurableObject<Env> {
     } else if (this.pausedTimeout > 0 && session?.pausedSince && now - session.pausedSince >= this.pausedTimeout) {
       await this.endSession("paused_too_long");
     }
+    const current = await this.ctx.storage.get<Session>("session");
+    const due = current ? this.keepAliveDue(current) : undefined;
+    if (current && due !== undefined && now >= due) await this.keepAlive(current);
     const claims = await this.claims();
     let changed = false;
     for (const [id, claim] of Object.entries(claims)) {
@@ -1103,6 +1143,8 @@ export class Pairing extends DurableObject<Env> {
     const disconnectedAt = await this.ctx.storage.get<number>("macDisconnectedAt");
     if (session && !session.macAway && disconnectedAt) deadlines.push(disconnectedAt + this.disconnectGrace);
     if (this.pausedTimeout > 0 && session?.pausedSince) deadlines.push(session.pausedSince + this.pausedTimeout);
+    const keepAliveDue = session ? this.keepAliveDue(session) : undefined;
+    if (keepAliveDue !== undefined) deadlines.push(keepAliveDue);
     for (const claim of Object.values(await this.claims())) deadlines.push(claim.expiresAt);
     const handBack = await this.ctx.storage.get<HandBack>("handBack");
     if (handBack) deadlines.push(handBack.answered || handBack.notified ? handBack.expiresAt : handBack.notifyAt);
