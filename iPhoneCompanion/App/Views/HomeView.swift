@@ -41,10 +41,12 @@ struct HomeView: View {
                                               setUp: { onboarding.resume(.continueMusic) },
                                               quiet: nowPlayingMode == .onIPhone)
                     }
-                    // Apple Music has the Lock Screen while it plays the Mac's
-                    // song here, so the Mac's player has nothing to show; Stop
-                    // Showing is still in Settings (23 November 2026).
-                    if nowPlayingMode != .onIPhone {
+                    // Only while the player is turned off (first run, or after
+                    // Stop Showing): opening Second Chair already shows it again
+                    // and asks iOS to put it first, so a Refresh here repeated
+                    // that. Refresh and Stop Showing stay in Settings
+                    // (Alistair, 23 November 2026).
+                    if !model.isNowPlayingEnabled, nowPlayingMode != .onIPhone {
                         ShowOnLockScreenButton(enabled: attributes != nil && isLive, sessionIsActive: sessionIsActive)
                             .transition(.opacity)
                     }
