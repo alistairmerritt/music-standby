@@ -60,6 +60,30 @@ import StandByProtocol
         #expect(p.ingest(moved, artworkID: nil) != nil)
     }
 
+    /// Music lists the same AirPlay devices in a different order from one
+    /// read to the next; a paused Mac sent each reorder (23 November 2026).
+    @Test func reorderedOutputsAreNotAChange() throws {
+        let mac = AudioOutput(id: "name:Mac", name: "Mac", kind: .computer, isSelected: true)
+        let kitchen = AudioOutput(id: "aa:01", name: "HomePod", kind: .homePod, isSelected: false)
+        let bedroom = AudioOutput(id: "aa:02", name: "HomePod", kind: .homePod, isSelected: false)
+        let lounge = AudioOutput(id: "aa:03", name: "Apple TV", kind: .appleTV, isSelected: false)
+        var p = publisher()
+        var first = snap(.paused, 60, at: 1000)
+        first.outputs = [kitchen, mac, lounge, bedroom]
+        let sent = try must(p.ingest(first, artworkID: nil))
+        #expect(sent.outputs?.map(\.id) == ["name:Mac", "aa:03", "aa:01", "aa:02"])
+        for (i, order) in [[bedroom, lounge, mac, kitchen], [lounge, kitchen, bedroom, mac]].enumerated() {
+            var again = snap(.paused, 60, at: 1005 + Double(i) * 5)
+            again.outputs = order
+            #expect(p.ingest(again, artworkID: nil) == nil)
+        }
+        var chosen = snap(.paused, 60, at: 1020)
+        var loungeOn = lounge
+        loungeOn.isSelected = true
+        chosen.outputs = [bedroom, loungeOn, mac, kitchen]
+        #expect(p.ingest(chosen, artworkID: nil) != nil)
+    }
+
     @Test func seekIsSent() {
         var p = publisher()
         _ = p.ingest(snap(.playing, 10, at: 1000), artworkID: nil)
