@@ -88,6 +88,8 @@ interface Session {
   pushedArtworkID?: string;
   /** During a pause: when the phone was last pushed the paused state, by an update or the keep-alive. */
   keptAliveAt?: number;
+  /** The phone paused the Mac to play the song itself (Continue on iPhone): no keep-alive until the Mac plays again. */
+  musicOnPhone?: boolean;
 }
 
 interface PushTokens {
@@ -198,7 +200,7 @@ export class Pairing extends DurableObject<Env> {
   }
   /** When the next keep-alive is due, or undefined when none is. */
   private keepAliveDue(session: Session): number | undefined {
-    if (this.keepAliveEvery <= 0 || session.pausedSince === undefined) return undefined;
+    if (this.keepAliveEvery <= 0 || session.pausedSince === undefined || session.musicOnPhone) return undefined;
     const due = (session.keptAliveAt ?? session.pausedSince) + this.keepAliveEvery;
     return due < session.pausedSince + this.keepAliveFor ? due : undefined;
   }
@@ -505,7 +507,10 @@ export class Pairing extends DurableObject<Env> {
     const restarted = state === "playing" && session.pausedSince !== undefined && Date.now() - session.pausedSince >= this.remindAfter;
     session.listeningSessionID = message.listeningSessionID ?? session.listeningSessionID;
     session.pausedSince = state === "playing" ? undefined : (session.pausedSince ?? Date.now());
-    if (state === "playing") delete session.keptAliveAt;
+    if (state === "playing") {
+      delete session.keptAliveAt;
+      delete session.musicOnPhone;
+    }
     if (message.track) session.lastTrack = message.track;
     const wasAway = session.macAway === true;
     delete session.macAway;
@@ -704,6 +709,14 @@ export class Pairing extends DurableObject<Env> {
 
     const mac = this.macSocket();
     if (!mac) throw new HttpError(504, "mac_unreachable", "the Mac is not connected");
+
+    // Apple Music on the phone takes over the song: the keep-alive stays out of
+    // its way, so Second Chair isn't pushed in front of it (23 November 2026).
+    if (command.reason === "continue_on_phone" && session && !session.musicOnPhone) {
+      session.musicOnPhone = true;
+      await this.ctx.storage.put("session", session);
+      await this.scheduleAlarm();
+    }
 
     let resolve!: (ack: CommandAck) => void;
     const promise = new Promise<CommandAck>((r) => (resolve = r));
