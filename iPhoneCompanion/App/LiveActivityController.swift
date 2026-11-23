@@ -93,7 +93,8 @@ final class LiveActivityController {
 
     /// The Mac's player is back on screen, so the card is no longer needed.
     func endAll(because reason: String) {
-        let cards = Card.activities
+        // The development builds' test card stays until it's swiped away.
+        let cards = Card.activities.filter { $0.attributes.activityID != "demo" }
         guard !cards.isEmpty else { return }
         LockScreenRecord.add("Live Activity: ended \(cards.count == 1 ? "the card" : "\(cards.count) cards") (\(reason))")
         for card in cards {
