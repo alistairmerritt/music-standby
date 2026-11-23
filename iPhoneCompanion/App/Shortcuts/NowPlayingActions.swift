@@ -19,11 +19,24 @@ struct ShowInNowPlayingIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         guard model.pairedMac != nil else { throw ShortcutError(TransportError.notPaired) }
-        if await model.activateNowPlaying(waitingForTheMacFor: Self.stateWait) { return .result() }
+        let reached = await model.activateNowPlaying(waitingForTheMacFor: Self.stateWait)
+        // Shown from the background, unless another player holds the Lock
+        // Screen: then iOS refuses the background request (error 5) and only
+        // the app on screen can take it back (21 November 2026).
+        shortcutLog.notice("Show in Now Playing: reached \(reached, privacy: .public), primary refused \(model.primaryWasRefused, privacy: .public), can open \(systemContext.currentMode.canContinueInForeground, privacy: .public)")
+        if reached, !model.primaryWasRefused { return .result() }
         guard systemContext.currentMode.canContinueInForeground else {
+            if reached { return .result() }
             throw ShortcutError("Your Mac’s music couldn’t be reached. Check that your Mac is awake and Second Chair is open on it.")
         }
-        try await continueInForeground("Open Second Chair to show your Mac’s music?", alwaysConfirm: false)
+        shortcutLog.notice("Show in Now Playing: reached \(reached, privacy: .public), primary refused \(model.primaryWasRefused, privacy: .public); opening the app")
+        do {
+            try await continueInForeground("Open Second Chair to show your Mac’s music?", alwaysConfirm: false)
+        } catch {
+            shortcutLog.error("Show in Now Playing: couldn’t open the app: \(String(describing: error), privacy: .public)")
+            throw error
+        }
+        shortcutLog.notice("Show in Now Playing: in the foreground")
         await model.activateNowPlaying()
         return .result()
     }

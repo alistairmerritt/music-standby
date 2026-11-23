@@ -1,84 +1,70 @@
-import os
 import StandByKit
 import SwiftUI
 import UIKit
 
-private let seekLog = Logger(subsystem: "com.alistairmerritt.MusicStandBy", category: "seekbar")
-
+/// Home: what's playing on the Mac, the remote, Continue Listening and the
+/// Lock Screen button. Settings has the rest (21 November 2026 redesign; it
+/// was one long Form until then).
 struct HomeView: View {
     @Environment(AppModel.self) private var model
-    @Environment(ReminderModel.self) private var reminders
     @Environment(OnboardingCoordinator.self) private var onboarding
-    @State private var isConfirmingUnpair = false
     @State private var phoneMusic = SystemMusicPhonePlayer()
     /// Apple Music on this phone, read once a second while Home shows.
     @State private var phoneNowPlaying: PhoneNowPlaying?
-    /// For the Continue Listening row: Apple Music access and subscription here.
+    /// For Continue Listening: Apple Music access and subscription here.
     @State private var appleMusicAccess: AppleMusicAccess = .allowed
     @State private var canPlayCatalog: Bool?
     @Environment(\.openURL) private var openURL
+    @State private var showsSettings = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ScrollViewReader { proxy in
-        Form {
-            if isDemoLayout { demoSection }
-            if !model.isDemo, !onboarding.progress.snapshot.playerHasShown { finishSetupSection }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                if isDemoLayout { demoBanner }
+                if !model.isDemo, !onboarding.progress.snapshot.playerHasShown { finishSetupBanner }
+                ConnectionCard(macName: model.pairedMac?.name ?? "Your Mac", connection: connection, isDemo: isDemoLayout) {
+                    Task { await model.reconnect() }
+                }
 
-            Section {
-                if let attributes = model.attributes, let track = attributes.track {
-                    // Greyed out and inert while the iPhone plays and the Mac
-                    // doesn't, as after Continue on iPhone: the Mac's paused
-                    // song isn't what's playing (17 November 2026).
-                    Group {
-                        NowPlayingRow(track: track, attributes: attributes, artwork: model.artwork) { seconds in
-                            Task { await model.seek(to: seconds) }
-                        }
-                        TransportControls(isPlaying: attributes.isPlaying) { kind in
-                            Task { await model.send(kind) }
-                        }
-                        if let volume = attributes.volume {
-                            VolumeRow(level: volume) { level in
-                                Task { await model.setVolume(level) }
-                            }
+                NowPlayingPanel(attributes: attributes, mode: nowPlayingMode)
+
+                VStack(spacing: 14) {
+                    if isDemoLayout {
+                        // Both directions need the real Mac's Music, so the demo only says what they do.
+                        Notice(symbol: nil, title: nil,
+                               text: "With Second Chair on your Mac, move what’s playing to Apple Music on this iPhone, and back again.",
+                               button: nil, action: nil)
+                    } else if isLive {
+                        ContinueListeningArea(player: phoneMusic, here: $phoneNowPlaying, status: continueListening,
+                                              allowAppleMusic: allowAppleMusic) {
+                            onboarding.resume(.continueMusic)
                         }
                     }
-                    .disabled(iPhoneIsPlaying)
-                    .opacity(iPhoneIsPlaying ? 0.4 : 1)
-                } else {
-                    Text("Nothing is playing on your Mac.")
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text(iPhoneIsPlaying ? "Now Playing on Mac · Paused" : "Now Playing on Mac")
-            } footer: {
-                if iPhoneIsPlaying, iPhoneHasMacSong {
-                    Text("This song is now playing on your iPhone.")
+                    ShowOnLockScreenButton(enabled: attributes != nil && isLive, sessionIsActive: sessionIsActive)
                 }
             }
-
-            if isDemoLayout {
-                // Both directions need the real Mac's Music, so the demo only says what they do.
-                Section("Continue Listening") {
-                    Text("With Second Chair on your Mac, move what’s playing to Apple Music on this iPhone, and back again.")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                HandoffSection(player: phoneMusic, here: $phoneNowPlaying, status: continueListening, allowAppleMusic: allowAppleMusic) {
-                    onboarding.resume(.continueMusic)
-                }
-                .id("continueListening")
-            }
-            nowPlayingSection
-                .id("lockScreen")
-            // The reminder comes from the relay, which the demo doesn't use.
-            if !isDemoLayout { remindersSection }
-            macSection
-
-            Section {
-                NavigationLink("Diagnostics") { DiagnosticsView() }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+            .animation(.default, value: nowPlayingMode)
+        }
+        // The song’s artwork, blurred, behind
+        // Home, as Apple Music's player does, with a dark band at the top
+        // behind the title and the Mac's card.
+        .background { HomeBackground(artwork: showsArtworkBackground ? model.artwork : nil, style: HomeBackground.style, muted: backgroundMuted) }
+        .environment(\.colorScheme, showsArtworkBackground && model.artwork != nil && HomeBackground.style != .none ? .dark : colorScheme)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .navigationTitle("Second Chair")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gearshape") { showsSettings = true }
             }
         }
-        .navigationTitle("Second Chair")
+        .navigationDestination(isPresented: $showsSettings) { SettingsView() }
+        #if DEBUG
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-screenshotSettings") { showsSettings = true } }
+        #endif
         .task {
             // Apple Music here has no change notice worth the wiring; once a
             // second is plenty for which handoff to offer.
@@ -93,28 +79,62 @@ struct HomeView: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
-        .confirmationDialog("Unpair this Mac?", isPresented: $isConfirmingUnpair, titleVisibility: .visible) {
-            Button("Unpair", role: .destructive) {
-                Task { await model.unpair() }
-            }
-        } message: {
-            Text("You’ll need a new pairing code to connect again.")
+    }
+
+    // MARK: State
+
+    /// The artwork goes behind Home whenever there's a song, greyed (below)
+    /// when it isn't what's playing.
+    private var showsArtworkBackground: Bool {
+        guard attributes?.track != nil else { return false }
+        switch nowPlayingMode {
+        case .live: return true
+        case .onIPhone, .iPhonePlaysOther, .lastKnown: return HomeBackground.mutedStyle != .hide
         }
+    }
+
+    /// While the phone has the music, or the Mac can't be reached, the Mac's
+    /// song is greyed out, and so is its background.
+    private var backgroundMuted: Bool {
+        switch nowPlayingMode {
+        case .onIPhone, .iPhonePlaysOther, .lastKnown: true
+        case .live: false
+        }
+    }
+
+    private var connection: ConnectionState {
         #if DEBUG
-        .task {
-            // -screenshotScroll continueListening|lockScreen: the lower part, for screenshots.
-            guard let target = ScreenshotMode.scrollTarget else { return }
-            try? await Task.sleep(for: .seconds(1))
-            proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.08))
-        }
+        if let state = HomeScreenshot.connection { return state }
         #endif
+        return model.connection
+    }
+
+    private var attributes: MacPlaybackAttributes? {
+        #if DEBUG
+        if HomeScreenshot.nothingPlaying { return nil }
+        #endif
+        return model.attributes
+    }
+
+    /// The Mac's state is current. Not while it's offline or the relay is
+    /// unreachable: then the panel shows the last song without controls.
+    private var isLive: Bool {
+        switch connection {
+        case .macOffline, .disconnected, .failed: false
+        case .connected, .connecting, .reconnecting: true
         }
+    }
+
+    private var nowPlayingMode: NowPlayingMode {
+        if !isLive { return .lastKnown }
+        guard iPhoneIsPlaying else { return .live }
+        return iPhoneHasMacSong ? .onIPhone : .iPhonePlaysOther(phoneNowPlaying?.title)
     }
 
     /// Apple Music on this iPhone plays while the Mac doesn't (17 November
     /// 2026). Read once a second, like the rest of Home's view of it.
     private var iPhoneIsPlaying: Bool {
-        guard model.attributes?.isPlaying != true else { return false }
+        guard attributes?.isPlaying != true else { return false }
         #if DEBUG
         if ScreenshotMode.iPhonePlaying { return true }
         #endif
@@ -138,52 +158,11 @@ struct HomeView: View {
         return model.sessionController.isActive
     }
 
-    private var nowPlayingSection: some View {
-        Section {
-            // No status row: iOS's `isSystemPrimary` read false while Second
-            // Chair was on the Lock Screen (8 and 17 November 2026), so
-            // "Another app is showing" was wrong, and nothing else tells which
-            // player shows. Diagnostics keeps the raw value.
-            if sessionIsActive {
-                Button("Refresh Now Playing") {
-                    Task { await model.activateNowPlaying() }
-                }
-                Button("Stop Showing", role: .destructive) {
-                    Task { await model.stopNowPlaying() }
-                }
-            } else {
-                Button("Show in Now Playing") {
-                    Task { await model.activateNowPlaying() }
-                }
-                .disabled(model.attributes == nil)
-            }
-        } header: {
-            Text("Lock Screen and StandBy")
-        } footer: {
-            // iOS shows a session only once the app has asked while open, so a
-            // dismissed player stays hidden until the next launch re-requests it.
-            Text("If you dismiss the player on your Lock Screen, it may stay hidden until you next open Second Chair.")
-        }
-    }
-
-    private var remindersSection: some View {
-        Section {
-            Toggle("Remind When Music Starts", isOn: Binding(
-                get: { reminders.isEnabled },
-                set: { enabled in Task { await reminders.setEnabled(enabled) } }
-            ))
-        } footer: {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Get a notification when your Mac starts playing again after a break. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
-                if let problem = reminders.problem {
-                    Text(problem).foregroundStyle(.red)
-                }
-            }
-        }
-    }
-
     private var continueListening: ContinueListeningStatus? {
-        ContinueListeningStatus.assess(mac: model.macMusicConnection, appleMusicAccess: appleMusicAccess, canPlayCatalog: canPlayCatalog)
+        #if DEBUG
+        if let status = HomeScreenshot.continueListening { return status }
+        #endif
+        return ContinueListeningStatus.assess(mac: model.macMusicConnection, appleMusicAccess: appleMusicAccess, canPlayCatalog: canPlayCatalog)
     }
 
     /// Asks for Apple Music access, or, once refused, opens Settings.
@@ -206,376 +185,167 @@ struct HomeView: View {
         return model.isDemo
     }
 
-    /// Until the player has shown once: the first run, from where it stopped.
-    private var finishSetupSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Play something on \(model.pairedMac?.name ?? "your Mac").").font(.headline)
-                Text("Your music shows up here and on your Lock Screen once it’s playing.").font(.subheadline).foregroundStyle(.secondary)
-            }
-            Button("Continue Setup") { onboarding.resume(.play) }
-        } header: {
-            Text("Finish Setting Up")
-        }
-    }
+    // MARK: Banners
 
     /// What the demo is, for App Review above all, and the way out.
-    private var demoSection: some View {
-        Section {
-            Text("You’re trying Second Chair with a simulated Mac. Its songs are invented, and nothing plays aloud.")
-            Button("Leave Demo") {
-                Task { await model.leaveDemo() }
-            }
-        } header: {
-            Text("Demo")
-        } footer: {
-            Text("Tap Show in Now Playing, then lock your iPhone or set it down to charge in StandBy.")
-        }
+    private var demoBanner: some View {
+        Notice(symbol: "sparkles", title: "Demo",
+               text: "You’re trying a simulated Mac. Its songs are invented, and nothing plays aloud. Tap Show on Lock Screen, then lock your iPhone or stand it on a charger for StandBy.",
+               button: "Leave Demo") { Task { await model.leaveDemo() } }
     }
 
-    /// The Mac alone: its buttons say what they act on, now that Continue
-    /// Listening has a status of its own (16 November 2026).
-    private var macSection: some View {
-        Section("Mac") {
-            LabeledContent("Name", value: model.pairedMac?.name ?? "")
-            LabeledContent("Status", value: statusText)
-            if !isDemoLayout {
-                Button("Reconnect to Mac") {
-                    Task { await model.reconnect() }
-                }
-                Button("Unpair Mac", role: .destructive) {
-                    isConfirmingUnpair = true
-                }
-            }
-        }
+    /// Until the player has shown once: the first run, from where it stopped.
+    private var finishSetupBanner: some View {
+        Notice(symbol: "checklist", title: "Finish setting up",
+               text: "Play something on \(model.pairedMac?.name ?? "your Mac"). Your music shows up here and on your Lock Screen once it’s playing.",
+               button: "Continue") { onboarding.resume(.play) }
     }
+}
 
-    private var statusText: String {
-        switch model.connection {
+extension ConnectionState {
+    /// The short state after the Mac's name, on Home and in Settings.
+    var summary: String {
+        switch self {
         case .disconnected: "Not Connected"
         case .connecting: "Connecting…"
         case .connected: "Connected"
-        case .macOffline: "Mac Offline"
+        case .macOffline: "Offline"
         case .reconnecting: "Reconnecting…"
-        case .failed(let reason): reason
+        case .failed: "Can’t Connect"
         }
     }
 }
 
-private struct NowPlayingRow: View {
-    let track: SessionTrack
-    let attributes: MacPlaybackAttributes
-    let artwork: CGImage?
-    /// Called once when a drag on the progress bar ends, with the chosen position.
-    let onSeek: (TimeInterval) -> Void
-
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 14) {
-                artworkView
-                    .frame(width: 72, height: 72)
-                    .clipShape(.rect(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.title).font(.headline).lineLimit(1)
-                    Text(track.artist).font(.subheadline).lineLimit(1)
-                    Text(track.album).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }
-            SeekBar(attributes: attributes, duration: track.duration, onSeek: onSeek)
-        }
-        .padding(.vertical, 4)
-    }
-
-    @ViewBuilder private var artworkView: some View {
-        if let artwork {
-            Image(decorative: artwork, scale: 1).resizable().scaledToFill()
-        } else {
-            Rectangle().fill(.quaternary)
-                .overlay { Image(systemName: "music.note").foregroundStyle(.secondary) }
-        }
-    }
-}
-
-/// The progress bar, draggable. While dragging it shows the finger's position;
-/// when the drag ends the Mac is asked to seek there, and the bar goes back to
-/// following the Mac's own state until the result arrives.
+/// Shows the Mac's music on the Lock Screen, in StandBy and in Control
+/// Centre: asks iOS again, which is also how a dismissed player comes back.
+/// A long press offers Stop Showing, which Settings has too.
 ///
-/// The end of a drag is taken from `onEditingChanged(false)` **or** from the
-/// values going quiet for `settle`: on an iPhone (12 Nov 2026) a drag on this
-/// slider reported its start and every value but never its end, with or
-/// without the clock running, while the volume slider below always did. The
-/// clock also pauses during a drag.
-private struct SeekBar: View {
-    let attributes: MacPlaybackAttributes
-    let duration: TimeInterval
-    let onSeek: (TimeInterval) -> Void
-    @State private var dragging = false
-    @State private var dragValue: TimeInterval = 0
-    @State private var now = Date()
-    @State private var settling: Task<Void, Never>?
-    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private static let settle: Duration = .milliseconds(600)
-
-    var body: some View {
-        let elapsed = dragging ? dragValue : attributes.elapsed(at: now)
-        VStack(spacing: 2) {
-            Slider(
-                value: Binding(get: { elapsed }, set: { value in
-                    dragValue = value
-                    if !dragging { dragging = true }
-                    settling?.cancel()
-                    settling = Task { @MainActor in
-                        try? await Task.sleep(for: Self.settle)
-                        guard !Task.isCancelled else { return }
-                        finishDrag()
-                    }
-                }),
-                in: 0...max(duration, 1),
-                onEditingChanged: { editing in
-                    if editing {
-                        dragValue = elapsed
-                        dragging = true
-                    } else {
-                        settling?.cancel()
-                        finishDrag()
-                    }
-                }
-            )
-            .disabled(duration <= 0)
-            HStack {
-                Text(Duration.seconds(elapsed), format: .time(pattern: .minuteSecond))
-                Spacer()
-                Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-        .onReceive(clock) { if !dragging { now = $0 } }
-    }
-
-    private func finishDrag() {
-        guard dragging else { return }
-        seekLog.debug("Seek bar drag ended, seeking to \(dragValue, privacy: .public)")
-        dragging = false
-        now = Date()
-        onSeek(dragValue)
-    }
-}
-
-/// Its own box under Now Playing, with both directions. Each is greyed out
-/// while the music is already on that side; with both paused, both work.
-private struct HandoffSection: View {
+/// No "showing" status anywhere: iOS's `isSystemPrimary` read false while
+/// Second Chair was on the Lock Screen (8 and 17 November 2026).
+private struct ShowOnLockScreenButton: View {
     @Environment(AppModel.self) private var model
-    let player: SystemMusicPhonePlayer
-    @Binding var here: PhoneNowPlaying?
-    /// Whether Continue Listening can work, and what to do if not. Nil when
-    /// there's nothing to say yet.
-    let status: ContinueListeningStatus?
-    let allowAppleMusic: (_ canAsk: Bool) async -> Void
-    /// Continue Listening's setup, from the first run.
-    let setUp: () -> Void
-    @State private var working = false
-    @State private var problem: String?
-    /// Off unless turned on (17 November 2026), as adding changes the
-    /// library: the Mac can only play a playlist or album that's in it.
-    @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
+    let enabled: Bool
+    let sessionIsActive: Bool
 
-    private var macPlaying: Bool { model.attributes?.isPlaying == true }
-    private var phonePlaying: Bool { here?.isPlaying == true }
-    private var phoneSongInMacQueue: Bool { model.macQueuePosition(of: here?.catalogID) != nil }
-    /// Any Apple Music song can go to the Mac: one its queue doesn't have goes as its station.
-    private var phoneHasAppleMusicSong: Bool { here?.catalogID != nil }
-
-    /// Whenever the Mac's song can move.
-    private var showsContinueOnPhone: Bool { model.canContinueOnPhone }
-    /// While the phone plays, or when its paused song is one the Mac has; not
-    /// for whatever Apple Music here last played long ago.
-    private var showsContinueOnMac: Bool { phonePlaying || phoneSongInMacQueue }
-
-    /// Always shown once there's a status, so Continue Listening has a place
-    /// on the phone even with nothing to continue (16 November 2026).
     var body: some View {
-        if status != nil || showsContinueOnPhone || showsContinueOnMac {
-            Section {
-                if let status {
-                    LabeledContent("Status", value: status.title)
-                    if status == .setUpOnMac || status == .reconnectOnMac {
-                        Button("Set Up Continue Listening", action: setUp)
-                    }
-                    if case .allowAppleMusic(let canAsk) = status {
-                        Button(canAsk ? "Allow Apple Music Access" : "Open Settings") {
-                            Task { await allowAppleMusic(canAsk) }
-                        }
-                    }
-                }
-                if showsContinueOnPhone {
-                    row("Continue on iPhone", symbol: "iphone",
-                        detail: model.macSongHasNoCatalogID
-                            ? "Your iPhone will look this song up in Apple Music, then continue it here with your Up Next queue. Playback on your Mac will pause."
-                            : "Continue listening on your iPhone, with your playlist, album or Up Next queue. Playback on your Mac will pause.",
-                        enabled: !(phonePlaying && !macPlaying)) { await continueHere() }
-                }
-                if showsContinueOnMac {
-                    row("Continue on Mac", symbol: "laptopcomputer",
-                        detail: phoneSongInMacQueue
-                            ? "Continue listening on your Mac from the same point. Playback on your iPhone will pause."
-                            : "Continue listening on your Mac from the same point, with your playlist or album when your Mac can play it, or else this song’s station. Playback on your iPhone will pause.",
-                        enabled: phoneHasAppleMusicSong && !(macPlaying && !phonePlaying)) { await sendBack() }
-                }
-            } header: {
-                Text("Continue Listening")
-            } footer: {
-                if let problem { Text(problem) } else if let detail = status?.detail { Text(detail) }
+        Menu {
+            Button("Stop Showing", systemImage: "eye.slash", role: .destructive) {
+                Task { await model.stopNowPlaying() }
             }
-            .onChange(of: [macPlaying, phonePlaying]) { problem = nil }
-            // Part of Continue Listening, so its short label reads in context.
-            Section {
-                Toggle("Automatically Add to Library", isOn: $addsToLibrary)
-            } footer: {
-                Text("To keep your playlist or album going when you Continue Listening from iPhone to Mac, Second Chair can add it to your Apple Music library automatically. It stays there until you remove it. With this off, your Mac plays the song’s station instead.")
-            }
-        }
-    }
-
-    private func continueHere() async -> String? {
-        switch await model.continueOnPhone(with: player) {
-        case .unavailable: return "This song couldn’t be found in Apple Music."
-        case .notAllowed: return "Allow access to Apple Music in Settings to continue listening on your iPhone."
-        case .didNotStart: return "Couldn’t start playback on your iPhone. Music is still playing on your Mac."
-        case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere:
-            // Stays here (17 November 2026): Home greys out the Mac's section
-            // and says the song is on the iPhone, and Continue on Mac is at
-            // hand. The Shortcuts action still opens Music unless told not to.
-            return nil
-        }
-    }
-
-    private func sendBack() async -> String? {
-        let outcome = await model.sendBackToMac(with: player)
-        // Say only what's true now: headphones moving over can pause Apple Music here by themselves.
-        let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
-        switch outcome {
-        case .sentAsStation: return "Your Mac is playing the station, which started with another song."
-        case .macRefused: return "Couldn’t start playback on your Mac." + stillHere
-        case .macDidNotStart: return "Your Mac didn’t respond. Try again." + stillHere
-        case .sentBack, .nothingPlayingHere: return nil
-        }
-    }
-
-    private func row(_ title: String, symbol: String, detail: String, enabled: Bool,
-                     action: @escaping @MainActor () async -> String?) -> some View {
-        Button {
-            Task {
-                working = true
-                problem = nil
-                problem = await action()
-                here = player.nowPlaying()
-                working = false
-            }
+            .disabled(!sessionIsActive)
         } label: {
-            HStack {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).foregroundStyle(enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                        Text(detail).font(.footnote).foregroundStyle(enabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
-                    }
-                } icon: {
-                    Image(systemName: symbol).foregroundStyle(enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+            // "Refresh" once the app has a session: it may be showing already,
+            // and asking again is how a hidden player comes back.
+            Label(sessionIsActive ? "Refresh Lock Screen" : "Show on Lock Screen",
+                  systemImage: sessionIsActive ? "arrow.clockwise" : "lock.iphone")
+                .frame(maxWidth: .infinity)
+        } primaryAction: {
+            Task { await model.activateNowPlaying() }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .tint(.primary)
+        .disabled(!enabled)
+        .accessibilityHint("Shows your Mac’s music on the Lock Screen, in StandBy and in Control Centre. Use it if you dismissed the player.")
+    }
+}
+
+#if DEBUG
+/// `-screenshotHome offline|nothing|notSetUp|access|disconnected`: Home in a
+/// state the simulated Mac can't reach by itself, for screenshots.
+@MainActor
+enum HomeScreenshot {
+    static var state: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let at = arguments.firstIndex(of: "-screenshotHome"), arguments.count > at + 1 else { return nil }
+        return arguments[at + 1]
+    }
+
+    static var connection: ConnectionState? {
+        switch state {
+        case "offline": .macOffline(macName: "MacBook Pro")
+        case "disconnected": .disconnected
+        case "reconnecting": .reconnecting
+        default: nil
+        }
+    }
+
+    static var nothingPlaying: Bool { state == "nothing" }
+
+    static var continueListening: ContinueListeningStatus? {
+        switch state {
+        case "notSetUp": .setUpOnMac
+        case "access": .allowAppleMusic(canAsk: true)
+        case "noSubscription": .needsAppleMusic
+        // The simulator can't grant Apple Music: screenshots show it ready.
+        default: ScreenshotMode.isOn ? .ready : nil
+        }
+    }
+}
+#endif
+
+/// Home's background: the song's artwork blurred, or its colour, with a dark
+/// band at the top. Nothing when there's no artwork.
+struct HomeBackground: View {
+    enum Style: String { case artwork, colour, none }
+
+    let artwork: CGImage?
+    let style: Style
+    /// Greyed and darker, as the artwork is while the iPhone has the music.
+    var muted = false
+
+    enum MutedStyle: String { case grey, hide }
+    /// `-homeBackgroundMuted grey|hide` in development builds; grey by default.
+    static var mutedStyle: MutedStyle {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let at = arguments.firstIndex(of: "-homeBackgroundMuted"), arguments.count > at + 1,
+           let style = MutedStyle(rawValue: arguments[at + 1]) { return style }
+        #endif
+        return .grey
+    }
+
+    /// `-homeBackground artwork|colour|none` in development builds; artwork by default.
+    static var style: Style {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let at = arguments.firstIndex(of: "-homeBackground"), arguments.count > at + 1,
+           let style = Style(rawValue: arguments[at + 1]) { return style }
+        #endif
+        return .artwork
+    }
+
+    var body: some View {
+        if let artwork, style != .none {
+            ZStack {
+                switch style {
+                case .artwork:
+                    Image(decorative: artwork, scale: 1)
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: 70, opaque: true)
+                        .saturation(muted ? 0 : 1.25)
+                        // Pale covers stay readable under white text.
+                        .brightness(-0.12)
+                        .overlay(Color.black.opacity(muted ? 0.5 : 0.35))
+                case .colour:
+                    let wall = ArtworkColours.wall(for: artwork)
+                    LinearGradient(colors: [wall.top, wall.bottom], startPoint: .top, endPoint: .bottom)
+                case .none:
+                    EmptyView()
                 }
-                if working {
-                    Spacer()
-                    ProgressView()
-                }
+                // Dark behind the title and the Mac's card, fading out by the song.
+                LinearGradient(stops: [.init(color: .black.opacity(0.85), location: 0),
+                                       .init(color: .black.opacity(0.55), location: 0.18),
+                                       .init(color: .clear, location: 0.42)],
+                               startPoint: .top, endPoint: .bottom)
             }
-        }
-        // iOS's own dimming of a disabled row is too faint here: set the
-        // colours, so a direction that isn't open looks it.
-        .disabled(working || !enabled)
-    }
-}
-
-/// Music's own volume on the Mac. Sent once when the drag ends.
-private struct VolumeRow: View {
-    let level: Double
-    let onChange: (Double) -> Void
-    @State private var dragging = false
-    @State private var dragValue = 0.0
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-            Slider(
-                value: Binding(get: { dragging ? dragValue : level }, set: { dragValue = $0 }),
-                in: 0...1,
-                onEditingChanged: { editing in
-                    if editing {
-                        dragValue = level
-                    } else {
-                        onChange(dragValue)
-                    }
-                    dragging = editing
-                }
-            )
-            Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
-        }
-        .accessibilityLabel("Volume on your Mac")
-    }
-}
-
-private struct TransportControls: View {
-    let isPlaying: Bool
-    let action: (CommandKind) -> Void
-
-    var body: some View {
-        HStack {
-            Spacer()
-            button("backward.fill", "Previous", .previous)
-            Spacer()
-            button(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", isPlaying ? .pause : .play)
-                .font(.largeTitle)
-            Spacer()
-            button("forward.fill", "Next", .next)
-            Spacer()
-        }
-        .font(.title2)
-        .padding(.vertical, 4)
-    }
-
-    private func button(_ symbol: String, _ label: String, _ kind: CommandKind) -> some View {
-        Button {
-            action(kind)
-        } label: {
-            Label(label, systemImage: symbol).labelStyle(.iconOnly)
-        }
-        .buttonStyle(.borderless)
-    }
-}
-
-/// The Continue Listening row's words (16 November 2026).
-extension ContinueListeningStatus {
-    var title: String {
-        switch self {
-        case .ready: "Ready"
-        case .setUpOnMac: "Set Up on Your Mac"
-        case .reconnectOnMac: "Reconnect on Your Mac"
-        case .allowAppleMusic: "Allow Apple Music"
-        case .needsAppleMusic: "Needs Apple Music"
-        }
-    }
-
-    var detail: String? {
-        switch self {
-        case .ready:
-            nil
-        case .setUpOnMac:
-            "Continue Listening needs Second Chair on your Mac connected to Music. On your Mac, click the music note and choose Connect to Music…, then select Second Chair under Devices in Music and enter the code."
-        case .reconnectOnMac:
-            "Music on your Mac no longer recognises Second Chair. On your Mac, click the music note and choose Connect to Music… again."
-        case .allowAppleMusic:
-            "Continue Listening plays songs in Apple Music on this iPhone, which Second Chair needs your permission for."
-        case .needsAppleMusic:
-            "Continue on iPhone plays the song in Apple Music on this iPhone, which needs an Apple Music subscription."
+            .ignoresSafeArea()
+            .transition(.opacity)
+            .animation(.smooth(duration: 0.6), value: ObjectIdentifier(artwork))
+            .animation(.smooth(duration: 0.6), value: muted)
+        } else {
+            Color(.systemBackground).ignoresSafeArea()
         }
     }
 }

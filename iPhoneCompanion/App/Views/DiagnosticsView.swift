@@ -1,5 +1,6 @@
 import StandByKit
 import SwiftUI
+import UIKit
 
 struct DiagnosticsView: View {
     @Environment(AppModel.self) private var model
@@ -50,10 +51,20 @@ struct DiagnosticsView: View {
         .onAppear { model.refreshDiagnostics() }
     }
 
+    /// Shortened on screen; the whole token is a long press away, for support.
     private func token(_ label: String, _ value: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-            Text(value ?? "Not issued").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(value.map(Self.shortened) ?? "Not issued").font(.caption.monospaced()).foregroundStyle(.secondary)
         }
+        .contextMenu {
+            if let value {
+                Button("Copy Token", systemImage: "doc.on.doc") { UIPasteboard.general.string = value }
+            }
+        }
+    }
+
+    static func shortened(_ token: String) -> String {
+        token.count > 16 ? "\(token.prefix(8))…\(token.suffix(4))" : token
     }
 }
