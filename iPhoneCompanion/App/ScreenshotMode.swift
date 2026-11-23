@@ -40,7 +40,7 @@ enum ScreenshotMode {
         return arguments[at + 1]
     }
 
-    private static let suite = "com.alistairmerritt.MusicStandBy.screenshots"
+    static let suite = "com.alistairmerritt.MusicStandBy.screenshots"
     private static let mac = PairedMac(id: DemoMode.mac.id, name: "MacBook Pro")
 
     static func makeModel() -> AppModel {
