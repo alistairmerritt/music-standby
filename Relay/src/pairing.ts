@@ -606,10 +606,10 @@ export class Pairing extends DurableObject<Env> {
    * extension, which caches the artwork the card draws.
    */
   private async phoneAsksForActivity(request: Request): Promise<Response> {
-    const body = await readJSON<{ fresh?: boolean }>(request);
+    const body = await readJSON<{ fresh?: boolean; local?: boolean }>(request);
     const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
     if (!playback?.track) throw new HttpError(409, "nothing_playing");
-    if (!(await this.tokens()).activityStart) throw new HttpError(409, "no_activity_token");
+    if (!body?.local && !(await this.tokens()).activityStart) throw new HttpError(409, "no_activity_token");
     // No session: the Mac has been stopped or paused too long, so there's nothing to show.
     let session = await this.ctx.storage.get<Session>("session");
     if (!session) throw new HttpError(409, "nothing_playing");
@@ -620,8 +620,27 @@ export class Pairing extends DurableObject<Env> {
       await this.endSession("phone_display_mode");
       session = await this.startSession(playback, false);
     }
+    if (body?.local) return json(200, await this.grantLocalActivity(session, playback));
     if (!(await this.startActivity(session, playback))) throw new HttpError(502, "activity_refused");
     return empty();
+  }
+
+  /**
+   * `local`: the app is open and starts the card itself, which costs none of
+   * iOS's hourly ActivityKit push budget. On 24 November 2026, after about 17
+   * pushed starts in an hour, iOS stopped showing new ones though APNs took
+   * every push. The relay records the card as its own, then the app sends its
+   * token (PUT /v1/tokens/activity) and the relay updates it as usual.
+   */
+  private async grantLocalActivity(session: Session, playback: PlaybackMessage) {
+    const record = (await this.record())!;
+    await this.endActivity("replaced");
+    const content = this.activityContent(session, playback);
+    const activityID = crypto.randomUUID();
+    const activity: ActivityRecord = { activityID, startedAt: Date.now(), shown: this.shownOf(content), content, delivered: JSON.stringify(content) };
+    await this.ctx.storage.put("activity", activity);
+    console.log(`activity ${short(activityID)}: started by the phone`);
+    return { attributes: { activityID, macName: record.mac.name }, content };
   }
 
   /** `announce`: try the card, or the reminder, as for music starting. */

@@ -160,31 +160,62 @@ final class LiveActivityController {
         }
     }
 
-    /// Player Display set to Live Activity, showing on, and no card: asks the
-    /// relay for one when the app opens. `fresh` (switching to Live Activity,
-    /// or Show Live Activity after Stop Showing) always starts a new card, and
-    /// has the relay push-start a hidden Now Playing session, whose pushes
-    /// wake the extension that caches the card's artwork.
+    /// Player Display set to Live Activity, showing on, and no card. When the
+    /// app opens, after Show Live Activity, and on switching to Live Activity
+    /// (`fresh`: also has the relay start a hidden Now Playing session, whose
+    /// pushes wake the extension that caches the card's artwork).
+    ///
+    /// The app is open each time, so it starts the card itself: an app-started
+    /// card costs none of iOS's hourly push budget, which pushed starts ran out
+    /// of on 24 November 2026. The relay records it and keeps it updated.
     @discardableResult
     func showCard(fresh: Bool = false) async -> Bool {
         // The relay knows whether the Mac has played lately; it refuses if not.
         guard Self.display == .liveActivity, wanted else { return false }
         guard fresh || Card.activities.allSatisfy({ $0.attributes.activityID == "demo" || $0.activityState != .active }) else { return true }
-        // The relay needs the start token first; sending it again does no harm.
-        guard let token = Card.pushToStartToken else {
-            LockScreenRecord.add("Live Activity: no start token from iOS yet, so no card")
-            return false
+        // For the relay's own starts later (after a break); sending it again does no harm.
+        if let token = Card.pushToStartToken {
+            relayHasToken = true
+            await sendStartToken(token)
         }
-        relayHasToken = true
-        await sendStartToken(token)
+        let data: Data
         do {
-            try await client()?.requestActivity(fresh: fresh)
-            LockScreenRecord.add("Live Activity: asked the relay for the card\(fresh ? ", with Now Playing hidden" : "")")
-            return true
+            guard let answer = try await client()?.requestActivity(fresh: fresh, local: true) else { return false }
+            data = answer
         } catch {
             LockScreenRecord.add("Live Activity: the relay didn’t start the card (\(error.localizedDescription))")
             return false
         }
+        // Empty: an older relay pushed the card itself.
+        guard !data.isEmpty else {
+            LockScreenRecord.add("Live Activity: asked the relay for the card\(fresh ? ", with Now Playing hidden" : "")")
+            return true
+        }
+        guard let grant = try? JSONDecoder().decode(LocalCard.self, from: data) else {
+            LockScreenRecord.add("Live Activity: couldn’t read the relay’s card")
+            return false
+        }
+        for old in Card.activities where old.attributes.activityID != "demo" {
+            await old.end(nil, dismissalPolicy: .immediate)
+        }
+        do {
+            let card = try Card.request(attributes: grant.attributes,
+                                        content: ActivityContent(state: grant.content, staleDate: Date().addingTimeInterval(30 * 60)),
+                                        pushType: .token)
+            LockScreenRecord.add("Live Activity: started the card here\(fresh ? ", with Now Playing hidden" : "")")
+            follow(card)
+            return true
+        } catch {
+            LockScreenRecord.add("Live Activity: iOS didn’t start the card (\(error.localizedDescription))")
+            try? await client()?.removeActivityToken(activityID: grant.attributes.activityID)
+            return false
+        }
+    }
+
+    /// The relay's answer to a `local` request: what the app starts the card with.
+    private struct LocalCard: Decodable {
+        var attributes: MacPlaybackActivityAttributes
+        var content: MacPlaybackActivityAttributes.ContentState
     }
 
     private func observeStartTokens() async {

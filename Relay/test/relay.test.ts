@@ -1391,6 +1391,36 @@ describe("live activity (experiment)", () => {
     expect((await call("POST", "/v1/activity/start", { token: macToken, body: {} })).status).toBe(404);
   });
 
+  it("with the app open, lets the phone start the card itself and then updates it", async () => {
+    const { mac, phoneToken, sessionID } = await playingSetup();
+    const response = await call("POST", "/v1/activity/start", { token: phoneToken, body: { local: true } });   // no push-to-start token needed
+    expect(response.status).toBe(200);
+    const grant = (await response.json()) as { attributes: { activityID: string; macName: string }; content: { title: string } };
+    expect(grant.attributes.macName).toBe("Studio Mac");
+    expect(grant.content.title).toBe("Losing My Edge");
+    expect(await activityPushes(phoneToken)).toHaveLength(0);   // nothing pushed: the phone starts it
+    const { activityID } = grant.attributes;
+    expect((await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } })).status).toBe(204);
+    expect(await activityPushes(phoneToken)).toHaveLength(0);   // nothing changed since: no catch-up
+    const next = playback({ track: smallHours });
+    mac.send({ type: "state", message: next });
+    const state = await waitForRevision(phoneToken, next.revision);
+    expect(state.sessionID).toBe(sessionID);
+    const sent = await activityPushes(phoneToken);
+    expect(sent.map((p) => p.event)).toEqual(["activity-update"]);
+    expect(sent[0].sessionID).toBe(activityID);
+  });
+
+  it("asked fresh with the app open, starts a new Now Playing session and grants the card", async () => {
+    const { phoneToken, sessionID } = await playingSetup();
+    const before = (await pushes(phoneToken)).length;
+    const response = await call("POST", "/v1/activity/start", { token: phoneToken, body: { fresh: true, local: true } });
+    expect(response.status).toBe(200);
+    const sent = (await pushes(phoneToken)).slice(before);
+    expect(sent.map((p) => p.event)).toEqual(["end", "start"]);
+    expect(sent[1].sessionID).not.toBe(sessionID);
+  });
+
   it("refuses when nothing is playing", async () => {
     const { phoneToken } = await pairedSetup();
     await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
