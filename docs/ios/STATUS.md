@@ -15,7 +15,7 @@ Merged into `main` together, in this order: PR #27 (first run V2), #50 (Home red
 - After Continue on iPhone: **Playing on iPhone**, with **Open Apple Music** as the main button and Continue on Mac below it.
 - The Continue buttons are drawn by the app and morph through a hand-over (words, symbol, colour and place) on one spring with the panel. Continue on Mac stays in place and greys out (grey words) while the Mac plays.
 - "Your Mac will pause." and "Your iPhone will pause." show only while that side is playing.
-- Show on Lock Screen is on Home only while the player is off. Opening the app already brings the player back; Refresh and Stop Showing are in Settings.
+- Show on Lock Screen is on Home only while the player is off. Opening the app already brings the player back; Restore Now Playing and Stop Showing are in Settings.
 
 **iPhone, the hand-over moment** (started in the app only):
 - Light gathers at the top edge, around the Dynamic Island, while the music moves, with taps that build (Core Haptics, haptics only).

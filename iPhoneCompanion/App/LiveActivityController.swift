@@ -28,7 +28,7 @@ final class LiveActivityController {
     /// What the relay was last told: nil until the first sync.
     private var relayHasToken: Bool?
 
-    /// Settings' "Show Controls When Music Starts". On unless turned off.
+    /// Settings' "Keep Music Visible". On unless turned off.
     static let enabledKey = "liveActivityCardEnabled"
     static var defaults: UserDefaults { UserDefaults(suiteName: AppGroup.identifier) ?? .standard }
     static var isEnabled: Bool { defaults.object(forKey: enabledKey) as? Bool ?? true }

@@ -50,11 +50,14 @@ struct SettingsView: View {
         }
     }
 
-    private var lockScreenSection: some View {
+    /// Three groups, so each toggle's explanation sits directly under it
+    /// (24 November 2026 copy review): the player's own buttons, the Live
+    /// Activity, and the notification.
+    @ViewBuilder private var lockScreenSection: some View {
         Section {
-            // "Refresh" once the app has a session: it may be showing already,
+            // "Restore" once the app has a session: it may be showing already,
             // and asking again is how a hidden player comes back.
-            Button(model.sessionController.isActive ? "Refresh Lock Screen" : "Show on Lock Screen") {
+            Button(model.sessionController.isActive ? "Restore Now Playing" : "Show on Lock Screen") {
                 Task { await model.activateNowPlaying() }
             }
             .disabled(model.attributes == nil)
@@ -62,31 +65,40 @@ struct SettingsView: View {
                 Task { await model.stopNowPlaying() }
             }
             .disabled(!model.sessionController.isActive)
-            // The card and the notification come from the relay, which the demo doesn't use.
-            if !isDemoLayout {
-                Toggle("Show Controls When Music Starts", isOn: $showsControls)
+        } header: {
+            Text("Lock Screen and StandBy")
+        } footer: {
+            // iOS shows a session only once the app has asked while open, so a
+            // dismissed player stays hidden until the next launch re-requests it.
+            Text("If you dismiss the player, it may stay hidden until you next open Second Chair.")
+        }
+        // The card and the notification come from the relay, which the demo doesn't use.
+        if !isDemoLayout {
+            Section {
+                Toggle("Keep Music Visible", isOn: $showsControls)
                     .onChange(of: showsControls) { LiveActivityController.shared.sync() }
+            } footer: {
+                // The relay can't see whether Now Playing has gone, so the card
+                // comes at the moment it most likely has: music after a break.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("When your Mac starts playing after a break, show its song and controls on your Lock Screen, in case iOS has replaced Now Playing. Tap it to bring Now Playing back.")
+                    if showsControls && !LiveActivityController.systemAllows {
+                        Text("Live Activities are turned off for Second Chair in Settings.").foregroundStyle(.red)
+                    }
+                }
+            }
+            Section {
                 Toggle("Notify When Music Resumes", isOn: Binding(
                     get: { reminders.isEnabled },
                     set: { enabled in Task { await reminders.setEnabled(enabled) } }
                 ))
-            }
-        } header: {
-            Text("Lock Screen and StandBy")
-        } footer: {
-            VStack(alignment: .leading, spacing: 8) {
-                if !isDemoLayout {
-                    Text("When your Mac starts playing after a break, its song and controls appear on your Lock Screen and in StandBy, without opening Second Chair.")
-                    if showsControls && !LiveActivityController.systemAllows {
-                        Text("Live Activities are turned off for Second Chair in Settings.").foregroundStyle(.red)
+            } footer: {
+                // The relay sends it only when it didn't show the card.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("If Keep Music Visible is off or can’t show, get a notification instead when your Mac starts playing after a break. Tap it to bring Now Playing back.")
+                    if let problem = reminders.problem {
+                        Text(problem).foregroundStyle(.red)
                     }
-                    Text("With controls off, get a notification instead. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
-                }
-                // iOS shows a session only once the app has asked while open, so a
-                // dismissed player stays hidden until the next launch re-requests it.
-                Text("If you dismiss the player, it may stay hidden until you next open Second Chair.")
-                if let problem = reminders.problem {
-                    Text(problem).foregroundStyle(.red)
                 }
             }
         }
