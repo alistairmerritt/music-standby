@@ -17,7 +17,7 @@ extension WidgetActions {
             case .unavailable where !macConnected: throw WidgetActionError(message: ShortcutError.notConnected)
             case .unavailable: throw WidgetActionError(message: "Nothing on your Mac can be continued here. The song has to be in Apple Music.")
             case .notAllowed: throw WidgetActionError(message: "Allow access to Apple Music in Settings to continue listening on your iPhone.")
-            case .didNotStart: throw WidgetActionError(message: "Couldn’t start playback on your iPhone. Music is still playing on your Mac.")
+            case .didNotStart: throw WidgetActionError(message: ContinueOutcome.didNotStartMessage(here: player.nowPlaying()))
             }
         }
         continueOnMac = {

@@ -222,7 +222,7 @@ struct ContinueListeningArea: View {
         switch await model.continueOnPhone(with: player, arrived: arrived) {
         case .unavailable: ("This song couldn’t be found in Apple Music.", true)
         case .notAllowed: ("Allow access to Apple Music in Settings to continue listening on your iPhone.", true)
-        case .didNotStart: ("Couldn’t start playback on your iPhone. Music is still playing on your Mac.", true)
+        case .didNotStart: (ContinueOutcome.didNotStartMessage(here: player.nowPlaying()), true)
         // Stays here (17 November 2026): Home says the song is on the
         // iPhone, and Continue on Mac is at hand. The Shortcuts action
         // still opens Music unless told not to.

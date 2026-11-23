@@ -206,3 +206,19 @@ public enum ContinueOutcome: Equatable, Sendable {
     /// As `resumedHere`, but Apple Music here was already playing.
     case alreadyPlayingHere
 }
+
+extension ContinueOutcome {
+    /// What to say when Apple Music here didn't start the Mac's song, given
+    /// what it's playing now. "Couldn't start playback on your iPhone. Music
+    /// is still playing on your Mac." read as if the phone were silent when
+    /// it was playing another song, and the Mac may have been paused
+    /// (23 November 2026). The Mac is never touched until the song plays
+    /// here, so it's as it was either way.
+    public static func didNotStartMessage(here: PhoneNowPlaying?) -> String {
+        guard let here, here.isPlaying else {
+            return "Apple Music on your iPhone didn’t start this song. Nothing changed on your Mac."
+        }
+        let playing = here.title.map { "“\($0)”" } ?? "its own music"
+        return "Apple Music on your iPhone didn’t switch to this song, so it’s still playing \(playing). Nothing changed on your Mac."
+    }
+}

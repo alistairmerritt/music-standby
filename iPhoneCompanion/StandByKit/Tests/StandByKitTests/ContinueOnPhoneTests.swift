@@ -326,3 +326,22 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         #expect(CatalogCandidate.best(title: "Japanese Denim", artist: "Nobody", duration: 270, in: songs) == nil)
     }
 }
+
+@Suite struct DidNotStartMessageTests {
+    @Test func saysWhatThePhoneIsStillPlaying() {
+        let here = PhoneNowPlaying(catalogID: "1", position: 30, isPlaying: true, title: "Song A")
+        #expect(ContinueOutcome.didNotStartMessage(here: here)
+                == "Apple Music on your iPhone didn’t switch to this song, so it’s still playing “Song A”. Nothing changed on your Mac.")
+    }
+
+    @Test func playingWithNoTitle() {
+        let here = PhoneNowPlaying(catalogID: nil, position: 0, isPlaying: true)
+        #expect(ContinueOutcome.didNotStartMessage(here: here).contains("still playing its own music."))
+    }
+
+    @Test func silentOrPausedPhone() {
+        let expected = "Apple Music on your iPhone didn’t start this song. Nothing changed on your Mac."
+        #expect(ContinueOutcome.didNotStartMessage(here: nil) == expected)
+        #expect(ContinueOutcome.didNotStartMessage(here: PhoneNowPlaying(catalogID: "1", position: 0, isPlaying: false, title: "Song A")) == expected)
+    }
+}

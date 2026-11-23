@@ -59,7 +59,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
         case .unavailable where !macConnected: throw ShortcutError(ShortcutError.notConnected)
         case .unavailable: throw ShortcutError("Nothing on your Mac can be continued here. The song has to be in Apple Music.")
         case .notAllowed: throw ShortcutError("Allow access to Apple Music in Settings to continue listening on your iPhone.")
-        case .didNotStart: throw ShortcutError("Couldn’t start playback on your iPhone. Music is still playing on your Mac.")
+        case .didNotStart: throw ShortcutError(ContinueOutcome.didNotStartMessage(here: player.nowPlaying()))
         }
         guard opensMusic else { return .result(dialog: dialog) }
         return .result(opensIntent: OpenURLIntent(SystemMusicPhonePlayer.appURL), dialog: dialog)
