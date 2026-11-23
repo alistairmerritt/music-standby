@@ -1,4 +1,6 @@
 import AppIntents
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import StandByKit
 import SwiftUI
 import UIKit
@@ -15,6 +17,26 @@ enum MacPlaybackCardArtwork {
         let data = MockArtwork.cover(id: id) ?? ArtworkStore(container: SharedContainer.appGroup()).load(id: id)
         return data.flatMap(UIImage.init(data:))?.preparingThumbnail(of: CGSize(width: pixels, height: pixels))
     }
+
+    /// The card's background: the cover, heavily blurred, in the spirit of
+    /// Home's (`HomeBackground`: saturation 1.25, brightness −0.12, then a
+    /// black wash). Made here because a Live Activity can't blur a view
+    /// reliably, and kept small: it's only colour (Alistair, 23 Nov 2026).
+    static func backdrop(from cover: UIImage?) -> UIImage? {
+        guard let cover, let input = CIImage(image: cover) else { return nil }
+        let size: CGFloat = 96
+        let scaled = input.transformed(by: CGAffineTransform(scaleX: size / input.extent.width, y: size / input.extent.height))
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = scaled.clampedToExtent()
+        blur.radius = 14
+        let tone = CIFilter.colorControls()
+        tone.inputImage = blur.outputImage
+        tone.saturation = 1.25
+        tone.brightness = -0.12
+        guard let output = tone.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: size, height: size)),
+              let cg = CIContext(options: [.useSoftwareRenderer: false]).createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: cg)
+    }
 }
 
 /// The Lock Screen and StandBy card: the Mac's song, its progress, and
@@ -23,32 +45,60 @@ struct MacPlaybackCardView: View {
     let attributes: MacPlaybackActivityAttributes
     let state: MacPlaybackActivityAttributes.ContentState
     let artwork: UIImage?
+    /// The blurred cover behind the card; nil until the artwork is cached,
+    /// when iOS's own background shows instead.
+    let backdrop: UIImage?
 
     init(attributes: MacPlaybackActivityAttributes, state: MacPlaybackActivityAttributes.ContentState) {
         self.attributes = attributes
         self.state = state
         artwork = MacPlaybackCardArtwork.image(for: state.artworkID)
+        backdrop = MacPlaybackCardArtwork.backdrop(from: artwork)
     }
 
     var body: some View {
+        if let backdrop {
+            content
+                .background {
+                    ZStack {
+                        Image(uiImage: backdrop).resizable().scaledToFill()
+                        Color.black.opacity(0.35)
+                    }
+                }
+                // The square cover fills a wide card: keep it inside.
+                .clipped()
+                // Always dark under the artwork, as on Home: white type.
+                .environment(\.colorScheme, .dark)
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 MacPlaybackCardCover(image: artwork, size: 56)
                 VStack(alignment: .leading, spacing: 1) {
                     Label(attributes.macName, systemImage: "laptopcomputer")
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
                         .padding(.bottom, 2)
                     Text(state.hasSong ? state.title : "Nothing playing").font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     if state.hasSong {
-                        Text(state.artist).font(.system(size: 14)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                        Text(state.artist).font(.system(size: 14)).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
                 MacPlaybackCardButtons(state: state, size: 44)
             }
             MacPlaybackCardProgress(state: state)
+            // The tap opens Second Chair, which brings the Mac's player back
+            // (scrubber, volume, Control Centre) and ends the card.
+            Text("Tap for the full player")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, -4)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(16)
     }
 }
@@ -62,7 +112,7 @@ struct MacPlaybackCardCover: View {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                Rectangle().fill(.white.opacity(0.12)).overlay(Image(systemName: "music.note").foregroundStyle(.white.opacity(0.6)))
+                Rectangle().fill(.quaternary).overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
             }
         }
         .frame(width: size, height: size)
@@ -94,7 +144,7 @@ struct MacPlaybackCardButtons: View {
             }
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
     }
 }
 
@@ -116,7 +166,7 @@ struct MacPlaybackCardProgress: View {
             }
         }
         .progressViewStyle(.linear)
-        .tint(.white)
+        .tint(.primary)
         .labelsHidden()
     }
 }

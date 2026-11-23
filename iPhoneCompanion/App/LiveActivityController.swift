@@ -2,6 +2,7 @@ import ActivityKit
 import Foundation
 import Observation
 import StandByKit
+import UIKit
 
 /// The app's side of the Live Activity card (experiment, 23 November 2026).
 ///
@@ -127,6 +128,17 @@ final class LiveActivityController {
         guard following.insert(card.id).inserted else { return }
         let id = card.attributes.activityID
         LockScreenRecord.add("Live Activity: following the card for “\(card.content.state.title)” (\(card.activityState))")
+        // Started while Second Chair is on screen: the player is already up
+        // (the app asked for it when it opened), so the card would be a second one.
+        if UIApplication.shared.applicationState == .active, isShowing(), card.activityState == .active {
+            following.remove(card.id)
+            Task {
+                await card.end(nil, dismissalPolicy: .immediate)
+                try? await client()?.removeActivityToken(activityID: id)
+                LockScreenRecord.add("Live Activity: ended the card at once, since Second Chair is open and showing the player")
+            }
+            return
+        }
         Task {
             for await token in card.pushTokenUpdates {
                 do {

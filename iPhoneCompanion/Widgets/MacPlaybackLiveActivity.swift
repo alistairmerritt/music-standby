@@ -8,9 +8,9 @@ import WidgetKit
 struct MacPlaybackLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MacPlaybackActivityAttributes.self) { context in
+            // iOS's own background (Alistair, 23 Nov): light or dark with the
+            // phone, so the card's colours are the system's, not white.
             MacPlaybackCardView(attributes: context.attributes, state: context.state)
-                .activityBackgroundTint(Color(red: 0.08, green: 0.07, blue: 0.19).opacity(0.82))
-                .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             let state = context.state
             let artwork = MacPlaybackCardArtwork.image(for: state.artworkID, pixels: 120)

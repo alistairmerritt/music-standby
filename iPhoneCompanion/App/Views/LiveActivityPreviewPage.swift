@@ -11,7 +11,7 @@ struct LiveActivityPreviewPage: View {
     private let attributes = MacPlaybackActivityAttributes(activityID: "preview", macName: "MacBook Pro")
 
     private func state(_ title: String, _ artist: String, _ art: String, playing: Bool, elapsed: Double, duration: Double) -> MacPlaybackActivityAttributes.ContentState {
-        .init(title: title, artist: artist, album: "", artworkID: "mock-art-\(art)", isPlaying: playing, elapsed: elapsed,
+        .init(title: title, artist: artist, album: "", artworkID: art == "none" ? "" : "mock-art-\(art)", isPlaying: playing, elapsed: elapsed,
               capturedAt: Date().timeIntervalSince1970, duration: duration, canGoNext: true)
     }
 
@@ -28,6 +28,8 @@ struct LiveActivityPreviewPage: View {
                 Spacer().frame(height: 4)
                 lockScreenCard(lowSun)
                 lockScreenCard(paused)
+                // Before the artwork is cached: iOS's own background, here in light mode.
+                lockScreenCard(state("Small Hours", "Fen Lights", "none", playing: true, elapsed: 40, duration: 252), scheme: .light)
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -36,10 +38,12 @@ struct LiveActivityPreviewPage: View {
         .environment(\.colorScheme, .dark)
     }
 
-    /// As iOS draws it: the card on a tinted, translucent plate.
-    private func lockScreenCard(_ state: MacPlaybackActivityAttributes.ContentState) -> some View {
+    /// Roughly as iOS draws it, with its own background: light or dark with the phone.
+    private func lockScreenCard(_ state: MacPlaybackActivityAttributes.ContentState, scheme: ColorScheme = .dark) -> some View {
         MacPlaybackCardView(attributes: attributes, state: state)
-            .background(Color(red: 0.08, green: 0.07, blue: 0.19).opacity(0.82), in: .rect(cornerRadius: 24, style: .continuous))
+            .background(.regularMaterial, in: .rect(cornerRadius: 24, style: .continuous))
+            .clipShape(.rect(cornerRadius: 24, style: .continuous))
+            .environment(\.colorScheme, scheme)
     }
 
     private func island(compact state: MacPlaybackActivityAttributes.ContentState) -> some View {
