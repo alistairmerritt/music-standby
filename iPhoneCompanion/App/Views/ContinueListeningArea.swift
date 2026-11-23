@@ -18,6 +18,8 @@ struct ContinueListeningArea: View {
     let allowAppleMusic: (_ canAsk: Bool) async -> Void
     /// Continue Listening's setup, from the first run.
     let setUp: () -> Void
+    /// Both directions quiet, when Home's accent is elsewhere (Open Apple Music).
+    var quiet = false
 
     private enum Direction { case toPhone, toMac }
     @State private var working: Direction?
@@ -117,7 +119,7 @@ struct ContinueListeningArea: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .modifier(ContinueButtonStyle(prominent: prominent))
+            .modifier(ContinueButtonStyle(prominent: prominent && !quiet))
             .disabled(working != nil)
             .accessibilityHint(detail)
             if result == nil {

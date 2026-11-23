@@ -17,6 +17,8 @@ public struct Handover {
     var sleep: @Sendable (TimeInterval) async throws -> Void
     /// Where the Mac stopped when Continue on iPhone last took its song.
     var memory: HandoverMemory
+    /// Where the widget's picture lives; tests pass their own.
+    var widgetDefaults: UserDefaults = WidgetSnapshot.defaults
 
     public init(
         latest: @escaping @MainActor () -> PlaybackMessage?,
@@ -45,6 +47,16 @@ public struct Handover {
     /// song this phone took, where it stopped), it has nothing new, and
     /// Apple Music here, which has played on since, carries on instead.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
+        let outcome = await performContinueOnPhone(with: player, timeout: timeout)
+        // The widget shows the song as on the iPhone, with Continue on Mac.
+        switch outcome {
+        case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere: WidgetSnapshot.markOnIPhone(true, in: widgetDefaults)
+        case .unavailable, .notAllowed, .didNotStart: break
+        }
+        return outcome
+    }
+
+    private func performContinueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> ContinueOutcome {
         guard let message = latest(), let track = message.track else { return .unavailable }
         guard let catalogID = await catalogID(for: track, with: player) else {
             record("Continue on iPhone: \(track.title) isn't in the Apple Music catalogue")
@@ -259,6 +271,12 @@ public struct Handover {
     /// playlist: the Mac plays the playlist from the song, which is quicker
     /// than many skips and carries on after the 25 songs it sent.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
+        let outcome = await performSendBackToMac(with: player, timeout: timeout)
+        if outcome == .sentBack || outcome == .sentAsStation { WidgetSnapshot.markOnIPhone(false, in: widgetDefaults) }
+        return outcome
+    }
+
+    private func performSendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> SendBackOutcome {
         // Playing or paused here: a paused song is still the phone's to hand on.
         guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
         let ahead = macQueuePosition(of: catalogID)

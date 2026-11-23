@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         center.setNotificationCategories([Self.handBackCategory])
         // Show in Now Playing and Stop Showing act on the app's own model.
         AppDependencyManager.shared.add(dependency: self.model)
+        // The widget's and the controls' buttons run in this process.
+        WidgetActions.shared.install(model: model)
         // Every launch: the device token goes to the relay for Continue from
         // iPhone whatever the reminder setting, and it can change.
         application.registerForRemoteNotifications()

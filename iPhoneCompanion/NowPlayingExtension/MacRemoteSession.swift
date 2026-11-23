@@ -2,6 +2,7 @@ import Foundation
 import NowPlaying
 import Observation
 import StandByKit
+import WidgetKit
 import os
 
 /// The Mac's playback as the system sees it. Runs in the extension process.
@@ -31,6 +32,7 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
         logger.log("Session created for \(attributes.id, privacy: .public), revision \(attributes.revision)")
         startObservingPushToken()
         prefetchArtwork()
+        WidgetSnapshot.publish(attributes)
     }
 
     func update(_ incoming: MacPlaybackAttributes) {
@@ -41,6 +43,9 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
         attributes = incoming
         logger.log("Update to revision \(incoming.revision); memory \(Self.footprint(), privacy: .public)")
         prefetchArtwork()
+        // The extension wakes for every change while the player is up, so it
+        // keeps the Continue Listening widget's picture current (22 November 2026).
+        WidgetSnapshot.publish(incoming)
     }
 
     /// Fetches the track's artwork into the cache as soon as the update
@@ -102,7 +107,11 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
 
     private func artworkCached(_ artworkID: String?) {
         fetchingArtwork = nil
-        if let artworkID, attributes.track?.artworkReference == artworkID { fetchedArtwork = artworkID }
+        if let artworkID, attributes.track?.artworkReference == artworkID {
+            fetchedArtwork = artworkID
+            // The widget drew the new song before its artwork was here.
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshot.kind)
+        }
     }
 
     var content: (any MediaContentRepresentable)? {

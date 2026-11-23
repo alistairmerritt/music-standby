@@ -37,11 +37,16 @@ struct HomeView: View {
                                button: nil, action: nil)
                     } else if isLive {
                         ContinueListeningArea(player: phoneMusic, here: $phoneNowPlaying, status: continueListening,
-                                              allowAppleMusic: allowAppleMusic) {
-                            onboarding.resume(.continueMusic)
-                        }
+                                              allowAppleMusic: allowAppleMusic,
+                                              setUp: { onboarding.resume(.continueMusic) },
+                                              quiet: nowPlayingMode == .onIPhone)
                     }
-                    ShowOnLockScreenButton(enabled: attributes != nil && isLive, sessionIsActive: sessionIsActive)
+                    // Apple Music has the Lock Screen while it plays the Mac's
+                    // song here, so the Mac's player has nothing to show; Stop
+                    // Showing is still in Settings (23 November 2026).
+                    if nowPlayingMode != .onIPhone {
+                        ShowOnLockScreenButton(enabled: attributes != nil && isLive, sessionIsActive: sessionIsActive)
+                    }
                 }
             }
             .padding(.horizontal, 20)

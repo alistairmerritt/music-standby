@@ -23,6 +23,7 @@ enum NowPlayingMode: Equatable {
 struct NowPlayingPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.openURL) private var openURL
     let attributes: MacPlaybackAttributes?
     let mode: NowPlayingMode
 
@@ -51,9 +52,23 @@ struct NowPlayingPanel: View {
                     .disabled(dimsMacSong)
                     .opacity(dimsMacSong ? 0.4 : 1)
                 case .onIPhone:
-                    Text("Paused on Mac at \(Duration.seconds(attributes.elapsed(at: Date())), format: .time(pattern: .minuteSecond))")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    // The song's controls are in Apple Music now, so the way
+                    // there takes the remote's place, as Home's one accent;
+                    // Continue on Mac steps back (Alistair, 23 November 2026).
+                    VStack(spacing: 10) {
+                        Button {
+                            openURL(SystemMusicPhonePlayer.appURL)
+                        } label: {
+                            Label("Open Apple Music", systemImage: "arrow.up.forward.app")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        Text("Paused on Mac at \(Duration.seconds(attributes.elapsed(at: Date())), format: .time(pattern: .minuteSecond))")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 case .lastKnown:
                     EmptyView()
                 }
