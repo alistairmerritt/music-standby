@@ -26,6 +26,8 @@ public enum SessionEndReason: String, Equatable, Sendable {
     case pairingRevoked
     /// The relay issued a different session identifier.
     case replaced
+    /// Player Display was set to Live Activity, so Now Playing goes.
+    case playerDisplay
 }
 
 public enum TransportEvent: Sendable {

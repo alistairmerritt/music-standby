@@ -586,6 +586,35 @@ struct Harness {
         #expect(h.controller.activations.count == 1)
     }
 
+    @Test func liveActivityDisplayNeverStartsNowPlaying() async {
+        let h = Harness()
+        h.model.usesNowPlaying = { false }
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        await eventually("applied") { h.model.attributes?.revision == 1 }
+        #expect(await h.model.sceneDidBecomeActive() == .liveActivity)
+        await h.model.activateNowPlaying()
+        #expect(h.controller.activations.isEmpty)
+        #expect(h.model.isNowPlayingEnabled)
+    }
+
+    @Test func switchingToLiveActivityEndsNowPlaying() async {
+        let h = Harness()
+        let task = await h.run()
+        defer { task.cancel() }
+        await h.connected()
+        await h.transport.emit(.playback(message(revision: 1)))
+        await eventually("activated") { h.controller.isActive }
+        h.model.usesNowPlaying = { false }
+        await h.model.endNowPlayingForLiveActivity()
+        #expect(h.controller.deactivations == 1)
+        await h.transport.emit(.playback(message(revision: 2)))
+        await eventually("applied") { h.model.attributes?.revision == 2 }
+        #expect(h.controller.activations.count == 1)
+    }
+
     @Test func foregroundDoesNotActivateBeforeAnyTrack() async {
         let h = Harness()
         let task = await h.run()

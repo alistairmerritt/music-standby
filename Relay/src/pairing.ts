@@ -336,6 +336,7 @@ export class Pairing extends DurableObject<Env> {
     const deleteToken = /^\/v1\/tokens\/session\/([^/]+)$/.exec(path);
     if (deleteToken && method === "DELETE") return this.deleteSessionToken(decodeURIComponent(deleteToken[1]));
     if (method === "POST" && path === "/v1/session/end") return this.phoneEndsSession(request);
+    if (method === "POST" && path === "/v1/activity/start") return this.phoneAsksForActivity(request);
     throw new HttpError(404, "not_found");
   }
 
@@ -597,7 +598,31 @@ export class Pairing extends DurableObject<Env> {
     await this.pushUpdate(session, paused);
   }
 
-  private async startSession(message: PlaybackMessage): Promise<void> {
+  /**
+   * The phone asks for the card now (Player Display set to Live Activity, and
+   * the app opened or switched with none showing). `fresh` also starts a new
+   * Now Playing session by push: the app has just ended its own so it stops
+   * showing, and a pushed one stays hidden while still waking the Now Playing
+   * extension, which caches the artwork the card draws.
+   */
+  private async phoneAsksForActivity(request: Request): Promise<Response> {
+    const body = await readJSON<{ fresh?: boolean }>(request);
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    if (!playback?.track) throw new HttpError(409, "nothing_playing");
+    if (!(await this.tokens()).activityStart) throw new HttpError(409, "no_activity_token");
+    // No session: the Mac has been stopped or paused too long, so there's nothing to show.
+    let session = await this.ctx.storage.get<Session>("session");
+    if (!session) throw new HttpError(409, "nothing_playing");
+    if (body?.fresh) {
+      await this.endSession("phone_display_mode");
+      session = await this.startSession(playback, false);
+    }
+    if (!(await this.startActivity(session, playback))) throw new HttpError(502, "activity_refused");
+    return empty();
+  }
+
+  /** `announce`: try the card, or the reminder, as for music starting. */
+  private async startSession(message: PlaybackMessage, announce = true): Promise<Session> {
     const session: Session = {
       sessionID: crypto.randomUUID(),
       listeningSessionID: message.listeningSessionID,
@@ -614,8 +639,9 @@ export class Pairing extends DurableObject<Env> {
       console.log(`session ${short(session.sessionID)}: no push-to-start token; the phone must foreground to see it`);
     }
     // A session started by push stays hidden until the app is opened.
-    await this.musicStarted(session, message);
+    if (announce) await this.musicStarted(session, message);
     await this.scheduleAlarm();
+    return session;
   }
 
   private async pushUpdate(session: Session, message: PlaybackMessage): Promise<void> {

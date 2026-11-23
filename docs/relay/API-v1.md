@@ -74,6 +74,7 @@ Three kinds, all opaque bearer strings. Clients never parse them.
 | `DELETE /v1/tokens/activity-start` | phone | — → `204` | §15, the card off |
 | `PUT /v1/tokens/activity` | phone | `{ "activityID": "…", "token": "<hex>" }` → `204`, or `409 activity_mismatch` | §15 |
 | `DELETE /v1/tokens/activity/{activityID}` | phone | — → `204` | §15 |
+| `POST /v1/activity/start` | phone | `{ "fresh": bool? }` → `204`, `409 nothing_playing`, `409 no_activity_token` or `502 activity_refused` | §15, the card now |
 
 ---
 
@@ -454,3 +455,5 @@ Branch `experiment/live-activity`. The reasoning is in the project's `Records/LI
 `content-state` is `{ title, artist, album, artworkID, isPlaying, elapsed, capturedAt, duration, canGoNext }`. `capturedAt` is in Unix seconds. Times are plain numbers because ActivityKit decodes a `Date` as seconds since 2001.
 
 **The card's token.** iOS starts the card, then wakes the app, which sends the card's update token with the relay's `activityID`. If anything changed between the start push and the token arriving, the relay sends an update straight away. Seeks and volume changes aren't sent. After the phone downloads a new song's artwork (§8), the relay sends a priority-5 update so the card can draw it. The phone deletes the token when the card ends: when opening the app brings the player back, when the person swipes the card away, or when iOS ends it. A dead token is dropped.
+
+**The card on request (24 November 2026).** With Player Display set to Live Activity, the app asks for the card when it opens, or when that mode is chosen, and none is showing: `POST /v1/activity/start`. The relay starts it as above, without the reminder. With `fresh: true` (switching to Live Activity), the relay first ends the session, which ends the Now Playing player, then push-starts a new one. A pushed session stays hidden (§9), so only the card shows, but the new session's pushes still wake the Now Playing extension, which caches the artwork the card draws. It refuses with `409 nothing_playing` when there's no session (nothing played lately), and `409 no_activity_token` before the phone has sent its push-to-start token.

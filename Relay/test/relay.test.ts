@@ -1373,6 +1373,38 @@ describe("live activity (experiment)", () => {
     expect(start.sessionID).not.toBe(activityID);
   });
 
+  it("starts the card when the phone asks, without the reminder", async () => {
+    const { phoneToken } = await playingSetup();
+    expect((await call("POST", "/v1/activity/start", { token: phoneToken, body: {} })).status).toBe(409);   // no card token yet
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
+    expect((await call("POST", "/v1/activity/start", { token: phoneToken, body: {} })).status).toBe(204);
+    const sent = await activityPushes(phoneToken);
+    expect(sent.map((p) => p.event)).toEqual(["activity-start"]);
+    expect(sent[0].payload.aps["content-state"].title).toBe("Losing My Edge");
+    expect((await pushes(phoneToken)).filter((p) => p.event === "reminder")).toHaveLength(0);
+  });
+
+  it("refuses when nothing is playing", async () => {
+    const { phoneToken } = await pairedSetup();
+    await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
+    const response = await call("POST", "/v1/activity/start", { token: phoneToken, body: {} });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "nothing_playing" } });
+  });
+
+  it("asked fresh, ends the Now Playing session and push-starts a new one with the card", async () => {
+    const { phoneToken, sessionID } = await playingSetup();
+    await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
+    const before = (await pushes(phoneToken)).length;
+    expect((await call("POST", "/v1/activity/start", { token: phoneToken, body: { fresh: true } })).status).toBe(204);
+    const sent = (await pushes(phoneToken)).slice(before);
+    expect(sent.map((p) => p.event)).toEqual(["end", "start", "activity-start"]);
+    expect(sent[0].sessionID).toBe(sessionID);
+    expect(sent[1].sessionID).not.toBe(sessionID);
+    expect(sent.filter((p) => p.event === "reminder")).toHaveLength(0);
+  });
+
   it("stops updating a card the phone has ended", async () => {
     const { mac, phoneToken, activityID } = await cardStarted();
     await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } });

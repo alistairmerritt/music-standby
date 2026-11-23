@@ -209,6 +209,15 @@ public struct RelayClient: CommandSender, SessionReading, Sendable {
         _ = try await perform(try makeRequest(RelayPath.activityToken(id: activityID), method: "DELETE"))
     }
 
+    /// Asks the relay to start the card now, for Player Display set to Live
+    /// Activity. `fresh` also has it end the Now Playing session and push-start
+    /// a hidden one, after the app has ended its own (API-v1 §15).
+    public func requestActivity(fresh: Bool) async throws {
+        var request = try makeRequest(RelayPath.activityStart, method: "POST")
+        try attach(ActivityRequestBody(fresh: fresh), to: &request)
+        _ = try await perform(request)
+    }
+
     /// Turns reminders on: the app's ordinary push token, for "Music playing" alerts.
     public func registerAlertToken(_ hex: String) async throws {
         var request = try makeRequest(RelayPath.alertToken, method: "PUT")
@@ -387,6 +396,10 @@ private struct AlertTokenRegistration: Encodable {
 }
 
 /// The card's token bodies (experiment): small enough not to need the shared protocol yet.
+private struct ActivityRequestBody: Encodable {
+    var fresh: Bool
+}
+
 private struct ActivityTokenBody: Encodable {
     var activityID: String?
     var token: String

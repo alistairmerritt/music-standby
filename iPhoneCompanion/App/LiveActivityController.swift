@@ -12,7 +12,9 @@ import UIKit
 /// - Follows each card iOS starts from that push: sends its update token,
 ///   and tells the relay when it's gone.
 /// - Ends the card once the app has the Mac's player back, so the two don't
-///   show together.
+///   show together (Player Display: Automatic).
+/// - Switches Player Display, and with Live Activity chosen, asks the relay
+///   for the card when the app opens with none showing (24 November 2026).
 ///
 /// iOS starts the card and then wakes the app in the background to collect
 /// the token ("…wakes up your app, and grants it background runtime"), so
@@ -23,21 +25,21 @@ final class LiveActivityController {
 
     private typealias Card = Activity<MacPlaybackActivityAttributes>
     private var client: () -> RelayClient? = { nil }
-    private var isShowing: () -> Bool = { true }
+    private weak var model: AppModel?
+    private var isShowing: Bool { model?.isNowPlayingEnabled ?? true }
     private var started = false
     /// What the relay was last told: nil until the first sync.
     private var relayHasToken: Bool?
 
-    /// Settings' "Keep Music Visible". On unless turned off.
-    static let enabledKey = "liveActivityCardEnabled"
     static var defaults: UserDefaults { UserDefaults(suiteName: AppGroup.identifier) ?? .standard }
-    static var isEnabled: Bool { defaults.object(forKey: enabledKey) as? Bool ?? true }
+    /// Settings' Player Display.
+    static var display: PlayerDisplay { PlayerDisplay.current(in: defaults) }
     /// iOS's own switch: Settings › Second Chair › Live Activities.
     static var systemAllows: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
-    /// Whether the relay should start the card: the setting is on, showing
-    /// is on (Stop Showing stops the card too), and iOS allows it.
-    private var wanted: Bool { Self.isEnabled && isShowing() && Self.systemAllows }
+    /// Whether the relay should start the card: Player Display uses it,
+    /// showing is on (Stop Showing stops the card too), and iOS allows it.
+    private var wanted: Bool { Self.display.usesLiveActivity && isShowing && Self.systemAllows }
     /// Cards already being followed, by iOS's id.
     private var following: Set<String> = []
 
@@ -45,7 +47,7 @@ final class LiveActivityController {
         guard !started else { return }
         started = true
         self.client = client
-        isShowing = { [weak model] in model?.isNowPlayingEnabled ?? true }
+        self.model = model
         if !Self.systemAllows {
             LockScreenRecord.add("Live Activities are off for Second Chair in Settings, so the relay will send the reminder")
         }
@@ -85,7 +87,7 @@ final class LiveActivityController {
             guard let token = Card.pushToStartToken else { return }   // sent when iOS gives it
             Task { await sendStartToken(token) }
         } else {
-            LockScreenRecord.add("Live Activity: the card is off (\(Self.isEnabled ? (isShowing() ? "Live Activities are off in Settings" : "Stop Showing") : "the setting is off")); the relay sends the reminder instead")
+            LockScreenRecord.add("Live Activity: the card is off (\(Self.display.usesLiveActivity ? (isShowing ? "Live Activities are off in Settings" : "Stop Showing") : "Player Display is Now Playing")); the relay sends the reminder instead")
             Task { try? await client()?.removeActivityStartToken() }
             endAll(because: "the card was turned off")
         }
@@ -103,6 +105,67 @@ final class LiveActivityController {
                 await card.end(nil, dismissalPolicy: .immediate)
                 try? await client()?.removeActivityToken(activityID: id)
             }
+        }
+    }
+
+    // MARK: Player Display (24 November 2026)
+
+    /// Settings' Player Display was changed. Runs with the app open, the only
+    /// time iOS lets it bring Now Playing back. The Mac's music isn't touched.
+    /// - Returns: what went wrong, to show under the choices, or nil.
+    @discardableResult
+    func setDisplay(_ display: PlayerDisplay) async -> String? {
+        let before = Self.display
+        guard display != before, let model else { return nil }
+        display.save(in: Self.defaults)
+        LockScreenRecord.add("Player Display: \(before.title) → \(display.title)")
+        guard isShowing else { sync(); return nil }   // Stop Showing: nothing shows until it's turned back on
+        switch display {
+        case .liveActivity:
+            // The relay ends the Now Playing session and push-starts a hidden
+            // one (it still caches the card's artwork), with the card.
+            await model.endNowPlayingForLiveActivity()
+            sync()
+            guard Self.systemAllows else { return "Live Activities are turned off for Second Chair in Settings." }
+            guard model.macTrack != nil else { return nil }   // the card comes when the Mac next plays after a break, or when you open Second Chair
+            return await showCard(fresh: true) ? nil : "Couldn’t show the Live Activity. Try again in a moment."
+        case .nowPlaying, .automatic:
+            // Now Playing first; the card goes once iOS has taken the request.
+            if !before.usesNowPlaying {
+                await model.activateNowPlaying()
+                if model.sessionController.lastPrimaryError == nil {
+                    endAll(because: "Player Display is \(display.title), and Now Playing is back")
+                }
+            }
+            sync()   // Now Playing alone: the relay stops starting the card, and any card ends
+            return nil
+        }
+    }
+
+    /// Player Display set to Live Activity, showing on, and no card: asks the
+    /// relay for one when the app opens. `fresh` (switching to Live Activity,
+    /// or Show Live Activity after Stop Showing) always starts a new card, and
+    /// has the relay push-start a hidden Now Playing session, whose pushes
+    /// wake the extension that caches the card's artwork.
+    @discardableResult
+    func showCard(fresh: Bool = false) async -> Bool {
+        // The relay knows whether the Mac has played lately; it refuses if not.
+        guard Self.display == .liveActivity, wanted else { return false }
+        guard fresh || Card.activities.allSatisfy({ $0.attributes.activityID == "demo" || $0.activityState != .active }) else { return true }
+        // The relay needs the start token first; sending it again does no harm.
+        guard let token = Card.pushToStartToken else {
+            LockScreenRecord.add("Live Activity: no start token from iOS yet, so no card")
+            return false
+        }
+        relayHasToken = true
+        await sendStartToken(token)
+        do {
+            try await client()?.requestActivity(fresh: fresh)
+            LockScreenRecord.add("Live Activity: asked the relay for the card\(fresh ? ", with Now Playing hidden" : "")")
+            return true
+        } catch {
+            LockScreenRecord.add("Live Activity: the relay didn’t start the card (\(error.localizedDescription))")
+            return false
         }
     }
 
@@ -130,8 +193,9 @@ final class LiveActivityController {
         let id = card.attributes.activityID
         LockScreenRecord.add("Live Activity: following the card for “\(card.content.state.title)” (\(card.activityState))")
         // Started while Second Chair is on screen: the player is already up
-        // (the app asked for it when it opened), so the card would be a second one.
-        if UIApplication.shared.applicationState == .active, isShowing(), card.activityState == .active, id != "demo" {
+        // (the app asked for it when it opened), so the card would be a second
+        // one. Not with Player Display set to Live Activity: there the card is the player.
+        if Self.display.usesNowPlaying, UIApplication.shared.applicationState == .active, isShowing, card.activityState == .active, id != "demo" {
             following.remove(card.id)
             Task {
                 await card.end(nil, dismissalPolicy: .immediate)

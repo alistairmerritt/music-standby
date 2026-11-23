@@ -268,7 +268,11 @@ private struct ShowOnLockScreenButton: View {
                   systemImage: sessionIsActive ? "arrow.clockwise" : "lock.iphone")
                 .frame(maxWidth: .infinity)
         } primaryAction: {
-            Task { await model.activateNowPlaying() }
+            Task {
+                await model.activateNowPlaying()
+                // Player Display set to Live Activity: the card instead.
+                await LiveActivityController.shared.showCard(fresh: true)
+            }
         }
         .buttonStyle(.bordered)
         .controlSize(.large)

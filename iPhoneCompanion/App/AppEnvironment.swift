@@ -71,6 +71,7 @@ enum AppEnvironment {
         )
         let phoneMusic = SystemMusicPhonePlayer()
         model.phonePlaysMusic = { phoneMusic.nowPlaying()?.isPlaying == true }
+        model.usesNowPlaying = { LiveActivityController.display.usesNowPlaying }
         return model
     }
 
