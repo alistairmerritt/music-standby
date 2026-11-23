@@ -166,29 +166,36 @@ struct ContinueListeningArea: View {
         working = direction
         result = nil
         HandoffMoment.shared.begin(direction)
+        // The ripple and the firm tap land the moment the music moves, while
+        // the hand-over finishes off (HandoffMoment, 23 November 2026).
+        var landed = false
+        let arrived: @MainActor () -> Void = {
+            guard !landed else { return }
+            landed = true
+            HandoffMoment.shared.land(direction)
+        }
         let outcome: (text: String, isFailure: Bool)?
         #if DEBUG
         if ScreenshotMode.isOn {
-            outcome = await DemoHandover.shared.run(direction, model: model)
+            outcome = await DemoHandover.shared.run(direction, model: model, arrived: arrived)
         } else {
-            outcome = direction == .toPhone ? await continueHere() : await sendBack()
+            outcome = direction == .toPhone ? await continueHere(arrived) : await sendBack(arrived)
         }
         #else
-        outcome = direction == .toPhone ? await continueHere() : await sendBack()
+        outcome = direction == .toPhone ? await continueHere(arrived) : await sendBack(arrived)
         #endif
         result = outcome
-        // The ripple and the firm tap when it lands (HandoffMoment).
         if outcome == nil || outcome?.isFailure == false {
-            HandoffMoment.shared.land(direction)
-        } else {
+            arrived()
+        } else if !landed {
             HandoffMoment.shared.fail()
         }
         here = player.nowPlaying()
         working = nil
     }
 
-    private func continueHere() async -> (text: String, isFailure: Bool)? {
-        switch await model.continueOnPhone(with: player) {
+    private func continueHere(_ arrived: @escaping @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
+        switch await model.continueOnPhone(with: player, arrived: arrived) {
         case .unavailable: ("This song couldn’t be found in Apple Music.", true)
         case .notAllowed: ("Allow access to Apple Music in Settings to continue listening on your iPhone.", true)
         case .didNotStart: ("Couldn’t start playback on your iPhone. Music is still playing on your Mac.", true)
@@ -199,8 +206,8 @@ struct ContinueListeningArea: View {
         }
     }
 
-    private func sendBack() async -> (text: String, isFailure: Bool)? {
-        let outcome = await model.sendBackToMac(with: player)
+    private func sendBack(_ arrived: @escaping @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
+        let outcome = await model.sendBackToMac(with: player, arrived: arrived)
         // Say only what's true now: headphones moving over can pause Apple Music here by themselves.
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
         return switch outcome {

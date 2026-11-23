@@ -7,6 +7,20 @@ import Foundation
 /// November 2026, so both use the same steps.
 @MainActor
 public struct Handover {
+    /// Called once, the moment the music moves: when it starts on the phone,
+    /// or when the Mac is seen playing it. The rest of a hand-over (pausing
+    /// the other side, a station to follow, a seek) carries on after it, so
+    /// Home's animation lands with the sound rather than seconds later
+    /// (23 November 2026).
+    @MainActor final class Arrival {
+        var call: (@MainActor () -> Void)?
+        func fire() {
+            let call = call
+            self.call = nil
+            call?()
+        }
+    }
+    private let arrival = Arrival()
     /// The Mac's last state, as known now.
     var latest: @MainActor () -> PlaybackMessage?
     /// Reads the Mac's state again, so `latest` has the newest.
@@ -46,7 +60,10 @@ public struct Handover {
     /// When the Mac hasn't moved since the last time (still paused on the
     /// song this phone took, where it stopped), it has nothing new, and
     /// Apple Music here, which has played on since, carries on instead.
-    public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
+    public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                                arrived: (@MainActor () -> Void)? = nil) async -> ContinueOutcome {
+        arrival.call = arrived
+        defer { arrival.call = nil }
         let outcome = await performContinueOnPhone(with: player, timeout: timeout)
         // The widget shows the song as on the iPhone, with Continue on Mac.
         switch outcome {
@@ -163,6 +180,8 @@ public struct Handover {
     /// station from the song when few songs are left to play.
     private func finishContinuing(_ catalogID: String, songsAfter: Int, from source: String, repeatMode: RepeatMode?,
                                   with player: any PhoneMusicPlaying) async -> ContinueOutcome {
+        // The song plays here now: that's the moment the music moved.
+        arrival.fire()
         if source != "the Mac" { memory.saveQueued(nil) }
         if let repeatMode { player.setRepeat(repeatMode) }
         let outcome = await pauseMac(for: catalogID, songsAfter: songsAfter)
@@ -270,7 +289,10 @@ public struct Handover {
     /// `skipsAtMost` songs into the Mac's queue and that queue is the same
     /// playlist: the Mac plays the playlist from the song, which is quicker
     /// than many skips and carries on after the 25 songs it sent.
-    public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
+    public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                              arrived: (@MainActor () -> Void)? = nil) async -> SendBackOutcome {
+        arrival.call = arrived
+        defer { arrival.call = nil }
         let outcome = await performSendBackToMac(with: player, timeout: timeout)
         if outcome == .sentBack || outcome == .sentAsStation { WidgetSnapshot.markOnIPhone(false, in: widgetDefaults) }
         return outcome
@@ -368,6 +390,7 @@ public struct Handover {
         while now() < deadline {
             await refresh()
             if let current = latest(), current.state == .playing, current.track?.catalogID == catalogID {
+                arrival.fire()
                 // Headphones following the music to the Mac may have paused it already.
                 if player.nowPlaying()?.isPlaying == true { player.pause() }
                 // The Mac has the music again: the next Continue on iPhone takes it.
@@ -417,6 +440,7 @@ public struct Handover {
             await refresh()
             if let current = latest(), current.state == .playing, let track = current.track,
                current.revision > (before?.revision ?? 0), track.id != before?.track?.id || track.catalogID == catalogID {
+                arrival.fire()
                 let sameSong = track.catalogID == catalogID
                     || (track.catalogID == nil && here.title.map { track.title.caseInsensitiveCompare($0) == .orderedSame } == true)
                 if sameSong { await seekIfTheMacMissedIt(player: player, here: here) }

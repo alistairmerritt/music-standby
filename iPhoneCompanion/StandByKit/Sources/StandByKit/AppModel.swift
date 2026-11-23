@@ -319,8 +319,11 @@ public final class AppModel {
     }
 
     /// Continue on iPhone, from the Mac's live state. See `Handover`.
-    public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> ContinueOutcome {
-        await handover.continueOnPhone(with: player, timeout: timeout)
+    /// `arrived` runs the moment the music starts here, before the rest of
+    /// the hand-over finishes.
+    public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                                arrived: (@MainActor () -> Void)? = nil) async -> ContinueOutcome {
+        await handover.continueOnPhone(with: player, timeout: timeout, arrived: arrived)
     }
 
     /// How many songs ahead in the Mac's queue this catalogue ID is: 0 for
@@ -331,8 +334,11 @@ public final class AppModel {
     }
 
     /// Continue on Mac, from the Mac's live state. See `Handover`.
-    public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10) async -> SendBackOutcome {
-        await handover.sendBackToMac(with: player, timeout: timeout)
+    /// `arrived` runs the moment the Mac is seen playing, before the rest of
+    /// the hand-over finishes.
+    public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                              arrived: (@MainActor () -> Void)? = nil) async -> SendBackOutcome {
+        await handover.sendBackToMac(with: player, timeout: timeout, arrived: arrived)
     }
 
     /// The handover steps, reading the Mac through this model's transport.

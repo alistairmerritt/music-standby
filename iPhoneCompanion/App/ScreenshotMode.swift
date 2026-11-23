@@ -116,16 +116,21 @@ final class DemoHandover {
     private(set) var autoDirection: HandoffDirection = .toPhone
 
     /// About as long as a real hand-over takes, then the music has moved.
-    func run(_ direction: HandoffDirection, model: AppModel) async -> (text: String, isFailure: Bool)? {
+    /// Like a real one, it says when the music moves, then takes a moment
+    /// more to finish.
+    func run(_ direction: HandoffDirection, model: AppModel,
+             arrived: @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
         try? await Task.sleep(for: .seconds(1.8))
+        arrived()
         switch direction {
         case .toPhone:
-            await model.send(.pause)
             phonePlaying = true
+            await model.send(.pause)
         case .toMac:
-            phonePlaying = false
             await model.send(.play)
+            phonePlaying = false
         }
+        try? await Task.sleep(for: .seconds(0.8))
         return nil
     }
 
