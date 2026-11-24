@@ -614,7 +614,7 @@ private final class ClientBox: @unchecked Sendable {
         case .connection(.disconnected): "disconnected"
         case .connection(.connecting): "connecting"
         case .connection(.connected(let name)): "connected:\(name)"
-        case .connection(.macOffline(let name)): "offline:\(name)"
+        case .connection(.macOffline(let name, _)): "offline:\(name)"
         case .connection(.reconnecting): "reconnecting"
         case .connection(.failed): "failed"
         case .playback(let message): "playback:\(message.revision)"

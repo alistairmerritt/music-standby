@@ -205,9 +205,23 @@ public enum ContinueOutcome: Equatable, Sendable {
     case resumedHere
     /// As `resumedHere`, but Apple Music here was already playing.
     case alreadyPlayingHere
+    /// The Mac wasn't connected (asleep, closed, or gone), so the Mac's last
+    /// song plays here from where it stopped, and the Mac wasn't asked to
+    /// pause (25 November 2026: a laptop in a bag on the drive to work).
+    case continuedWithoutMac(MacAway)
 }
 
 extension ContinueOutcome {
+    /// What to say when the song plays here without the Mac (25 November 2026).
+    public static func withoutMacMessage(_ away: MacAway, title: String?) -> String {
+        let song = title.map { "“\($0)”" } ?? "your Mac’s song"
+        return switch away {
+        case .asleep: "Your Mac is asleep, so \(song) is playing here from where it stopped."
+        case .quit: "Second Chair isn’t open on your Mac, so \(song) is playing here from where it last was."
+        case .lost: "Your Mac isn’t connected, so \(song) is playing here from where it last was."
+        }
+    }
+
     /// What to say when Apple Music here didn't start the Mac's song, given
     /// what it's playing now. "Couldn't start playback on your iPhone. Music
     /// is still playing on your Mac." read as if the phone were silent when

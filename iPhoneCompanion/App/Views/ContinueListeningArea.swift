@@ -227,6 +227,7 @@ struct ContinueListeningArea: View {
         // iPhone, and Continue on Mac is at hand. The Shortcuts action
         // still opens Music unless told not to.
         case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere: nil
+        case .continuedWithoutMac(let away): (ContinueOutcome.withoutMacMessage(away, title: model.attributes?.track?.title), false)
         }
     }
 

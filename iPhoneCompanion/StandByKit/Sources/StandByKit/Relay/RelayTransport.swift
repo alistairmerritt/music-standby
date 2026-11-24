@@ -213,7 +213,7 @@ public actor RelayTransport: PlaybackTransport {
     /// The relay is the authority: its session, or none, is the truth.
     private func apply(_ state: SessionState) {
         let name = state.mac.name
-        setConnection(state.macConnected ? .connected(macName: name) : .macOffline(macName: name))
+        setConnection(state.macConnected ? .connected(macName: name) : .macOffline(macName: name, away: state.macAway))
         guard let sessionID = state.sessionID, let playback = state.playback else {
             if hub.assignedSession != nil { hub.send(.sessionEnded(.playbackEnded)) }
             // Nothing to replay to a later subscriber without a session.

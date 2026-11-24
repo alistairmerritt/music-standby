@@ -359,9 +359,10 @@ public final class AppModel {
     /// `arrived` runs the moment the music starts here, before the rest of
     /// the hand-over finishes.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                                within: TimeInterval? = nil,
                                 from source: HandoverSource = .app,
                                 arrived: (@MainActor () -> Void)? = nil) async -> ContinueOutcome {
-        await handover.continueOnPhone(with: player, timeout: timeout, from: source, arrived: arrived)
+        await handover.continueOnPhone(with: player, timeout: timeout, within: within, from: source, arrived: arrived)
     }
 
     /// How many songs ahead in the Mac's queue this catalogue ID is: 0 for
@@ -382,7 +383,7 @@ public final class AppModel {
 
     /// The handover steps, reading the Mac through this model's transport.
     private var handover: Handover {
-        Handover(
+        var handover = Handover(
             latest: { [weak self] in self?.latestMessage },
             refresh: { [transport] in await transport.refreshState() },
             send: { [transport] in try await transport.send($0) },
@@ -391,6 +392,11 @@ public final class AppModel {
             sleep: sleep,
             memory: .defaults(defaults)
         )
+        handover.macAway = { [weak self] in
+            guard case .macOffline(_, let away) = self?.connection else { return nil }
+            return away ?? .lost
+        }
+        return handover
     }
 
     public func send(_ command: RemoteCommand) async {

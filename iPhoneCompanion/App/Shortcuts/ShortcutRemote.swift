@@ -39,6 +39,10 @@ struct ShortcutError: Error, CustomLocalizedStringResourceConvertible {
             message = "There’s nothing to control on your Mac yet. Play something in Music there first."
         case TransportError.macUnreachable:
             message = "Your Mac didn’t answer. Try again."
+        // Second Chair's server didn't answer: the phone's own connection, as in
+        // a car between masts. Not the Mac (25 November 2026).
+        case TransportError.timedOut, TransportError.network:
+            message = "Second Chair couldn’t reach its server, so it couldn’t ask your Mac. Check this iPhone is online and try again."
         case let error as LocalizedError:
             message = error.errorDescription ?? error.localizedDescription
         default:
