@@ -91,7 +91,7 @@ struct ConnectionCard: View {
     private var detail: String? {
         if isDemo { return "A simulated Mac" }
         return switch connection {
-        case .macOffline(_, away: .asleep): "It reconnects when your Mac wakes."
+        case .macOffline(_, away: .asleep): "Second Chair will reconnect when your Mac wakes."
         case .macOffline(_, away: .quit): "Open Second Chair on your Mac."
         case .macOffline: "Wake your Mac and check Second Chair is open on it."
         case .disconnected: "Check this iPhone is online."
