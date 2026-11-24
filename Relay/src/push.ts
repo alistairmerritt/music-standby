@@ -28,6 +28,127 @@ export interface PushSender {
   send(push: Push): Promise<PushResult>;
   sendAlert(push: AlertPush): Promise<PushResult>;
   sendBackground(push: BackgroundPush): Promise<PushResult>;
+  sendActivity(push: ActivityPush): Promise<PushResult>;
+}
+
+// MARK: Live Activity (experiment, 23 November 2026)
+//
+// A Live Activity can be started by a push while the app isn't running, and
+// iOS shows it at once. The Now Playing session can't: one started or updated
+// by push stays hidden until the open app asks for it. So when the Mac plays
+// after a break, the relay puts a small card with the Mac's song and its
+// controls on the Lock Screen instead of only reminding the person to open
+// the app. Apple: "Starting and updating Live Activities with ActivityKit
+// push notifications". Push type `liveactivity`, topic
+// `<bundle id>.push-type.liveactivity`, `start` to the push-to-start token,
+// `update` and `end` to the activity's own token.
+
+/** The type iOS decodes `attributes` into: the Swift struct's name. */
+export const ACTIVITY_ATTRIBUTES_TYPE = "MacPlaybackActivityAttributes";
+
+/**
+ * What the card shows; the Swift `MacPlaybackActivityAttributes.ContentState`.
+ * Times are plain numbers (Unix seconds): ActivityKit decodes a `Date` as
+ * seconds since 2001, which nothing here should depend on.
+ */
+export interface ActivityContent {
+  title: string;
+  artist: string;
+  album: string;
+  /** For the app's artwork cache, which the Now Playing extension fills; "" without. */
+  artworkID: string;
+  isPlaying: boolean;
+  /** Seconds into the song at `capturedAt`. */
+  elapsed: number;
+  /** Unix seconds. */
+  capturedAt: number;
+  duration: number;
+  canGoNext: boolean;
+}
+
+/** The card's fixed part; the Swift `MacPlaybackActivityAttributes`. */
+export interface ActivityAttributes {
+  /** The relay's id for this card, so the phone's token can be matched to it. */
+  activityID: string;
+  macName: string;
+}
+
+export type ActivityEvent = "start" | "update" | "end";
+
+export interface ActivityPush {
+  event: ActivityEvent;
+  token: string;
+  activityID: string;
+  /** 10 is delivered at once and counts against iOS's hourly budget; 5 doesn't. */
+  priority: 5 | 10;
+  payload: {
+    aps: {
+      event: ActivityEvent;
+      timestamp: number;
+      "content-state": ActivityContent;
+      "attributes-type"?: string;
+      attributes?: ActivityAttributes;
+      alert?: { title: string; body: string };
+      /** iOS 18: start, and hand the app a token for the updates. */
+      "input-push-token"?: 1;
+      /** Unix seconds: when the card counts as out of date. */
+      "stale-date"?: number;
+      /** Unix seconds: when an ended card leaves the Lock Screen. */
+      "dismissal-date"?: number;
+    };
+  };
+}
+
+/** The card goes out of date after this long without an update (paused). */
+export const ACTIVITY_STALE_AFTER_S = 30 * 60;
+
+/**
+ * Starts the card. Apple requires an alert on a push-started Live Activity, so
+ * it says what happened; no sound, like the reminder it replaces.
+ */
+export function makeActivityStart(token: string, attributes: ActivityAttributes, content: ActivityContent, now = Date.now()): ActivityPush {
+  const timestamp = Math.floor(now / 1000);
+  return {
+    event: "start",
+    token,
+    activityID: attributes.activityID,
+    priority: 10,
+    payload: {
+      aps: {
+        event: "start",
+        timestamp,
+        "content-state": content,
+        "attributes-type": ACTIVITY_ATTRIBUTES_TYPE,
+        attributes,
+        alert: { title: `Music playing on ${attributes.macName}`, body: "Play, pause and skip from your Lock Screen." },
+        "input-push-token": 1,
+        "stale-date": timestamp + ACTIVITY_STALE_AFTER_S,
+      },
+    },
+  };
+}
+
+export function makeActivityUpdate(token: string, activityID: string, content: ActivityContent, priority: 5 | 10, now = Date.now()): ActivityPush {
+  const timestamp = Math.floor(now / 1000);
+  return {
+    event: "update",
+    token,
+    activityID,
+    priority,
+    payload: { aps: { event: "update", timestamp, "content-state": content, "stale-date": timestamp + ACTIVITY_STALE_AFTER_S } },
+  };
+}
+
+/** Ends the card and takes it off the Lock Screen at once. */
+export function makeActivityEnd(token: string, activityID: string, content: ActivityContent, now = Date.now()): ActivityPush {
+  const timestamp = Math.floor(now / 1000);
+  return {
+    event: "end",
+    token,
+    activityID,
+    priority: 10,
+    payload: { aps: { event: "end", timestamp, "content-state": content, "dismissal-date": timestamp } },
+  };
 }
 
 /**
@@ -144,7 +265,7 @@ export function tokenIsDead(result: PushResult): boolean {
 
 /** Records pushes instead of sending them. */
 export class MockPushSender implements PushSender {
-  constructor(private readonly record: (push: Push | AlertPush | BackgroundPush) => Promise<void>) {}
+  constructor(private readonly record: (push: Push | AlertPush | BackgroundPush | ActivityPush) => Promise<void>) {}
   async send(push: Push): Promise<PushResult> {
     await this.record(push);
     return { status: 200 };
@@ -154,6 +275,10 @@ export class MockPushSender implements PushSender {
     return { status: 200 };
   }
   async sendBackground(push: BackgroundPush): Promise<PushResult> {
+    await this.record(push);
+    return { status: 200 };
+  }
+  async sendActivity(push: ActivityPush): Promise<PushResult> {
     await this.record(push);
     return { status: 200 };
   }
@@ -238,6 +363,22 @@ export class APNsPushSender implements PushSender {
 
   async sendBackground(push: BackgroundPush): Promise<PushResult> {
     return this.post(push.token, this.backgroundHeaders(await this.providerToken()), push.payload);
+  }
+
+  async sendActivity(push: ActivityPush): Promise<PushResult> {
+    return this.post(push.token, this.activityHeaders(push, await this.providerToken()), push.payload);
+  }
+
+  activityHeaders(push: ActivityPush, jwt: string): Record<string, string> {
+    return {
+      authorization: `bearer ${jwt}`,
+      "apns-push-type": "liveactivity",
+      "apns-topic": `${this.appTopic}.push-type.liveactivity`,
+      "apns-priority": String(push.priority),
+      // Like the reminder: a card that turns up minutes after the music started is noise.
+      "apns-expiration": String(Math.floor(Date.now() / 1000) + 2 * 60),
+      "content-type": "application/json",
+    };
   }
 
   /** Apple: a background push must have priority 5 and the app's own topic. */

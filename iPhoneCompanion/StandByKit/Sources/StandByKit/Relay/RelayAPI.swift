@@ -13,6 +13,12 @@ enum RelayPath {
     static let handBackStatus = "v1/hand-back/status"
     static let sessionToken = "v1/tokens/session"
     static func sessionToken(id: String) -> String { "v1/tokens/session/\(id.relayPathComponent)" }
+    /// The Live Activity card (experiment): its push-to-start token, and each card's update token.
+    static let activityStartToken = "v1/tokens/activity-start"
+    static let activityToken = "v1/tokens/activity"
+    static func activityToken(id: String) -> String { "v1/tokens/activity/\(id.relayPathComponent)" }
+    /// Player Display set to Live Activity: the card now (24 November 2026).
+    static let activityStart = "v1/activity/start"
     static let session = "v1/session"
     static let endSession = "v1/session/end"
     static let pairing = "v1/pairing"

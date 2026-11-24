@@ -71,6 +71,7 @@ enum AppEnvironment {
         )
         let phoneMusic = SystemMusicPhonePlayer()
         model.phonePlaysMusic = { phoneMusic.nowPlaying()?.isPlaying == true }
+        model.usesNowPlaying = { LiveActivityController.display.usesNowPlaying }
         return model
     }
 
@@ -122,7 +123,7 @@ enum AppEnvironment {
         try? await pairedClient()?.registerDeviceToken(token.hexString)
     }
 
-    private static func pairedClient() -> RelayClient? {
+    static func pairedClient() -> RelayClient? {
         guard relayConfiguration != nil, let credential = (try? KeychainCredentialStore().load()).flatMap({ $0 }) else { return nil }
         return RelayClient(credential: credential, http: URLSessionHTTP(reuseConnections: false))
     }

@@ -27,10 +27,15 @@ import {
   MockPushSender,
   REMINDER_ID,
   makeHandBackAlert,
+  makeActivityEnd,
+  makeActivityStart,
+  makeActivityUpdate,
   makeHandBackWake,
   makePush,
   makeReminder,
   tokenIsDead,
+  type ActivityContent,
+  type ActivityPush,
   type AlertPush,
   type APNsEnvironment,
   type BackgroundPush,
@@ -86,6 +91,10 @@ interface Session {
   macAway?: boolean;
   /** The artwork the phone was last pushed, to know when an update brings new artwork. */
   pushedArtworkID?: string;
+  /** During a pause: when the phone was last pushed the paused state, by an update or the keep-alive. */
+  keptAliveAt?: number;
+  /** The phone paused the Mac to play the song itself (Continue on iPhone): no keep-alive until the Mac plays again. */
+  musicOnPhone?: boolean;
 }
 
 interface PushTokens {
@@ -95,6 +104,22 @@ interface PushTokens {
   alert?: string;
   /** The same kind of token, whatever the reminder setting: for Continue from iPhone (API-v1 §14). */
   device?: string;
+  /** Live Activity push-to-start token: present while the phone wants the card (experiment). */
+  activityStart?: string;
+  /** The card now on the phone, with the token iOS gave it for updates. */
+  activity?: { activityID: string; token: string };
+}
+
+/** The Live Activity the relay last started (experiment, 23 Nov 2026). */
+interface ActivityRecord {
+  activityID: string;
+  startedAt: number;
+  /** What the card was last told, so only visible changes are pushed. */
+  shown: { trackID?: string; isPlaying: boolean; artworkID?: string };
+  /** The content the card should show now, for the token's catch-up and for `end`. */
+  content: ActivityContent;
+  /** The content last delivered to the phone, as JSON. */
+  delivered: string;
 }
 
 /** A Continue from iPhone request the relay is working on (API-v1 §14). */
@@ -117,10 +142,12 @@ interface StoredArtwork {
 
 interface RecordedPush {
   at: string;
-  event: PushEvent | "reminder" | "hand-back" | "hand-back-alert";
+  event: PushEvent | "reminder" | "hand-back" | "hand-back-alert" | "activity-start" | "activity-update" | "activity-end";
   sessionID: string;
   status: number;
-  payload: Push["payload"] | AlertPush["payload"] | BackgroundPush["payload"];
+  payload: Push["payload"] | AlertPush["payload"] | BackgroundPush["payload"] | ActivityPush["payload"];
+  /** Live Activity pushes: the APNs priority. */
+  priority?: number;
   collapseID?: string;
 }
 
@@ -186,6 +213,19 @@ export class Pairing extends DurableObject<Env> {
    */
   private get remindAfter(): number {
     return Number(this.env.REMIND_AFTER_MS ?? 8 * 60_000);
+  }
+  /** 0, the default, turns the paused keep-alive off; see `keepAlive`. */
+  private get keepAliveEvery(): number {
+    return Number(this.env.PAUSED_KEEP_ALIVE_MS ?? 0);
+  }
+  private get keepAliveFor(): number {
+    return Number(this.env.PAUSED_KEEP_ALIVE_FOR_MS ?? 60 * 60_000);
+  }
+  /** When the next keep-alive is due, or undefined when none is. */
+  private keepAliveDue(session: Session): number | undefined {
+    if (this.keepAliveEvery <= 0 || session.pausedSince === undefined || session.musicOnPhone) return undefined;
+    const due = (session.keptAliveAt ?? session.pausedSince) + this.keepAliveEvery;
+    return due < session.pausedSince + this.keepAliveFor ? due : undefined;
   }
   /** How long a background hand-back push gets before the notification. */
   private get handBackNotifyAfter(): number {
@@ -286,11 +326,17 @@ export class Pairing extends DurableObject<Env> {
     if (method === "PUT" && path === "/v1/tokens/alert") return this.putAlertToken(request);
     if (method === "DELETE" && path === "/v1/tokens/alert") return this.deleteAlertToken();
     if (method === "PUT" && path === "/v1/tokens/device") return this.putDeviceToken(request);
+    if (method === "PUT" && path === "/v1/tokens/activity-start") return this.putActivityStartToken(request);
+    if (method === "DELETE" && path === "/v1/tokens/activity-start") return this.deleteActivityStartToken();
+    if (method === "PUT" && path === "/v1/tokens/activity") return this.putActivityToken(request);
+    const deleteActivity = /^\/v1\/tokens\/activity\/([^/]+)$/.exec(path);
+    if (deleteActivity && method === "DELETE") return this.deleteActivityToken(decodeURIComponent(deleteActivity[1]));
     if (method === "POST" && path === "/v1/hand-back/status") return this.handBackStatus(request);
     if (method === "PUT" && path === "/v1/tokens/session") return this.putSessionToken(request, record);
     const deleteToken = /^\/v1\/tokens\/session\/([^/]+)$/.exec(path);
     if (deleteToken && method === "DELETE") return this.deleteSessionToken(decodeURIComponent(deleteToken[1]));
     if (method === "POST" && path === "/v1/session/end") return this.phoneEndsSession(request);
+    if (method === "POST" && path === "/v1/activity/start") return this.phoneAsksForActivity(request);
     throw new HttpError(404, "not_found");
   }
 
@@ -490,12 +536,17 @@ export class Pairing extends DurableObject<Env> {
     const restarted = state === "playing" && session.pausedSince !== undefined && Date.now() - session.pausedSince >= this.remindAfter;
     session.listeningSessionID = message.listeningSessionID ?? session.listeningSessionID;
     session.pausedSince = state === "playing" ? undefined : (session.pausedSince ?? Date.now());
+    if (state === "playing") {
+      delete session.keptAliveAt;
+      delete session.musicOnPhone;
+    }
     if (message.track) session.lastTrack = message.track;
     const wasAway = session.macAway === true;
     delete session.macAway;
     await this.ctx.storage.put("session", session);
     if (wasAway || message.revision > session.pushedRevision) await this.pushUpdate(session, message);
-    if (restarted) await this.remind();
+    if (restarted) await this.musicStarted(session, message);
+    else await this.updateActivity(session, message);
     await this.scheduleAlarm();
   }
 
@@ -547,7 +598,53 @@ export class Pairing extends DurableObject<Env> {
     await this.pushUpdate(session, paused);
   }
 
-  private async startSession(message: PlaybackMessage): Promise<void> {
+  /**
+   * The phone asks for the card now (Player Display set to Live Activity, and
+   * the app opened or switched with none showing). `fresh` also starts a new
+   * Now Playing session by push: the app has just ended its own so it stops
+   * showing, and a pushed one stays hidden while still waking the Now Playing
+   * extension, which caches the artwork the card draws.
+   */
+  private async phoneAsksForActivity(request: Request): Promise<Response> {
+    const body = await readJSON<{ fresh?: boolean; local?: boolean }>(request);
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    if (!playback?.track) throw new HttpError(409, "nothing_playing");
+    if (!body?.local && !(await this.tokens()).activityStart) throw new HttpError(409, "no_activity_token");
+    // No session: the Mac has been stopped or paused too long, so there's nothing to show.
+    let session = await this.ctx.storage.get<Session>("session");
+    if (!session) throw new HttpError(409, "nothing_playing");
+    // A new session ID: the same one, push-started again, came back on screen
+    // beside the card (iOS remembered it as the player it showed; 24 November
+    // 2026). The app waits for the new ID before it shows Now Playing again.
+    if (body?.fresh) {
+      await this.endSession("phone_display_mode");
+      session = await this.startSession(playback, false);
+    }
+    if (body?.local) return json(200, await this.grantLocalActivity(session, playback));
+    if (!(await this.startActivity(session, playback))) throw new HttpError(502, "activity_refused");
+    return empty();
+  }
+
+  /**
+   * `local`: the app is open and starts the card itself, which costs none of
+   * iOS's hourly ActivityKit push budget. On 24 November 2026, after about 17
+   * pushed starts in an hour, iOS stopped showing new ones though APNs took
+   * every push. The relay records the card as its own, then the app sends its
+   * token (PUT /v1/tokens/activity) and the relay updates it as usual.
+   */
+  private async grantLocalActivity(session: Session, playback: PlaybackMessage) {
+    const record = (await this.record())!;
+    await this.endActivity("replaced");
+    const content = this.activityContent(session, playback);
+    const activityID = crypto.randomUUID();
+    const activity: ActivityRecord = { activityID, startedAt: Date.now(), shown: this.shownOf(content), content, delivered: JSON.stringify(content) };
+    await this.ctx.storage.put("activity", activity);
+    console.log(`activity ${short(activityID)}: started by the phone`);
+    return { attributes: { activityID, macName: record.mac.name }, content };
+  }
+
+  /** `announce`: try the card, or the reminder, as for music starting. */
+  private async startSession(message: PlaybackMessage, announce = true): Promise<Session> {
     const session: Session = {
       sessionID: crypto.randomUUID(),
       listeningSessionID: message.listeningSessionID,
@@ -564,8 +661,9 @@ export class Pairing extends DurableObject<Env> {
       console.log(`session ${short(session.sessionID)}: no push-to-start token; the phone must foreground to see it`);
     }
     // A session started by push stays hidden until the app is opened.
-    await this.remind();
+    if (announce) await this.musicStarted(session, message);
     await this.scheduleAlarm();
+    return session;
   }
 
   private async pushUpdate(session: Session, message: PlaybackMessage): Promise<void> {
@@ -576,6 +674,7 @@ export class Pairing extends DurableObject<Env> {
     const ok = await this.push("update", token, attributes);
     if (ok) {
       session.pushedRevision = message.revision;
+      if (session.pausedSince !== undefined) session.keptAliveAt = Date.now();
       const artwork = attributes.track?.artworkID || undefined;
       const newArtwork = artwork !== undefined && artwork !== session.pushedArtworkID;
       session.pushedArtworkID = artwork;
@@ -604,6 +703,7 @@ export class Pairing extends DurableObject<Env> {
       await this.ctx.storage.put("tokens", tokens);
       await this.push("end", token, { id: session.sessionID } as NowPlayingAttributes);
     }
+    await this.endActivity(`session ${reason}`);
     console.log(`session ${short(session.sessionID)}: ended (${reason})`);
     await this.scheduleAlarm();
   }
@@ -688,6 +788,14 @@ export class Pairing extends DurableObject<Env> {
     const mac = this.macSocket();
     if (!mac) throw new HttpError(504, "mac_unreachable", "the Mac is not connected");
 
+    // Apple Music on the phone takes over the song: the keep-alive stays out of
+    // its way, so Second Chair isn't pushed in front of it (23 November 2026).
+    if (command.reason === "continue_on_phone" && session && !session.musicOnPhone) {
+      session.musicOnPhone = true;
+      await this.ctx.storage.put("session", session);
+      await this.scheduleAlarm();
+    }
+
     let resolve!: (ack: CommandAck) => void;
     const promise = new Promise<CommandAck>((r) => (resolve = r));
     this.waiters.set(id, { promise, resolve });
@@ -722,6 +830,165 @@ export class Pairing extends DurableObject<Env> {
   private async storedAck(id: string): Promise<CommandAck | undefined> {
     const acks = (await this.ctx.storage.get<[string, CommandAck][]>("acks")) ?? [];
     return acks.find(([k]) => k === id)?.[1];
+  }
+
+  // MARK: Live Activity (experiment, 23 November 2026)
+
+  /**
+   * Music started after a break, or for the first time: iOS has probably
+   * given the Lock Screen to Apple Music, and only the open app gets the
+   * player back. A phone that asked for it gets the Live Activity card, which
+   * iOS shows without the app; otherwise (or if the start is refused) the
+   * reminder, as before.
+   */
+  private async musicStarted(session: Session, message: PlaybackMessage): Promise<void> {
+    if (await this.startActivity(session, message)) return;
+    await this.remind();
+  }
+
+  /** A fresh card each time, even if one is still up: a card swiped away can't be told from one showing. */
+  private async startActivity(session: Session, message: PlaybackMessage): Promise<boolean> {
+    const tokens = await this.tokens();
+    const record = await this.record();
+    if (!tokens.activityStart || !record) return false;
+    await this.endActivity("replaced");
+    const content = this.activityContent(session, message);
+    const activityID = crypto.randomUUID();
+    const push = makeActivityStart(tokens.activityStart, { activityID, macName: record.mac.name }, content);
+    const result = await this.pushSender().sendActivity(push);
+    console.log(`activity ${short(activityID)}: start push → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
+    if (tokenIsDead(result)) {
+      const now = await this.tokens();
+      delete now.activityStart;
+      await this.ctx.storage.put("tokens", now);
+    }
+    if (result.status < 200 || result.status >= 300) return false;
+    const activity: ActivityRecord = { activityID, startedAt: Date.now(), shown: this.shownOf(content), content, delivered: JSON.stringify(content) };
+    await this.ctx.storage.put("activity", activity);
+    return true;
+  }
+
+  /** Tells the card about a change it would show: another song, play or pause, or the artwork. */
+  private async updateActivity(session: Session, message: PlaybackMessage): Promise<void> {
+    const activity = await this.ctx.storage.get<ActivityRecord>("activity");
+    if (!activity) return;
+    const content = this.activityContent(session, message);
+    const shown = this.shownOf(content);
+    const visible = shown.trackID !== activity.shown.trackID || shown.isPlaying !== activity.shown.isPlaying;
+    if (!visible && shown.artworkID === activity.shown.artworkID) return;
+    activity.content = content;
+    activity.shown = shown;
+    await this.ctx.storage.put("activity", activity);
+    // Artwork alone isn't worth iOS's update budget; the rest is what the person is looking at.
+    await this.sendActivityUpdate(activity, visible ? 10 : 5);
+  }
+
+  /** The phone has just downloaded this artwork, so the card can now draw it. */
+  private async refreshActivityArtwork(artworkID: string): Promise<void> {
+    const activity = await this.ctx.storage.get<ActivityRecord>("activity");
+    if (activity?.content.artworkID !== artworkID) return;
+    await this.sendActivityUpdate(activity, 5);
+  }
+
+  private async sendActivityUpdate(activity: ActivityRecord, priority: 5 | 10): Promise<void> {
+    const tokens = await this.tokens();
+    if (tokens.activity?.activityID !== activity.activityID) return; // sent when the phone registers its token
+    const result = await this.pushSender().sendActivity(makeActivityUpdate(tokens.activity.token, activity.activityID, activity.content, priority));
+    console.log(`activity ${short(activity.activityID)}: update push (${priority}) → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
+    if (tokenIsDead(result)) return this.forgetActivity(activity.activityID);
+    if (result.status >= 200 && result.status < 300) {
+      activity.delivered = JSON.stringify(activity.content);
+      await this.ctx.storage.put("activity", activity);
+    }
+  }
+
+  /** Ends the card, if the relay has its token, and forgets it. */
+  private async endActivity(reason: string): Promise<void> {
+    const activity = await this.ctx.storage.get<ActivityRecord>("activity");
+    if (!activity) return;
+    const tokens = await this.tokens();
+    if (tokens.activity?.activityID === activity.activityID) {
+      const result = await this.pushSender().sendActivity(makeActivityEnd(tokens.activity.token, activity.activityID, activity.content));
+      console.log(`activity ${short(activity.activityID)}: end push (${reason}) → ${result.status}`);
+    }
+    await this.forgetActivity(activity.activityID);
+  }
+
+  private async forgetActivity(activityID: string): Promise<void> {
+    const activity = await this.ctx.storage.get<ActivityRecord>("activity");
+    if (activity?.activityID === activityID) await this.ctx.storage.delete("activity");
+    const tokens = await this.tokens();
+    if (tokens.activity?.activityID === activityID) {
+      delete tokens.activity;
+      await this.ctx.storage.put("tokens", tokens);
+    }
+  }
+
+  private activityContent(session: Session, message: PlaybackMessage): ActivityContent {
+    const track = message.track ?? session.lastTrack;
+    return {
+      title: track?.title ?? "",
+      artist: track?.artist ?? "",
+      album: track?.album ?? "",
+      artworkID: track?.artworkID && ARTWORK_ID.test(track.artworkID) ? track.artworkID : "",
+      isPlaying: stateOf(message) === "playing",
+      elapsed: message.elapsedTime,
+      capturedAt: Date.parse(message.capturedAt) / 1000 || Date.now() / 1000,
+      duration: track?.duration ?? 0,
+      canGoNext: message.canGoNext,
+    };
+  }
+
+  private shownOf(content: ActivityContent): ActivityRecord["shown"] {
+    return { trackID: content.title ? `${content.title}\u0000${content.artist}` : undefined, isPlaying: content.isPlaying, artworkID: content.artworkID || undefined };
+  }
+
+  private async putActivityStartToken(request: Request): Promise<Response> {
+    const body = await readJSON<{ token?: string }>(request);
+    if (!body?.token || !HEX_TOKEN.test(body.token)) throw new HttpError(400, "invalid_request", "token must be hex");
+    const tokens = await this.tokens();
+    tokens.activityStart = body.token.toLowerCase();
+    await this.ctx.storage.put("tokens", tokens);
+    return empty();
+  }
+
+  /** The phone turned the card off. */
+  private async deleteActivityStartToken(): Promise<Response> {
+    const tokens = await this.tokens();
+    if (tokens.activityStart) {
+      delete tokens.activityStart;
+      await this.ctx.storage.put("tokens", tokens);
+    }
+    return empty();
+  }
+
+  /** The card the relay started, with its update token from iOS. Catches up on what changed since the start. */
+  private async putActivityToken(request: Request): Promise<Response> {
+    const body = await readJSON<{ activityID?: string; token?: string }>(request);
+    if (!body?.activityID || !body.token || !HEX_TOKEN.test(body.token)) {
+      throw new HttpError(400, "invalid_request", "activityID and a hex token are required");
+    }
+    const activity = await this.ctx.storage.get<ActivityRecord>("activity");
+    if (!activity || activity.activityID !== body.activityID) throw new HttpError(409, "activity_mismatch");
+    const tokens = await this.tokens();
+    tokens.activity = { activityID: activity.activityID, token: body.token.toLowerCase() };
+    await this.ctx.storage.put("tokens", tokens);
+    const session = await this.ctx.storage.get<Session>("session");
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    if (session && playback) {
+      activity.content = this.activityContent(session, playback);
+      activity.shown = this.shownOf(activity.content);
+      await this.ctx.storage.put("activity", activity);
+    }
+    // Anything that changed between the start push and now, the card hasn't seen.
+    if (activity.delivered !== JSON.stringify(activity.content)) await this.sendActivityUpdate(activity, 10);
+    return empty();
+  }
+
+  /** The phone ended or lost the card (opened the app, swiped it away, or iOS ended it). */
+  private async deleteActivityToken(activityID: string): Promise<Response> {
+    await this.forgetActivity(activityID);
+    return empty();
   }
 
   // MARK: Push tokens
@@ -844,7 +1111,9 @@ export class Pairing extends DurableObject<Env> {
       const pushes = (await this.ctx.storage.get<RecordedPush[]>("pushes")) ?? [];
       const at = iso(Date.now());
       pushes.push(
-        "collapseID" in push
+        "activityID" in push
+          ? { at, event: `activity-${push.event}`, sessionID: push.activityID, status: 200, payload: push.payload, priority: push.priority }
+          : "collapseID" in push
           ? { at, event: push.collapseID === REMINDER_ID ? "reminder" : "hand-back-alert", sessionID: "", status: 200, payload: push.payload, collapseID: push.collapseID }
           : "event" in push
             ? { at, event: push.event, sessionID: push.sessionID, status: 200, payload: push.payload }
@@ -937,6 +1206,7 @@ export class Pairing extends DurableObject<Env> {
     if (this.downloadFollowUp === artworkID) return;
     this.downloadFollowUp = artworkID;
     await new Promise((resolve) => setTimeout(resolve, Number(this.env.ARTWORK_DOWNLOAD_FOLLOW_UP_MS ?? ARTWORK_DOWNLOAD_FOLLOW_UP_MS)));
+    await this.refreshActivityArtwork(artworkID);
     const session = await this.ctx.storage.get<Session>("session");
     const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
     const tokens = await this.tokens();
@@ -1046,6 +1316,26 @@ export class Pairing extends DurableObject<Env> {
 
   // MARK: Timers
 
+  /**
+   * Pushes the paused state again, unchanged, during a pause (experiment, 23
+   * November 2026). iOS gives the Lock Screen and StandBy to Apple Music about
+   * 8 minutes into a pause, and only the app on screen wins them back; this
+   * tests whether a session that keeps hearing from the relay is kept. Runs
+   * only while a session exists, so a player swiped away or stopped from the
+   * app (both end the session) gets nothing more.
+   */
+  private async keepAlive(session: Session): Promise<void> {
+    session.keptAliveAt = Date.now();
+    await this.ctx.storage.put("session", session);
+    const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    if (!playback || stateOf(playback) === "playing") return;
+    const tokens = await this.tokens();
+    const token = tokens.session?.sessionID === session.sessionID ? tokens.session.token : undefined;
+    if (!token) return;
+    console.log(`session ${short(session.sessionID)}: keep-alive, paused ${Math.round((Date.now() - session.pausedSince!) / 60_000)} min`);
+    await this.push("update", token, await this.attributes(session, playback));
+  }
+
   async alarm(): Promise<void> {
     const now = Date.now();
     const abandonedAt = await this.abandonedAt();
@@ -1063,6 +1353,9 @@ export class Pairing extends DurableObject<Env> {
     } else if (this.pausedTimeout > 0 && session?.pausedSince && now - session.pausedSince >= this.pausedTimeout) {
       await this.endSession("paused_too_long");
     }
+    const current = await this.ctx.storage.get<Session>("session");
+    const due = current ? this.keepAliveDue(current) : undefined;
+    if (current && due !== undefined && now >= due) await this.keepAlive(current);
     const claims = await this.claims();
     let changed = false;
     for (const [id, claim] of Object.entries(claims)) {
@@ -1103,6 +1396,8 @@ export class Pairing extends DurableObject<Env> {
     const disconnectedAt = await this.ctx.storage.get<number>("macDisconnectedAt");
     if (session && !session.macAway && disconnectedAt) deadlines.push(disconnectedAt + this.disconnectGrace);
     if (this.pausedTimeout > 0 && session?.pausedSince) deadlines.push(session.pausedSince + this.pausedTimeout);
+    const keepAliveDue = session ? this.keepAliveDue(session) : undefined;
+    if (keepAliveDue !== undefined) deadlines.push(keepAliveDue);
     for (const claim of Object.values(await this.claims())) deadlines.push(claim.expiresAt);
     const handBack = await this.ctx.storage.get<HandBack>("handBack");
     if (handBack) deadlines.push(handBack.answered || handBack.notified ? handBack.expiresAt : handBack.notifyAt);

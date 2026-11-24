@@ -70,6 +70,11 @@ Three kinds, all opaque bearer strings. Clients never parse them.
 | `POST /v1/session/end` | phone | `SessionEndRequest` → `204` | Ends the session now |
 | `PUT /v1/tokens/device` | phone | `DeviceTokenRegistration` → `204` | §14. The app's APNs device token |
 | `POST /v1/hand-back/status` | phone | `HandBackStatusReport` → `204` | §14 |
+| `PUT /v1/tokens/activity-start` | phone | `{ "token": "<hex>" }` → `204` | §15 (experiment), the card on |
+| `DELETE /v1/tokens/activity-start` | phone | — → `204` | §15, the card off |
+| `PUT /v1/tokens/activity` | phone | `{ "activityID": "…", "token": "<hex>" }` → `204`, or `409 activity_mismatch` | §15 |
+| `DELETE /v1/tokens/activity/{activityID}` | phone | — → `204` | §15 |
+| `POST /v1/activity/start` | phone | `{ "fresh": bool?, "local": bool? }` → `204`; with `local`, `200 { attributes, content }`; or `409 nothing_playing`, `409 no_activity_token`, `502 activity_refused` | §15, the card now |
 
 ---
 
@@ -430,3 +435,27 @@ phone → relay  POST /v1/hand-back/status done       relay → Mac  hand-back-s
   relay's own are `asked`, `notified` and `unreachable`. A request is forgotten 2 minutes
   after it was made; a status for any other request id is accepted and dropped.
 - **Only one at a time.** A new request replaces the one before.
+
+## 15. The Live Activity card (experiment, 23 November 2026)
+
+Branch `experiment/live-activity`. The reasoning is in the project's `Records/LIVE-ACTIVITIES-FEASIBILITY.md`.
+
+**Why.** iOS shows a push-started Live Activity at once, without the app. A push-started or push-updated Now Playing session stays hidden until the open app asks for it (§9), and iOS gives the Lock Screen to Apple Music about 8 minutes into a pause. So when music starts after a break, the relay starts a small card with the Mac's song, play/pause and next.
+
+**When.** Where the reminder was sent (§9): the first state of a new session, and a playing state after `REMIND_AFTER_MS` (8 minutes) paused. If the phone has registered a push-to-start token, the relay ends any card it started before, then starts a new one, because a card the person swiped away can't be told apart from one that's showing. Without that token, or if the start isn't accepted, the reminder goes out as before.
+
+**Pushes.** These use `apns-push-type: liveactivity` and `apns-topic: <bundle id>.push-type.liveactivity`, with `apns-expiration` set 2 minutes ahead.
+
+| Event | To | Priority | Body (`aps`) |
+|---|---|---|---|
+| `start` | push-to-start token | 10 | `content-state`, `attributes-type: "MacPlaybackActivityAttributes"`, `attributes: { activityID, macName }`, `alert` (required by Apple; no sound), `input-push-token: 1`, `stale-date` (now + 30 min) |
+| `update` | the card's token | 10 for a new song or play/pause, 5 for artwork alone | `content-state`, `stale-date` |
+| `end` | the card's token | 10 | `content-state`, `dismissal-date: now` |
+
+`content-state` is `{ title, artist, album, artworkID, isPlaying, elapsed, capturedAt, duration, canGoNext }`. `capturedAt` is in Unix seconds. Times are plain numbers because ActivityKit decodes a `Date` as seconds since 2001.
+
+**The card's token.** iOS starts the card, then wakes the app, which sends the card's update token with the relay's `activityID`. If anything changed between the start push and the token arriving, the relay sends an update straight away. Seeks and volume changes aren't sent. After the phone downloads a new song's artwork (§8), the relay sends a priority-5 update so the card can draw it. The phone deletes the token when the card ends: when opening the app brings the player back, when the person swipes the card away, or when iOS ends it. A dead token is dropped.
+
+**The card on request (24 November 2026).** With Player Display set to Live Activity, the app asks for the card when it opens, or when that mode is chosen, and none is showing: `POST /v1/activity/start`. The relay starts it as above, without the reminder. With `fresh: true` (switching to Live Activity), the relay first ends the session, which ends the Now Playing player, then push-starts a new one **with a new ID**. (The same ID, push-started again, came back on screen beside the card: iOS remembered it as the player it showed.) Switching back, the app waits until it has the new ID before it asks for Now Playing; otherwise it would start a player under the old ID that nothing updates. A pushed session stays hidden (§9), so only the card shows, but the new session's pushes still wake the Now Playing extension, which caches the artwork the card draws. **`local: true` (the app is open).** The relay pushes no card. It ends any card it had, records a new one, and answers `200 { "attributes": { activityID, macName }, "content": <content-state> }`; the app starts the card itself with those, then sends its token (`PUT /v1/tokens/activity`), and the relay updates it as usual. An app-started card costs none of iOS's hourly ActivityKit push budget: on 24 November 2026, after about 17 pushed starts in an hour, iOS stopped showing new ones although APNs accepted every push. No push-to-start token is needed. A relay without `local` ignores it and pushes the card, answering `204`.
+
+It refuses with `409 nothing_playing` when there's no session (nothing played lately), and `409 no_activity_token` before the phone has sent its push-to-start token.

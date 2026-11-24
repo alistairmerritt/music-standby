@@ -262,13 +262,17 @@ private struct ShowOnLockScreenButton: View {
             }
             .disabled(!sessionIsActive)
         } label: {
-            // "Refresh" once the app has a session: it may be showing already,
+            // "Restore" once the app has a session: it may be showing already,
             // and asking again is how a hidden player comes back.
-            Label(sessionIsActive ? "Refresh Lock Screen" : "Show on Lock Screen",
+            Label(sessionIsActive ? "Restore Now Playing" : "Show on Lock Screen",
                   systemImage: sessionIsActive ? "arrow.clockwise" : "lock.iphone")
                 .frame(maxWidth: .infinity)
         } primaryAction: {
-            Task { await model.activateNowPlaying() }
+            Task {
+                await model.activateNowPlaying()
+                // Player Display set to Live Activity: the card instead.
+                await LiveActivityController.shared.showCard(fresh: true)
+            }
         }
         .buttonStyle(.bordered)
         .controlSize(.large)

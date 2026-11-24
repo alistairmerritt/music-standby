@@ -148,6 +148,8 @@ public final class AppModel {
         case notShowing
         /// Showing is on, but there's no song or session to show yet.
         case nothingToShow
+        /// Player Display is Live Activity: Now Playing isn't asked for.
+        case liveActivity
     }
 
     @discardableResult
@@ -165,6 +167,7 @@ public final class AppModel {
         // open (17 November 2026). StandBy already preferred the phone's.
         let deferToPhone = phonePlaysMusic() && attributes?.isPlaying != true
         guard isNowPlayingEnabled else { return .notShowing }
+        guard usesNowPlaying() else { return .liveActivity }
         if shouldShowSession, let attributes {
             await activate(with: attributes, requestingPrimary: !deferToPhone)
         } else if sessionController.isActive, !deferToPhone {
@@ -179,6 +182,18 @@ public final class AppModel {
     /// Chair then leaves the system player to the phone's music on opening
     /// while the Mac is paused (17 November 2026).
     @ObservationIgnored public var phonePlaysMusic: @MainActor () -> Bool = { false }
+
+    /// Whether Player Display uses Now Playing. The app sets it; with Live
+    /// Activity chosen, nothing here starts the Mac's player or asks iOS to
+    /// show it (24 November 2026).
+    @ObservationIgnored public var usesNowPlaying: @MainActor () -> Bool = { true }
+
+    /// Player Display was set to Live Activity: ends this app's Now Playing
+    /// session so the player goes. Showing stays on, for the Live Activity.
+    public func endNowPlayingForLiveActivity() async {
+        if !sessionController.isActive { await sessionController.adoptExisting() }
+        await endSession(.playerDisplay)
+    }
 
     /// Time in the background is not a lost connection. Stop reading the Mac
     /// and drop any countdown; the next foreground reads afresh and reconciles.
@@ -273,6 +288,8 @@ public final class AppModel {
     /// before the Mac's state has arrived: the next state then activates it.
     public func activateNowPlaying() async {
         setNowPlayingEnabled(true)
+        // Live Activity: showing on is all; the app asks the relay for the card.
+        guard usesNowPlaying() else { return }
         guard let attributes, attributes.track != nil else { return }
         await sessionController.activate(with: attributes)
         if let error = sessionController.lastError {
@@ -412,6 +429,13 @@ public final class AppModel {
                     await endSession(.replaced)
                 }
                 assignedSessionID = id
+                // The relay's new session, at once: otherwise the attributes kept the
+                // old ID until the Mac's next change, and Player Display, switching
+                // back from Live Activity, waited for it in vain (24 November 2026).
+                if var current = attributes, current.id != id {
+                    current.id = id
+                    attributes = current
+                }
             }
         case .sessionEnded(let reason):
             await endSession(reason)
@@ -476,7 +500,7 @@ public final class AppModel {
                 artwork = nil
             }
         }
-        if isNowPlayingEnabled, !sessionController.isActive, updated.track != nil {
+        if isNowPlayingEnabled, usesNowPlaying(), !sessionController.isActive, updated.track != nil {
             // Includes a previous activation that failed: every update retries it.
             await activate(with: updated)
         } else {

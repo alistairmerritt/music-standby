@@ -183,6 +183,46 @@ public struct RelayClient: CommandSender, SessionReading, Sendable {
         _ = try await perform(try makeRequest(RelayPath.sessionToken(id: sessionID), method: "DELETE"))
     }
 
+    // MARK: Live Activity card (experiment, 23 November 2026)
+
+    /// Lets the relay start the card when the Mac plays after a break.
+    public func registerActivityStartToken(_ hex: String) async throws {
+        var request = try makeRequest(RelayPath.activityStartToken, method: "PUT")
+        try attach(ActivityTokenBody(token: hex), to: &request)
+        _ = try await perform(request)
+    }
+
+    /// Turns the card off: the relay sends the reminder instead.
+    public func removeActivityStartToken() async throws {
+        _ = try await perform(try makeRequest(RelayPath.activityStartToken, method: "DELETE"))
+    }
+
+    /// The token iOS gave a card the relay started, for its updates.
+    public func registerActivityToken(_ hex: String, activityID: String) async throws {
+        var request = try makeRequest(RelayPath.activityToken, method: "PUT")
+        try attach(ActivityTokenBody(activityID: activityID, token: hex), to: &request)
+        _ = try await perform(request)
+    }
+
+    /// The card has gone: ended by the app, swiped away, or ended by iOS.
+    public func removeActivityToken(activityID: String) async throws {
+        _ = try await perform(try makeRequest(RelayPath.activityToken(id: activityID), method: "DELETE"))
+    }
+
+    /// Asks the relay to start the card now, for Player Display set to Live
+    /// Activity. `fresh` also has it end the Now Playing session and push-start
+    /// a hidden one, after the app has ended its own (API-v1 §15).
+    ///
+    /// `local`: the app is open and starts the card itself (no push budget).
+    /// The answer is then the card's attributes and content as JSON, for the
+    /// app to decode; empty when the relay pushed it instead (an older relay).
+    @discardableResult
+    public func requestActivity(fresh: Bool, local: Bool = false) async throws -> Data {
+        var request = try makeRequest(RelayPath.activityStart, method: "POST")
+        try attach(ActivityRequestBody(fresh: fresh, local: local), to: &request)
+        return try await perform(request).0
+    }
+
     /// Turns reminders on: the app's ordinary push token, for "Music playing" alerts.
     public func registerAlertToken(_ hex: String) async throws {
         var request = try makeRequest(RelayPath.alertToken, method: "PUT")
@@ -358,4 +398,15 @@ extension RelayClient: ArtworkFetching {
 
 private struct AlertTokenRegistration: Encodable {
     let token: String
+}
+
+/// The card's token bodies (experiment): small enough not to need the shared protocol yet.
+private struct ActivityRequestBody: Encodable {
+    var fresh: Bool
+    var local: Bool
+}
+
+private struct ActivityTokenBody: Encodable {
+    var activityID: String?
+    var token: String
 }

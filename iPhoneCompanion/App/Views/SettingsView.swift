@@ -17,6 +17,9 @@ struct SettingsView: View {
     /// Off unless turned on (17 November 2026), as adding changes the
     /// library: the Mac can only play a playlist or album that's in it.
     @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
+    /// Player Display (24 November 2026), kept by `LiveActivityController.setDisplay`.
+    @AppStorage(PlayerDisplay.key, store: LiveActivityController.defaults) private var displayRaw = ""
+    private var display: PlayerDisplay { PlayerDisplay(rawValue: displayRaw) ?? LiveActivityController.display }
 
     var body: some View {
         Form {
@@ -48,37 +51,71 @@ struct SettingsView: View {
         }
     }
 
-    private var lockScreenSection: some View {
+    /// The player's buttons and Player Display, then the notification, so
+    /// each explanation sits under what it explains (24 November 2026).
+    @ViewBuilder private var lockScreenSection: some View {
+        // The demo doesn't use the relay, so it has Now Playing alone.
+        let display = isDemoLayout ? .nowPlaying : display
         Section {
-            // "Refresh" once the app has a session: it may be showing already,
-            // and asking again is how a hidden player comes back.
-            Button(model.sessionController.isActive ? "Refresh Lock Screen" : "Show on Lock Screen") {
-                Task { await model.activateNowPlaying() }
+            if display == .liveActivity {
+                Button("Show Live Activity") {
+                    Task {
+                        await model.activateNowPlaying()   // showing on; Now Playing isn't asked for
+                        await LiveActivityController.shared.showCard(fresh: true)
+                    }
+                }
+                .disabled(model.attributes == nil)
+            } else {
+                // "Restore" once the app has a session: it may be showing already,
+                // and asking again is how a hidden player comes back.
+                Button(model.sessionController.isActive ? "Restore Now Playing" : "Show on Lock Screen") {
+                    Task { await model.activateNowPlaying() }
+                }
+                .disabled(model.attributes == nil)
             }
-            .disabled(model.attributes == nil)
             Button("Stop Showing", role: .destructive) {
                 Task { await model.stopNowPlaying() }
             }
-            .disabled(!model.sessionController.isActive)
-            // The notification comes from the relay, which the demo doesn't use.
+            .disabled(display == .liveActivity ? !model.isNowPlayingEnabled : !model.sessionController.isActive)
             if !isDemoLayout {
-                Toggle("Notify When Music Resumes", isOn: Binding(
-                    get: { reminders.isEnabled },
-                    set: { enabled in Task { await reminders.setEnabled(enabled) } }
-                ))
+                NavigationLink {
+                    PlayerDisplayPage()
+                } label: {
+                    LabeledContent("Player Display", value: display.title)
+                }
             }
         } header: {
             Text("Lock Screen and StandBy")
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                if !isDemoLayout {
-                    Text("Get a notification when your Mac starts playing after a break. Tap it to bring Second Chair back to your Lock Screen and StandBy.")
+                if display == .liveActivity {
+                    Text("If you swipe the Live Activity away, open Second Chair to show it again.")
+                } else {
+                    // iOS shows a session only once the app has asked while open, so a
+                    // dismissed player stays hidden until the next launch re-requests it.
+                    Text("If you dismiss the player, it may stay hidden until you next open Second Chair.")
                 }
-                // iOS shows a session only once the app has asked while open, so a
-                // dismissed player stays hidden until the next launch re-requests it.
-                Text("If you dismiss the player, it may stay hidden until you next open Second Chair.")
-                if let problem = reminders.problem {
-                    Text(problem).foregroundStyle(.red)
+                if display.usesLiveActivity && !LiveActivityController.systemAllows {
+                    Text("Live Activities are turned off for Second Chair in Settings.").foregroundStyle(.red)
+                }
+            }
+        }
+        // The notification comes from the relay, which the demo doesn't use.
+        if !isDemoLayout {
+            Section {
+                Toggle("Notify When Music Resumes", isOn: Binding(
+                    get: { reminders.isEnabled },
+                    set: { enabled in Task { await reminders.setEnabled(enabled) } }
+                ))
+            } footer: {
+                // The relay sends it only when it didn't start the Live Activity.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(display.usesLiveActivity
+                         ? "If the Live Activity can’t show, get a notification instead when your Mac starts playing after a break. Tap it to open Second Chair."
+                         : "Get a notification when your Mac starts playing after a break. Tap it to bring Now Playing back.")
+                    if let problem = reminders.problem {
+                        Text(problem).foregroundStyle(.red)
+                    }
                 }
             }
         }

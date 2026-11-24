@@ -19,6 +19,7 @@ struct MusicStandByApp: App {
                     guard mac != nil else { return }
                     UIApplication.shared.registerForRemoteNotifications()
                     appDelegate.reminders.refresh()
+                    LiveActivityController.shared.uploadStartToken()
                 }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     switch phase {
@@ -30,8 +31,15 @@ struct MusicStandByApp: App {
                         case .deferredToPhone: "Apple Music here was playing, so nothing was asked"
                         case .notShowing: "showing is off, so nothing was asked"
                         case .nothingToShow: "no song from the Mac yet, so nothing was asked"
+                        case .liveActivity: "Player Display is Live Activity, so Now Playing wasn’t asked for"
                         }
                         LockScreenRecord.add("Second Chair came to the front; \(what)")
+                        // The Mac's player is back, so the card isn't needed (experiment).
+                        if case .requested(refused: nil) = outcome {
+                            LiveActivityController.shared.endAll(because: "the app brought the Mac’s player back")
+                        }
+                        // Live Activity chosen: the card, if none is showing.
+                        if outcome == .liveActivity { await LiveActivityController.shared.showCard() }
                     }
                     case .background: Task { await model.sceneDidEnterBackground() }
                     default: break
@@ -49,7 +57,7 @@ struct RootView: View {
     var body: some View {
         Group {
             #if DEBUG
-            if WidgetPreviewPage.isOn { WidgetPreviewPage() } else { content }
+            if WidgetPreviewPage.isOn { WidgetPreviewPage() } else if LiveActivityPreviewPage.isOn { LiveActivityPreviewPage() } else { content }
             #else
             content
             #endif
