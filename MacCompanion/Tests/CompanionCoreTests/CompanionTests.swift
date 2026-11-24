@@ -53,6 +53,25 @@ import StandByProtocol
         await relay.sent.compactMap { if case .state(let m) = $0 { m } else { nil } }
     }
 
+    /// Going to sleep: the last state, then goodbye "sleep", then no
+    /// connection until the Mac wakes; waking says hello again (25 November 2026).
+    @Test func sleepSaysGoodbyeAndWakeReconnects() async throws {
+        let r = await rig()
+        await r.companion.willSleep()
+        let sent = await r.relay.sent
+        guard case .goodbye(let reason) = sent.last else { Issue.record("last frame was not goodbye: \(sent.last.map(String.init(describing:)) ?? "none")"); return }
+        #expect(reason == "sleep")
+        #expect(await r.relay.isConnected == false)
+        #expect(r.companion.isAsleep)
+        await r.companion.willSleep()
+        #expect(await r.relay.sent.count == sent.count, "a second sleep notice sends nothing more")
+        let before = await r.relay.sent.count
+        await r.companion.didWake()
+        #expect(!r.companion.isAsleep)
+        #expect(await r.relay.isConnected)
+        await eventually { await r.relay.sent.dropFirst(before).contains { if case .hello = $0 { true } else { false } } }
+    }
+
     @Test func connectingSaysHelloThenSendsState() async throws {
         let r = await rig()
         let sent = await r.relay.sent

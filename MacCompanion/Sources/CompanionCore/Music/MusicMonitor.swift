@@ -35,6 +35,8 @@ import StandByProtocol
 public final class MusicMonitor {
     public enum Trigger: String, Sendable {
         case start, notification, launch, terminate, wake, poll, command
+        /// The last read before the Mac sleeps (`Companion.willSleep`).
+        case sleep
     }
 
     public var onSnapshot: ((MusicSnapshot, Trigger) -> Void)?

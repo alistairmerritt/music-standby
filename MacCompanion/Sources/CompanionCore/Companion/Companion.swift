@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import os
@@ -109,6 +110,14 @@ public final class Companion {
     @ObservationIgnored private var tail: Task<Void, Never>?
     @ObservationIgnored private var listeners: [Task<Void, Never>] = []
     @ObservationIgnored private var started = false
+    /// The Mac said goodbye as it went to sleep, and reconnects only when it
+    /// wakes properly. Power Nap's dark wakes don't post `didWakeNotification`,
+    /// so they don't reconnect and the phone keeps saying Asleep (25 November 2026).
+    @ObservationIgnored public private(set) var isAsleep = false
+    @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
+    /// How long the Mac may wait for its goodbye before sleeping. macOS lets an
+    /// app delay sleep while it handles `willSleepNotification` (up to 30 s).
+    @ObservationIgnored var sleepGoodbyeLimit: TimeInterval = 3
     @ObservationIgnored private var eventCount = 0
 
     private struct ArtworkEntry {
@@ -207,16 +216,81 @@ public final class Companion {
         let transport = transport
         let hello = Hello(device: device)
         Task { await transport.connect(hello: hello) }
+        observeSleep()
     }
 
     /// Says goodbye so the relay needn't wait out its reconnect grace period.
     public func stop() async {
+        sleepObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        sleepObservers.removeAll()
         monitor.stop()
         await serial { [weak self] in await self?.send(.goodbye(reason: "app_quit")) }
         await transport.disconnect()
         listeners.forEach { $0.cancel() }
         listeners.removeAll()
         started = false
+    }
+
+    // MARK: Sleep and wake
+
+    /// Before 25 November 2026 a sleeping Mac said nothing: its socket stayed
+    /// open, so the relay, and the phone, said "Connected" for hours while
+    /// nothing answered, and a Continue on iPhone in the car waited on it.
+    private func observeSleep() {
+        let center = NSWorkspace.shared.notificationCenter
+        sleepObservers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.holdSleepForGoodbye() }
+        })
+        sleepObservers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Task { await self.didWake() }
+            }
+        })
+    }
+
+    /// Runs `willSleep` while holding off sleep, as macOS allows, by running
+    /// the main run loop until it's done or `sleepGoodbyeLimit` passes. Its
+    /// work runs on the main actor, which the run loop serves.
+    private func holdSleepForGoodbye() {
+        let done = Flag()
+        Task { await willSleep(); done.isSet = true }
+        let deadline = Date().addingTimeInterval(sleepGoodbyeLimit)
+        while !done.isSet, Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if !done.isSet { record("sleep: the goodbye didn't finish within \(sleepGoodbyeLimit) s") }
+    }
+
+    /// The Mac is going to sleep. One last read, so the relay keeps where
+    /// Music stopped; then goodbye with the reason `sleep`, so the phone says
+    /// Asleep at once and a Continue on iPhone doesn't wait on the Mac; then
+    /// disconnect, without reconnecting until `didWake`.
+    public func willSleep() async {
+        guard started, !isAsleep else { return }
+        isAsleep = true
+        record("going to sleep: telling the relay")
+        await serial { [weak self] in
+            guard let self else { return }
+            await self.ingest(await self.monitor.read(.sleep), trigger: .sleep)
+            await self.send(.goodbye(reason: Self.sleepGoodbye))
+        }
+        await transport.disconnect()
+    }
+
+    @MainActor private final class Flag { var isSet = false }
+
+    /// The reason a sleeping Mac gives (`MacFrame.goodbye`); the relay tells
+    /// the phone the Mac is asleep rather than gone.
+    public static let sleepGoodbye = "sleep"
+
+    /// Awake again: connect, which says hello and sends Music's state.
+    public func didWake() async {
+        guard started, isAsleep else { return }
+        isAsleep = false
+        record("awake: reconnecting")
+        await transport.connect(hello: Hello(device: device))
+        monitor.requestRead(.wake)
     }
 
     /// Waits until queued reads, commands and sends have finished.
