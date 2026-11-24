@@ -158,7 +158,7 @@ updates the session, showing the last track paused, instead of ending it.
 | `listeningSessionID` changes | Keep the session |
 | State `stopped`, `not_running` or `automation_denied` | Keep the session: `update` push, not playing, with the last track |
 | `paused` for any time | Keep the session. `PAUSED_TIMEOUT_MS` above 0 ends it after that long |
-| Mac sends `goodbye` | Keep the session: if playing, `update` push as paused at its extrapolated position |
+| Mac sends `goodbye` | Keep the session: if playing, `update` push as paused at its extrapolated position. `reason: "sleep"` makes `macAway` `asleep`; any other reason, `quit` |
 | Mac socket drops without `goodbye` | Wait 60 s for a reconnect, then as `goodbye`. The Mac's next state is pushed even at the same revision |
 | `POST /v1/session/end` from the phone | End the session, and start no new one for the same `listeningSessionID`. The next listening session, after a stop or quit, starts as usual |
 | `DELETE /v1/pairing` | End the session, revoke both tokens |
@@ -167,6 +167,10 @@ updates the session, showing the last track paused, instead of ending it.
 `GET /v1/session` returns `SessionState`:
 - `sessionID`: the current session, or absent.
 - `macConnected`.
+- `macAway`: only while the Mac isn't connected, why: `asleep` (it said goodbye with the reason
+  `sleep` as it went to sleep, from Mac 0.3.11), `quit` (any other goodbye, such as the app
+  quitting) or `lost` (the socket dropped without a goodbye). Cleared when the Mac connects.
+  Absent from older relays.
 - `playback`: the Mac's last state, as sent.
 - `attributes`: exactly what a push for this session carries.
 

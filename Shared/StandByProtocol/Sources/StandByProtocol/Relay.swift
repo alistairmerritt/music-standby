@@ -174,20 +174,40 @@ public struct NowPlayingAttributes: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// `200` from `GET /v1/session` (phone). What the relay knows right now.
+/// Why the Mac isn't connected to the relay (25 November 2026). Open: a value
+/// this build doesn't know decodes as `.lost`.
+public enum MacAway: String, Codable, Equatable, Sendable {
+    /// It said goodbye as it went to sleep (Mac 0.3.11 and later).
+    case asleep
+    /// It said goodbye for another reason, such as the app quitting.
+    case quit
+    /// Its connection dropped without a goodbye.
+    case lost
+
+    public init(from decoder: Decoder) throws {
+        self = MacAway(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .lost
+    }
+}
+
 public struct SessionState: Codable, Equatable, Sendable {
     /// The current Now Playing session, or nil when there is none.
     public var sessionID: String?
     public var mac: PairedMac
     public var macConnected: Bool
+    /// Why the Mac isn't connected: `asleep`, `quit` or `lost` (API-v1 §6).
+    /// Nil while it's connected, and from relays before 25 November 2026.
+    public var macAway: MacAway?
     /// The Mac's last state frame, exactly as received.
     public var playback: PlaybackMessage?
     /// What a push for the current session carries. Nil without a session.
     public var attributes: NowPlayingAttributes?
 
-    public init(sessionID: String?, mac: PairedMac, macConnected: Bool, playback: PlaybackMessage?, attributes: NowPlayingAttributes?) {
+    public init(sessionID: String?, mac: PairedMac, macConnected: Bool, macAway: MacAway? = nil, playback: PlaybackMessage?,
+                attributes: NowPlayingAttributes?) {
         self.sessionID = sessionID
         self.mac = mac
         self.macConnected = macConnected
+        self.macAway = macAway
         self.playback = playback
         self.attributes = attributes
     }

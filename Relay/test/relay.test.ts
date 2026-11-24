@@ -884,6 +884,41 @@ describe("connection loss", () => {
     expect((await pushes(phoneToken)).at(-1).payload.aps.attributes.isPlaying).toBe(false);
   });
 
+  // Why the Mac left, so the phone can say Asleep rather than Connected (25 November 2026).
+  it("says the Mac is asleep after a sleep goodbye, until it connects again", async () => {
+    const { mac, macToken, phoneToken } = await playingSetup();
+    expect((await session(phoneToken)).macAway).toBeUndefined();
+    mac.send({ type: "goodbye", reason: "sleep" });
+    await new Promise((r) => setTimeout(r, 50));
+    mac.close(1000);
+    await new Promise((r) => setTimeout(r, 50));
+    let s = await session(phoneToken);
+    expect(s.macConnected).toBe(false);
+    expect(s.macAway).toBe("asleep");
+    expect(s.attributes.isPlaying).toBe(false);
+    const again = await MacSocket.connect(macToken);
+    await again.next("paired");
+    s = await session(phoneToken);
+    expect(s.macConnected).toBe(true);
+    expect(s.macAway).toBeUndefined();
+  });
+
+  it("says quit after any other goodbye, and lost after a drop without one", async () => {
+    const first = await playingSetup();
+    first.mac.send({ type: "goodbye", reason: "app_quit" });
+    await new Promise((r) => setTimeout(r, 50));
+    first.mac.close(1000);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await session(first.phoneToken)).macAway).toBe("quit");
+
+    const second = await playingSetup();
+    second.mac.close(1001);
+    await new Promise((r) => setTimeout(r, 50));
+    const s = await session(second.phoneToken);
+    expect(s.macConnected).toBe(false);
+    expect(s.macAway).toBe("lost");
+  });
+
   it("keeps a session paused for hours by default", async () => {
     const { mac, pairingID, phoneToken, sessionID } = await playingSetup();
     const paused = playback({ state: "paused", isPlaying: false });

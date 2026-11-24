@@ -78,6 +78,9 @@ interface Claim {
  * the last track paused, rather than ending it for a replacement no one sees
  * (seen on an iPhone, 11 November 2026).
  */
+/** Why the Mac isn't connected, for the phone (25 November 2026). */
+type MacAway = "asleep" | "quit" | "lost";
+
 interface Session {
   sessionID: string;
   listeningSessionID?: string;
@@ -426,7 +429,7 @@ export class Pairing extends DurableObject<Env> {
       record.baseURL = new URL(request.url).origin;
       await this.ctx.storage.put("record", record);
     }
-    await this.ctx.storage.delete(["macDisconnectedAt", "goodbye"]);
+    await this.ctx.storage.delete(["macDisconnectedAt", "goodbye", "macAway"]);
     await this.ctx.storage.put("macLastSeenAt", Date.now());
     await this.scheduleAlarm();
     console.log(`pairing ${short(record.pairingID)}: Mac connected`);
@@ -465,6 +468,9 @@ export class Pairing extends DurableObject<Env> {
         return this.receiveAck(frame.ack);
       case "goodbye":
         await this.ctx.storage.put("goodbye", true);
+        // Why the Mac left, for the phone: asleep (from Mac 0.3.11, 25
+        // November 2026) or the app quitting.
+        await this.ctx.storage.put("macAway", frame.reason === "sleep" ? "asleep" : "quit");
         await this.markMacAway("goodbye");
         return;
       case "pair-decision":
@@ -494,6 +500,8 @@ export class Pairing extends DurableObject<Env> {
       await this.ctx.storage.delete("goodbye");
     } else {
       await this.ctx.storage.put("macDisconnectedAt", Date.now());
+      // Gone without a word: the network, a crash, or a Mac too old to say.
+      await this.ctx.storage.put("macAway", "lost");
     }
     await this.ctx.storage.put("macLastSeenAt", Date.now());
     await this.scheduleAlarm(ws);
@@ -744,10 +752,14 @@ export class Pairing extends DurableObject<Env> {
   private async sessionState(record: PairingRecord) {
     const session = await this.ctx.storage.get<Session>("session");
     const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    const macConnected = this.macSocket() !== undefined;
+    const macAway = await this.ctx.storage.get<MacAway>("macAway");
     return {
       ...(session ? { sessionID: session.sessionID } : {}),
       mac: { id: record.mac.id, name: record.mac.name },
-      macConnected: this.macSocket() !== undefined,
+      macConnected,
+      // Why the Mac isn't connected: "asleep", "quit" or "lost". Absent while connected.
+      ...(!macConnected && macAway ? { macAway } : {}),
       ...(playback ? { playback } : {}),
       ...(session && playback ? { attributes: await this.attributes(session, playback) } : {}),
     };
