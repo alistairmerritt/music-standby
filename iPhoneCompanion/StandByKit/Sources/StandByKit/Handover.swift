@@ -156,6 +156,8 @@ public struct Handover {
         /// How many songs it looks up.
         let asked: Int
         var foundCount: Int { found.count }
+        /// How many next songs the Mac sent.
+        var count: Int { upNext.count }
 
         init(_ upNext: [QueuedTrack], with player: any PhoneMusicPlaying) {
             self.upNext = upNext
@@ -174,16 +176,17 @@ public struct Handover {
             searches = Task { for search in each { await search.value } }
         }
 
-        /// The next songs' catalogue IDs in order, once the searches end or
-        /// `seconds` pass. A song not found by then is left out.
-        func catalogIDs(within seconds: TimeInterval) async -> [String] {
+        /// The next songs' catalogue IDs in order, from the one `after` the
+        /// first few on, once the searches end or `seconds` pass. A song not
+        /// found by then is left out.
+        func catalogIDs(within seconds: TimeInterval, after skipped: Int = 0) async -> [String] {
             if let searches {
                 _ = await Handover.answer(within: seconds) {
                     await searches.value
                     return true
                 }
             }
-            return upNext.indices.compactMap { upNext[$0].catalogID ?? found[$0] }
+            return upNext.indices.dropFirst(skipped).compactMap { upNext[$0].catalogID ?? found[$0] }
         }
     }
 
@@ -275,19 +278,24 @@ public struct Handover {
             switch await player.playFromAppleMusic(catalogID, title: track.title, artist: track.artist, position: position,
                                                    timeout: remaining(wait + Self.recentlyPlayedAllowance, floor: 2),
                                                    shuffled: message.shuffled == true, allowStation: allowStation,
-                                                   following: message.upNext ?? []) {
+                                                   following: message.upNext ?? [],
+                                                   note: { [record] in record("Continue on iPhone: \($0)") }) {
             case .playlist(let played)?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's Apple Music playlist plays here, from song \(played.index + 1) of \(played.count)")
-                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
-                                              from: "the playlist", repeatMode: message.repeatMode, with: player)
+                let left = played.count - played.index - 1
+                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : left,
+                                              from: "the playlist", repeatMode: message.repeatMode, with: player,
+                                              then: played.isShuffled ? nil : theMacsSongs(after: left, of: "playlist", upNext, with: player))
             case .album(let played, _)?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's Apple Music album plays here, from song \(played.index + 1) of \(played.count)")
-                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
-                                              from: "the album", repeatMode: message.repeatMode, with: player)
+                let left = played.count - played.index - 1
+                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : left,
+                                              from: "the album", repeatMode: message.repeatMode, with: player,
+                                              then: played.isShuffled ? nil : theMacsSongs(after: left, of: "album", upNext, with: player))
             case .station?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
@@ -319,15 +327,27 @@ public struct Handover {
     /// s for a station on 17 November 2026.
     static let recentlyPlayedLag: TimeInterval = 60
 
-    /// Once the song plays here: repeat as on the Mac, the Mac paused, and a
+    /// Once the song plays here: repeat as on the Mac, the Mac paused, then
+    /// `then` (which says how many songs it added after the queue), and a
     /// station from the song when few songs are left to play.
-    private func finishContinuing(_ catalogID: String, songsAfter: Int, from source: String, repeatMode: RepeatMode?,
-                                  with player: any PhoneMusicPlaying) async -> ContinueOutcome {
+    private func finishContinuing(_ catalogID: String, songsAfter queued: Int, from source: String, repeatMode: RepeatMode?,
+                                  with player: any PhoneMusicPlaying,
+                                  then addMore: (@MainActor () async -> Int)? = nil) async -> ContinueOutcome {
         // The song plays here now: that's the moment the music moved.
         arrival.fire()
         if source != "the Mac" { memory.saveQueued(nil) }
         if let repeatMode { player.setRepeat(repeatMode) }
-        let outcome = await pauseMac(for: catalogID, songsAfter: songsAfter)
+        let outcome = await pauseMac(for: catalogID, songsAfter: queued)
+        var songsAfter = queued
+        if let addMore, repeatMode != .all, repeatMode != .one {
+            if isBudgeted {
+                // Only adds to what plays later: skipped when time is short.
+                let left = remaining(6)
+                if left >= 1, let added = await Self.answer(within: left, { await addMore() }) { songsAfter += added }
+            } else {
+                songsAfter += await addMore()
+            }
+        }
         if songsAfter < Self.stationBelow, repeatMode != .all, repeatMode != .one {
             if isBudgeted {
                 // Only adds to what plays later: skipped when time is short.
@@ -344,6 +364,24 @@ public struct Handover {
             }
         }
         return outcome
+    }
+
+    /// The Mac's next songs that come after an Apple Music playlist or album,
+    /// played here in order, runs out: `inList` of them are in the list, and
+    /// the rest go after it here, in the Mac's order. On 26 November 2026 the
+    /// Mac was two songs from the end of an album, with 20 of Autoplay's
+    /// after them. Nil when the list has all the Mac's next songs.
+    private func theMacsSongs(after inList: Int, of kind: String, _ upNext: UpNextLookup,
+                              with player: any PhoneMusicPlaying) -> (@MainActor () async -> Int)? {
+        guard inList >= 0, upNext.count > inList else { return nil }
+        return { [self] in
+            let more = await upNext.catalogIDs(within: remaining(Self.upNextLookupWait), after: inList)
+            guard !more.isEmpty else { return 0 }
+            let added = await player.appendSongs(more)
+            record(added > 0 ? "Continue on iPhone: then the Mac's next \(added) song\(added == 1 ? "" : "s"), after the \(kind)"
+                             : "Continue on iPhone: couldn't add the Mac's songs after the \(kind)")
+            return added
+        }
     }
 
     /// The Mac's catalogue ID, or, when the Mac has none, the phone's own

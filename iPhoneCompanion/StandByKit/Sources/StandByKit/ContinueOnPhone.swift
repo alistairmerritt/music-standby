@@ -61,17 +61,24 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// the song plays. False when the library here hasn't the song.
     func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval) async -> Bool
     /// Plays the song from the Apple Music playlist or album that Apple
-    /// Music's recently played lists and that has it, or, with
-    /// `allowStation`, the song followed by the station listed last. For a
-    /// Mac playing from outside its library (`fromAppleMusic`). Returns what
-    /// it played; nil when recently played has nothing with the song yet
-    /// (it lags about a minute) or Music didn't start it.
+    /// Music's recently played lists and that has it, or else from the
+    /// song's own album in the catalogue, or, with `allowStation`, the song
+    /// followed by the station listed last. For a Mac playing from outside
+    /// its library (`fromAppleMusic`). Returns what it played; nil when
+    /// nothing has the song yet (recently played lags about a minute) or
+    /// Music didn't start it, and then nothing is left playing.
     /// `title` and `artist` are the Mac's song's, found by them when the
     /// playlist lists it under another catalogue ID; `following` is what the
     /// Mac queues after the song: a playlist or album only counts when its
-    /// songs match (`ContainerMatch`).
+    /// songs match (`ContainerMatch`). `note` hears why nothing counted, for
+    /// the log (26 November 2026).
     func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
-                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack]) async -> AppleMusicSource?
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                            note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource?
+    /// Adds these catalogue songs, in this order, after everything queued
+    /// here: the Mac's next songs once a list started here runs out, such as
+    /// Autoplay's after an album's last song. Returns how many it added.
+    func appendSongs(_ catalogIDs: [String]) async -> Int
     /// Where Apple Music here plays its current song from when it's not a
     /// library playlist or album: an Apple Music playlist or album that
     /// recently played lists and has the song, or the station listed last.
@@ -101,8 +108,9 @@ extension PhoneMusicPlaying {
     public func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval,
                                     timeout: TimeInterval) async -> Bool { false }
     public func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
-                                   timeout: TimeInterval, shuffled: Bool, allowStation: Bool,
-                                   following: [QueuedTrack]) async -> AppleMusicSource? { nil }
+                                   timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                                   note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource? { nil }
+    public func appendSongs(_ catalogIDs: [String]) async -> Int { 0 }
     public func appleMusicSource() async -> AppleMusicSource? { nil }
     public func addToLibrary(_ source: AppleMusicSource) async -> Bool { false }
     public func isShufflingLibrary() async -> Bool { false }

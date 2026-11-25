@@ -10,7 +10,8 @@ import Foundation
 /// Songs are compared by catalogue ID, or else by title and lead artist, as
 /// the Mac has catalogue IDs only for songs in its library. On 25 November
 /// 2026 a Mac playing an Apple Music playlist had IDs for 9 of its 18 next
-/// songs; compared by those IDs alone, the playlist didn't match.
+/// songs; compared by those IDs alone, the playlist didn't match. A list in
+/// the library has library IDs for all its songs, so only names match there.
 public enum ContainerMatch {
     /// How many following songs are compared.
     public static let compared = 3
@@ -31,35 +32,68 @@ public enum ContainerMatch {
 
     /// Where the Mac's song is in `container`, if the container is what the
     /// Mac's queue came from: the first place with the song whose next songs
-    /// match (`accepts`). The song is found by `catalogID`, or else by
-    /// `title` and `artist`: for a song outside the Mac's library, the phone's
-    /// search can find it on another release than the one the playlist lists.
+    /// match (`vouched`), at least `atLeast` of them. The song is found by
+    /// `catalogID`, or else by `title` and `artist`: for a song outside the
+    /// Mac's library, the phone's search can find it on another release than
+    /// the one the playlist lists, and a list in the library names its songs
+    /// by library IDs.
     public static func place(of catalogID: String, title: String? = nil, artist: String? = nil, in container: [Song],
-                             following: [QueuedTrack], inOrder: Bool) -> Int? {
+                             following: [QueuedTrack], inOrder: Bool, atLeast: Int = 0) -> Int? {
         let byID = container.indices.filter { container[$0].id == catalogID }
         let byName = title.map { title in
             container.indices.filter { !byID.contains($0) && isSame(container[$0], title: title, artist: artist ?? "") }
         } ?? []
-        return (byID + byName).first { accepts(container, at: $0, following: following, inOrder: inOrder) }
+        return (byID + byName).first { (vouched(container, at: $0, following: following, inOrder: inOrder) ?? -1) >= atLeast }
     }
 
     /// `container` is the playlist's or album's songs in order, `index` where
     /// the song is in it, and `following` the songs queued after it.
+    /// Whether nothing compared is different: see `vouched`.
+    public static func accepts(_ container: [Song], at index: Int, following: [QueuedTrack], inOrder: Bool) -> Bool {
+        vouched(container, at: index, following: following, inOrder: inOrder) != nil
+    }
+
+    /// How many of the songs queued after the song `container` agrees with,
+    /// or nil when one is different.
     ///
     /// In order, the container's next songs must be those, one after another.
     /// Shuffled, the queue is in no order, so each of them must be somewhere
     /// in the container. With nothing queued to compare, or nothing the
-    /// container can compare against (the song is its last), it passes: the
+    /// container can compare against (the song is its last), it's 0: the
     /// check can only reject what it can see is different.
-    public static func accepts(_ container: [Song], at index: Int, following: [QueuedTrack], inOrder: Bool) -> Bool {
+    public static func vouched(_ container: [Song], at index: Int, following: [QueuedTrack], inOrder: Bool) -> Int? {
         let queued = Array(following.prefix(compared))
-        guard !queued.isEmpty else { return true }
+        guard !queued.isEmpty else { return 0 }
         if inOrder {
-            let next = container.dropFirst(index + 1).prefix(queued.count)
-            guard !next.isEmpty else { return true }
-            return zip(next, queued).allSatisfy { isSame($0, $1) }
+            let next = Array(container.dropFirst(index + 1).prefix(queued.count))
+            return zip(next, queued).allSatisfy { isSame($0, $1) } ? next.count : nil
         }
-        return queued.allSatisfy { song in container.contains { isSame($0, song) } }
+        return queued.allSatisfy { song in container.contains { isSame($0, song) } } ? queued.count : nil
+    }
+
+    /// The song a playlist or album was started on, for telling when it
+    /// plays: by any of `catalogIDs`, or else by title and lead artist. A
+    /// list in the library names its songs by library IDs, which the player
+    /// never reports: on 26 November 2026 Continue on iPhone waited for one,
+    /// so the Mac's album, playing here, never counted as started, and the
+    /// Mac's next songs replaced it.
+    public struct Expected: Equatable, Sendable {
+        public var catalogIDs: Set<String>
+        public var title: String
+        public var artist: String
+
+        public init(catalogIDs: Set<String>, title: String, artist: String) {
+            self.catalogIDs = catalogIDs
+            self.title = title
+            self.artist = artist
+        }
+
+        /// The player's song: its store ID, title and artist.
+        public func isPlaying(storeID: String?, title: String?, artist: String?) -> Bool {
+            if let storeID, catalogIDs.contains(storeID) { return true }
+            guard let title else { return false }
+            return ContainerMatch.isSame(Song(id: nil, title: title, artist: artist), title: self.title, artist: self.artist)
+        }
     }
 
     static func isSame(_ listed: Song, _ queued: QueuedTrack) -> Bool {

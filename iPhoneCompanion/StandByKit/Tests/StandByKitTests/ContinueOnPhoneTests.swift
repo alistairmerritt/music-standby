@@ -79,11 +79,22 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         return playsLibrary
     }
     var playsFromAppleMusic: AppleMusicSource?
+    /// What `playFromAppleMusic` says about its search, for the log.
+    var appleMusicNotes: [String] = []
     private(set) var appleMusicAsked: [(id: String, title: String, shuffled: Bool, allowStation: Bool, following: [QueuedTrack])] = []
     func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
-                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack]) async -> AppleMusicSource? {
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                            note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource? {
         appleMusicAsked.append((catalogID, title, shuffled, allowStation, following))
+        appleMusicNotes.forEach(note)
         return playsFromAppleMusic
+    }
+    /// How many of the songs `appendSongs` adds: all of them unless set.
+    var appends: Int?
+    private(set) var appended: [[String]] = []
+    func appendSongs(_ catalogIDs: [String]) async -> Int {
+        appended.append(catalogIDs)
+        return appends ?? catalogIDs.count
     }
     var appleMusicHere: AppleMusicSource?
     func appleMusicSource() async -> AppleMusicSource? { appleMusicHere }
