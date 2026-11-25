@@ -144,6 +144,55 @@ public struct Handover {
         }
     }
 
+    /// The Mac's next songs, with catalogue IDs found here for those the Mac
+    /// has none for: it has them only for songs in its library. On 25
+    /// November 2026 a Mac playing an Apple Music playlist had IDs for 9 of
+    /// its 18 next songs, and the phone queued only those 9. The searches
+    /// start with the hand-over and run while the Mac's playlist is tried.
+    @MainActor final class UpNextLookup {
+        private let upNext: [QueuedTrack]
+        private var found: [Int: String] = [:]
+        private var searches: Task<Void, Never>?
+        /// How many songs it looks up.
+        let asked: Int
+        var foundCount: Int { found.count }
+
+        init(_ upNext: [QueuedTrack], with player: any PhoneMusicPlaying) {
+            self.upNext = upNext
+            let missing = upNext.indices.filter { upNext[$0].catalogID == nil }
+            asked = missing.count
+            guard !missing.isEmpty else { return }
+            let each = missing.map { index in
+                let song = upNext[index]
+                return Task { @MainActor [weak self] in
+                    let candidates = await player.searchCatalog(title: song.title, artist: song.artist)
+                    guard let id = CatalogCandidate.best(title: song.title, artist: song.artist, duration: song.duration,
+                                                         in: candidates)?.id else { return }
+                    self?.found[index] = id
+                }
+            }
+            searches = Task { for search in each { await search.value } }
+        }
+
+        /// The next songs' catalogue IDs in order, once the searches end or
+        /// `seconds` pass. A song not found by then is left out.
+        func catalogIDs(within seconds: TimeInterval) async -> [String] {
+            if let searches {
+                _ = await Handover.answer(within: seconds) {
+                    await searches.value
+                    return true
+                }
+            }
+            return upNext.indices.compactMap { upNext[$0].catalogID ?? found[$0] }
+        }
+    }
+
+    /// How long the Mac's queue may wait for the next songs to be found here.
+    /// A search took about a second on 25 November 2026.
+    static let upNextLookupWait: TimeInterval = 3
+    /// What a hand-over with a time limit keeps for the song to start.
+    static let startReserve: TimeInterval = 4
+
     private func performContinueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> ContinueOutcome {
         guard let message = latest(), let track = message.track else { return .unavailable }
         let away = macAway()
@@ -171,6 +220,7 @@ public struct Handover {
             record("Continue on iPhone: no access to Apple Music")
             return .notAllowed
         }
+        let upNext = UpNextLookup(Array((message.upNext ?? []).prefix(PlaybackMessage.upNextLimit)), with: player)
         let position: @MainActor () -> TimeInterval = { [latest, now] in
             let at: TimeInterval
             if let current = latest(), current.track?.catalogID == catalogID {
@@ -222,10 +272,10 @@ public struct Handover {
             // before for a while after it starts another.
             let settled = message.appleMusicSince.map { now().timeIntervalSince($0) >= Self.recentlyPlayedLag } ?? true
             let allowStation = (message.upNext?.count ?? 0) <= 1 && settled
-            switch await player.playFromAppleMusic(catalogID, position: position,
+            switch await player.playFromAppleMusic(catalogID, title: track.title, artist: track.artist, position: position,
                                                    timeout: remaining(wait + Self.recentlyPlayedAllowance, floor: 2),
                                                    shuffled: message.shuffled == true, allowStation: allowStation,
-                                                   following: (message.upNext ?? []).compactMap(\.catalogID)) {
+                                                   following: message.upNext ?? []) {
             case .playlist(let played)?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
@@ -249,7 +299,11 @@ public struct Handover {
         }
         memory.savePlaylist(nil)
         memory.saveAlbum(nil)
-        let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
+        let next = await upNext.catalogIDs(within: max(0, remaining(Self.upNextLookupWait + Self.startReserve) - Self.startReserve))
+        if upNext.asked > 0 {
+            record("Continue on iPhone: found \(upNext.foundCount) of the \(upNext.asked) next songs the Mac has no catalogue ID for")
+        }
+        let queue = [catalogID] + next
         let started = await player.play(catalogIDs: queue, position: position, timeout: remaining(timeout, floor: 3))
         guard started else {
             record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")

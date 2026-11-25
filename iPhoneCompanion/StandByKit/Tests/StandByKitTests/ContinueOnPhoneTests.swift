@@ -79,10 +79,10 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         return playsLibrary
     }
     var playsFromAppleMusic: AppleMusicSource?
-    private(set) var appleMusicAsked: [(id: String, shuffled: Bool, allowStation: Bool, following: [String])] = []
-    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? {
-        appleMusicAsked.append((catalogID, shuffled, allowStation, following))
+    private(set) var appleMusicAsked: [(id: String, title: String, shuffled: Bool, allowStation: Bool, following: [QueuedTrack])] = []
+    func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack]) async -> AppleMusicSource? {
+        appleMusicAsked.append((catalogID, title, shuffled, allowStation, following))
         return playsFromAppleMusic
     }
     var appleMusicHere: AppleMusicSource?
@@ -128,7 +128,8 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         h.clock.advance(42)   // 42 s into the song since the Mac's last state
         let phone = FakePhoneMusic()
         #expect(await h.model.continueOnPhone(with: phone) == .continued)
-        #expect(phone.asked.first?.ids == ["1102360418", "1102359994", "1102359746"], "songs without a catalogue ID are skipped")
+        #expect(phone.asked.first?.ids == ["1102360418", "1102359994", "1102359746"], "songs not in the catalogue here are skipped")
+        #expect(phone.searches == ["Uploaded demo Me"], "the one without a catalogue ID was looked up")
         #expect(phone.asked.first?.position == 42)
         #expect(await h.transport.sent.map(\.kind) == [.pause])
     }

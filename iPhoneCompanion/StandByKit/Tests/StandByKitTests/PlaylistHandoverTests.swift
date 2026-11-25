@@ -215,9 +215,33 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.appleMusicAsked.count == 1)
         #expect(phone.appleMusicAsked.first?.shuffled == true)
         #expect(phone.appleMusicAsked.first?.allowStation == false, "four songs ahead on the Mac: not a station")
-        #expect(phone.appleMusicAsked.first?.following == m.upNext?.compactMap(\.catalogID),
+        #expect(phone.appleMusicAsked.first?.following == m.upNext,
                 "the Mac's next songs go along, so an album that merely has the song isn't taken for the playlist")
+        #expect(phone.appleMusicAsked.first?.title == "Song", "and the song's title, for a playlist that lists it under another ID")
         #expect(phone.asked.isEmpty)
+    }
+
+    /// 25 November 2026: a Mac playing an Apple Music playlist had catalogue
+    /// IDs for only the songs in its library, 9 of its 18 next songs, and the
+    /// phone queued just those 9 when recently played didn't list the playlist.
+    @Test func theMacsNextSongsWithoutCatalogueIDsAreFoundHere() async {
+        var m = message(state: .playing)   // "Song" by "Artist", 200 s, no catalogue ID: outside the Mac's library
+        m.fromAppleMusic = true
+        m.upNext = [QueuedTrack(catalogID: nil, title: "Outside One", artist: "Band", duration: 200),
+                    QueuedTrack(catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312),
+                    QueuedTrack(catalogID: nil, title: "Outside Two", artist: "Band & Friend", duration: 180),
+                    QueuedTrack(catalogID: nil, title: "Nowhere", artist: "Band", duration: 150)]
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.catalog = [CatalogCandidate(id: "777", title: "Song", artist: "Artist", duration: 200),
+                         CatalogCandidate(id: "901", title: "Outside One", artist: "Band", duration: 200),
+                         CatalogCandidate(id: "902", title: "Outside Two", artist: "Band & Friend", duration: 181)]
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.appleMusicAsked.first?.id == "777", "recently played is tried first")
+        #expect(phone.asked.first?.ids == ["777", "901", "1102359994", "902"],
+                "in the Mac's order, with what the phone found; one it can't find is left out")
+        #expect(Set(phone.searches) == ["Song Artist", "Outside One Band", "Outside Two Band & Friend", "Nowhere Band"])
     }
 
     @Test func aStationOnTheMacFollowsTheSongHereAndRecentlyPlayedLaggingFallsBack() async {

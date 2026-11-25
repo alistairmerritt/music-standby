@@ -531,20 +531,24 @@ extension SystemMusicPhonePlayer {
 
     /// `following` is what the Mac queues after the song. A playlist or album
     /// that has the song only counts when its songs match (`ContainerMatch`):
-    /// a song's own album always has it (seen 19 November 2026).
-    func findInRecentlyPlayed(_ catalogID: String, allowStation: Bool, following: [String] = [], shuffled: Bool = false) async -> RecentFind? {
+    /// a song's own album always has it (seen 19 November 2026). With
+    /// `title`, the song also counts under another catalogue ID.
+    func findInRecentlyPlayed(_ catalogID: String, title: String? = nil, artist: String? = nil, allowStation: Bool,
+                              following: [QueuedTrack] = [], shuffled: Bool = false) async -> RecentFind? {
         guard access == .allowed else { return nil }
         for (n, container) in await recentContainers(2).enumerated() {
             switch container {
             case .playlist(let playlist):
                 guard let (loaded, entries) = await Self.withEntries(playlist),
-                      let index = entries.firstIndex(where: { Self.songID($0) == catalogID }),
-                      ContainerMatch.accepts(entries.map(Self.songID), at: index, following: following, inOrder: !shuffled) else { continue }
+                      let index = ContainerMatch.place(of: catalogID, title: title, artist: artist,
+                                                       in: entries.map { .init(id: Self.songID($0), title: $0.title, artist: $0.artistName) },
+                                                       following: following, inOrder: !shuffled) else { continue }
                 return .playlist(loaded, entries, index: index)
             case .album(let album):
                 guard let (loaded, tracks) = await Self.withTracks(album),
-                      let index = tracks.firstIndex(where: { $0.id.rawValue == catalogID }),
-                      ContainerMatch.accepts(tracks.map { $0.id.rawValue }, at: index, following: following, inOrder: !shuffled) else { continue }
+                      let index = ContainerMatch.place(of: catalogID, title: title, artist: artist,
+                                                       in: tracks.map { .init(id: $0.id.rawValue, title: $0.title, artist: $0.artistName) },
+                                                       following: following, inOrder: !shuffled) else { continue }
                 return .album(loaded, tracks, index: index)
             case .station(let station):
                 guard n == 0, allowStation else { continue }
@@ -556,22 +560,25 @@ extension SystemMusicPhonePlayer {
         return nil
     }
 
-    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? {
+    func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack]) async -> AppleMusicSource? {
         let started = Date()
-        guard let found = await findInRecentlyPlayed(catalogID, allowStation: allowStation, following: following, shuffled: shuffled) else { return nil }
+        guard let found = await findInRecentlyPlayed(catalogID, title: title, artist: artist, allowStation: allowStation,
+                                                     following: following, shuffled: shuffled) else { return nil }
         let left = max(1, timeout - Date().timeIntervalSince(started))
         switch found {
         case .playlist(let playlist, let entries, let index):
             player.shuffleMode = .off
             SystemMusicPlayer.shared.queue = SystemMusicPlayer.Queue(playlist: playlist, startingAt: entries[index])
-            guard await startAppleMusic(catalogID, position: position, timeout: left, shuffle: shuffled) else { return nil }
+            // The playlist's own ID for the song, found by title if the search here found another release.
+            guard await startAppleMusic(Self.songID(entries[index]) ?? catalogID, position: position, timeout: left,
+                                        shuffle: shuffled) else { return nil }
             return .playlist(PlaylistPlace(name: playlist.name, cloudID: playlist.id.rawValue, count: entries.count, index: index,
                                            shuffled: shuffled ? true : nil))
         case .album(let album, let tracks, let index):
             player.shuffleMode = .off
             SystemMusicPlayer.shared.queue = SystemMusicPlayer.Queue(album: album, startingAt: tracks[index])
-            guard await startAppleMusic(catalogID, position: position, timeout: left, shuffle: shuffled) else { return nil }
+            guard await startAppleMusic(tracks[index].id.rawValue, position: position, timeout: left, shuffle: shuffled) else { return nil }
             return .album(AlbumPlace(title: album.title, artist: album.artistName, count: tracks.count, index: index,
                                      shuffled: shuffled ? true : nil), id: album.id.rawValue)
         case .station(let station):
