@@ -78,6 +78,9 @@ interface Claim {
  * the last track paused, rather than ending it for a replacement no one sees
  * (seen on an iPhone, 11 November 2026).
  */
+/** Why the Mac isn't connected, for the phone (25 November 2026). */
+type MacAway = "asleep" | "quit" | "lost";
+
 interface Session {
   sessionID: string;
   listeningSessionID?: string;
@@ -149,6 +152,8 @@ interface RecordedPush {
   /** Live Activity pushes: the APNs priority. */
   priority?: number;
   collapseID?: string;
+  /** A card's start: whether the relay had recorded the card as it sent the push. */
+  knownToRelay?: boolean;
 }
 
 const ARTWORK_MAX_BYTES = 1024 * 1024;
@@ -180,6 +185,8 @@ const ARTWORK_FOLLOW_UP_MS = 700;
  * pushed doesn't count.
  */
 const ARTWORK_DOWNLOAD_FOLLOW_UP_MS = 1000;
+/** A card the relay started less than this long ago isn't replaced when music starts again; see `musicStarted`. */
+const ACTIVITY_START_GAP_MS = 30_000;
 const ACKS_KEEP = 50;
 const PUSHES_KEEP = 100;
 
@@ -426,7 +433,7 @@ export class Pairing extends DurableObject<Env> {
       record.baseURL = new URL(request.url).origin;
       await this.ctx.storage.put("record", record);
     }
-    await this.ctx.storage.delete(["macDisconnectedAt", "goodbye"]);
+    await this.ctx.storage.delete(["macDisconnectedAt", "goodbye", "macAway"]);
     await this.ctx.storage.put("macLastSeenAt", Date.now());
     await this.scheduleAlarm();
     console.log(`pairing ${short(record.pairingID)}: Mac connected`);
@@ -465,6 +472,9 @@ export class Pairing extends DurableObject<Env> {
         return this.receiveAck(frame.ack);
       case "goodbye":
         await this.ctx.storage.put("goodbye", true);
+        // Why the Mac left, for the phone: asleep (from Mac 0.3.11, 25
+        // November 2026) or the app quitting.
+        await this.ctx.storage.put("macAway", frame.reason === "sleep" ? "asleep" : "quit");
         await this.markMacAway("goodbye");
         return;
       case "pair-decision":
@@ -494,6 +504,8 @@ export class Pairing extends DurableObject<Env> {
       await this.ctx.storage.delete("goodbye");
     } else {
       await this.ctx.storage.put("macDisconnectedAt", Date.now());
+      // Gone without a word: the network, a crash, or a Mac too old to say.
+      await this.ctx.storage.put("macAway", "lost");
     }
     await this.ctx.storage.put("macLastSeenAt", Date.now());
     await this.scheduleAlarm(ws);
@@ -524,12 +536,7 @@ export class Pairing extends DurableObject<Env> {
     const state = stateOf(message);
     const session = await this.ctx.storage.get<Session>("session");
     if (!session) {
-      if (state !== "playing") return;
-      // A session the phone dismissed stays dismissed for that listening session.
-      const dismissed = await this.ctx.storage.get<string>("dismissed");
-      if (dismissed && message.listeningSessionID === dismissed) return;
-      await this.ctx.storage.delete("dismissed");
-      await this.startSession(message);
+      await this.startSessionIfPlaying(message);
       return;
     }
     // Stopped, quit or a new listening session: the same session, updated.
@@ -545,9 +552,30 @@ export class Pairing extends DurableObject<Env> {
     delete session.macAway;
     await this.ctx.storage.put("session", session);
     if (wasAway || message.revision > session.pushedRevision) await this.pushUpdate(session, message);
+    // The push can find the player's token dead (iOS dropped the player, as
+    // when Apple Music here has had the Lock Screen for hours), which ends the
+    // session. On 26 November 2026 the music then started a card for the ended
+    // session, and the Mac's next state, a second later, a new session with a
+    // second card for the same song. The new session starts now instead, from
+    // this state, and later states find it.
+    const current = await this.ctx.storage.get<Session>("session");
+    if (current?.sessionID !== session.sessionID) {
+      if (!current) await this.startSessionIfPlaying(message);
+      return;
+    }
     if (restarted) await this.musicStarted(session, message);
     else await this.updateActivity(session, message);
     await this.scheduleAlarm();
+  }
+
+  /** No session: one starts when the Mac plays, unless the phone dismissed this listening session. */
+  private async startSessionIfPlaying(message: PlaybackMessage): Promise<void> {
+    if (stateOf(message) !== "playing") return;
+    // A session the phone dismissed stays dismissed for that listening session.
+    const dismissed = await this.ctx.storage.get<string>("dismissed");
+    if (dismissed && message.listeningSessionID === dismissed) return;
+    await this.ctx.storage.delete("dismissed");
+    await this.startSession(message);
   }
 
   /**
@@ -744,10 +772,14 @@ export class Pairing extends DurableObject<Env> {
   private async sessionState(record: PairingRecord) {
     const session = await this.ctx.storage.get<Session>("session");
     const playback = await this.ctx.storage.get<PlaybackMessage>("playback");
+    const macConnected = this.macSocket() !== undefined;
+    const macAway = await this.ctx.storage.get<MacAway>("macAway");
     return {
       ...(session ? { sessionID: session.sessionID } : {}),
       mac: { id: record.mac.id, name: record.mac.name },
-      macConnected: this.macSocket() !== undefined,
+      macConnected,
+      // Why the Mac isn't connected: "asleep", "quit" or "lost". Absent while connected.
+      ...(!macConnected && macAway ? { macAway } : {}),
       ...(playback ? { playback } : {}),
       ...(session && playback ? { attributes: await this.attributes(session, playback) } : {}),
     };
@@ -842,6 +874,16 @@ export class Pairing extends DurableObject<Env> {
    * reminder, as before.
    */
   private async musicStarted(session: Session, message: PlaybackMessage): Promise<void> {
+    // One card for one start: a card started this recently is kept, and told
+    // about the change, rather than replaced. Its token may not be here yet,
+    // so it couldn't be ended, and two stayed up for one song (26 November
+    // 2026). The phone asking for a card still replaces it.
+    const recent = await this.ctx.storage.get<ActivityRecord>("activity");
+    if (recent && Date.now() - recent.startedAt < ACTIVITY_START_GAP_MS) {
+      console.log(`activity ${short(recent.activityID)}: started ${Math.round((Date.now() - recent.startedAt) / 1000)} s ago, so kept`);
+      await this.updateActivity(session, message);
+      return;
+    }
     if (await this.startActivity(session, message)) return;
     await this.remind();
   }
@@ -854,6 +896,12 @@ export class Pairing extends DurableObject<Env> {
     await this.endActivity("replaced");
     const content = this.activityContent(session, message);
     const activityID = crypto.randomUUID();
+    // Recorded before the push: iOS can start the card, and the phone send
+    // its token, before APNs answers, and a token for a card the relay
+    // doesn't know is refused (409 activity_mismatch), which the phone takes
+    // to mean the card isn't the relay's (26 November 2026).
+    const activity: ActivityRecord = { activityID, startedAt: Date.now(), shown: this.shownOf(content), content, delivered: JSON.stringify(content) };
+    await this.ctx.storage.put("activity", activity);
     const push = makeActivityStart(tokens.activityStart, { activityID, macName: record.mac.name }, content);
     const result = await this.pushSender().sendActivity(push);
     console.log(`activity ${short(activityID)}: start push → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
@@ -862,9 +910,10 @@ export class Pairing extends DurableObject<Env> {
       delete now.activityStart;
       await this.ctx.storage.put("tokens", now);
     }
-    if (result.status < 200 || result.status >= 300) return false;
-    const activity: ActivityRecord = { activityID, startedAt: Date.now(), shown: this.shownOf(content), content, delivered: JSON.stringify(content) };
-    await this.ctx.storage.put("activity", activity);
+    if (result.status < 200 || result.status >= 300) {
+      if ((await this.ctx.storage.get<ActivityRecord>("activity"))?.activityID === activityID) await this.ctx.storage.delete("activity");
+      return false;
+    }
     return true;
   }
 
@@ -1110,16 +1159,24 @@ export class Pairing extends DurableObject<Env> {
     return new MockPushSender(async (push) => {
       const pushes = (await this.ctx.storage.get<RecordedPush[]>("pushes")) ?? [];
       const at = iso(Date.now());
+      // Tests list tokens APNs should call dead, as it does for a player iOS has dropped.
+      const dead = ((await this.ctx.storage.get<string[]>("mockDeadTokens")) ?? []).includes(push.token);
+      const status = dead ? 410 : 200;
+      let knownToRelay: boolean | undefined;
+      if ("activityID" in push && push.event === "start") {
+        knownToRelay = (await this.ctx.storage.get<ActivityRecord>("activity"))?.activityID === push.activityID;
+      }
       pushes.push(
         "activityID" in push
-          ? { at, event: `activity-${push.event}`, sessionID: push.activityID, status: 200, payload: push.payload, priority: push.priority }
+          ? { at, event: `activity-${push.event}`, sessionID: push.activityID, status, payload: push.payload, priority: push.priority, knownToRelay }
           : "collapseID" in push
-          ? { at, event: push.collapseID === REMINDER_ID ? "reminder" : "hand-back-alert", sessionID: "", status: 200, payload: push.payload, collapseID: push.collapseID }
+          ? { at, event: push.collapseID === REMINDER_ID ? "reminder" : "hand-back-alert", sessionID: "", status, payload: push.payload, collapseID: push.collapseID }
           : "event" in push
-            ? { at, event: push.event, sessionID: push.sessionID, status: 200, payload: push.payload }
-            : { at, event: "hand-back", sessionID: "", status: 200, payload: push.payload },
+            ? { at, event: push.event, sessionID: push.sessionID, status, payload: push.payload }
+            : { at, event: "hand-back", sessionID: "", status, payload: push.payload },
       );
       await this.ctx.storage.put("pushes", pushes.slice(-PUSHES_KEEP));
+      return dead ? { status: 410, reason: "Unregistered" } : undefined;
     });
   }
 

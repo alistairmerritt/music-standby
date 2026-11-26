@@ -79,11 +79,22 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         return playsLibrary
     }
     var playsFromAppleMusic: AppleMusicSource?
-    private(set) var appleMusicAsked: [(id: String, shuffled: Bool, allowStation: Bool, following: [String])] = []
-    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? {
-        appleMusicAsked.append((catalogID, shuffled, allowStation, following))
+    /// What `playFromAppleMusic` says about its search, for the log.
+    var appleMusicNotes: [String] = []
+    private(set) var appleMusicAsked: [(id: String, title: String, shuffled: Bool, allowStation: Bool, following: [QueuedTrack])] = []
+    func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                            note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource? {
+        appleMusicAsked.append((catalogID, title, shuffled, allowStation, following))
+        appleMusicNotes.forEach(note)
         return playsFromAppleMusic
+    }
+    /// How many of the songs `appendSongs` adds: all of them unless set.
+    var appends: Int?
+    private(set) var appended: [[String]] = []
+    func appendSongs(_ catalogIDs: [String]) async -> Int {
+        appended.append(catalogIDs)
+        return appends ?? catalogIDs.count
     }
     var appleMusicHere: AppleMusicSource?
     func appleMusicSource() async -> AppleMusicSource? { appleMusicHere }
@@ -128,9 +139,72 @@ private func continuable(state: PlaybackState = .playing, revision: UInt64 = 1) 
         h.clock.advance(42)   // 42 s into the song since the Mac's last state
         let phone = FakePhoneMusic()
         #expect(await h.model.continueOnPhone(with: phone) == .continued)
-        #expect(phone.asked.first?.ids == ["1102360418", "1102359994", "1102359746"], "songs without a catalogue ID are skipped")
+        #expect(phone.asked.first?.ids == ["1102360418", "1102359994", "1102359746"], "songs not in the catalogue here are skipped")
+        #expect(phone.searches == ["Uploaded demo Me"], "the one without a catalogue ID was looked up")
         #expect(phone.asked.first?.position == 42)
         #expect(await h.transport.sent.map(\.kind) == [.pause])
+    }
+
+    // MARK: Without the Mac (25 November 2026: a laptop asleep in a bag on the drive to work)
+
+    private func away(_ h: Harness, _ away: MacAway) async {
+        await h.transport.emit(.connection(.macOffline(macName: "Studio Mac", away: away)))
+        await eventually("the Mac away") { h.model.connection == .macOffline(macName: "Studio Mac", away: away) }
+    }
+
+    @Test func withTheMacAsleepItsLastSongPlaysHereAndTheMacIsLeftAlone() async {
+        let (h, task) = await ready(continuable(state: .paused))
+        defer { task.cancel() }
+        await away(h, .asleep)
+        let phone = FakePhoneMusic()
+        #expect(await h.model.continueOnPhone(with: phone) == .continuedWithoutMac(.asleep))
+        #expect(phone.asked.first?.ids == ["1102360418", "1102359994", "1102359746"])
+        #expect(phone.asked.first?.position == 0, "paused at the start of the song in the test's state")
+        #expect(await h.transport.sent.isEmpty, "nothing sent to a Mac that isn't there")
+        #expect(HandoverMemory.defaults(h.defaults).load()?.catalogID == "1102360418", "kept for the way back")
+    }
+
+    @Test func aMacGoneWhilePlayingLongAgoStartsTheSongFromTheTop() async {
+        let (h, task) = await ready()
+        defer { task.cancel() }
+        await away(h, .lost)
+        h.clock.advance(7200)   // two hours of a "playing" state that nothing updated
+        let phone = FakePhoneMusic()
+        #expect(await h.model.continueOnPhone(with: phone) == .continuedWithoutMac(.lost))
+        #expect(phone.asked.first?.position == 0)
+    }
+
+    @Test func withoutTheMacAppleMusicsHistoryIsntSearched() async {
+        var m = continuable(state: .paused)
+        m.fromAppleMusic = true
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        await away(h, .asleep)
+        let phone = FakePhoneMusic()
+        #expect(await h.model.continueOnPhone(with: phone) == .continuedWithoutMac(.asleep))
+        #expect(phone.asked.first?.ids.first == "1102360418", "straight to the song and the Mac's Up Next")
+    }
+
+    @Test func outOfTimeTheStationToFollowIsLeftOut() async {
+        let (h, task) = await ready()
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        #expect(await h.model.continueOnPhone(with: phone, within: 0.001) == .continued)
+        #expect(phone.stationSeeds.isEmpty, "only adds to what plays later, so dropped when time is short")
+        #expect(phone.asked.count == 1, "the song itself still played")
+    }
+
+    @Test func theWithoutMacMessageNamesTheSongAndWhy() {
+        #expect(ContinueOutcome.withoutMacMessage(.asleep, title: "Low Sun") == "Your Mac is asleep, so “Low Sun” is playing here from where it stopped.")
+        #expect(ContinueOutcome.withoutMacMessage(.lost, title: nil) == "Your Mac isn’t connected, so your Mac’s song is playing here from where it last was.")
+    }
+
+    @Test func anUnknownAwayReasonReadsAsLost() throws {
+        let json = #"{"mac":{"id":"m","name":"Mac"},"macConnected":false,"macAway":"hibernating"}"#
+        let state = try StandByWire.makeDecoder().decode(SessionState.self, from: Data(json.utf8))
+        #expect(state.macAway == .lost)
+        let old = #"{"mac":{"id":"m","name":"Mac"},"macConnected":false}"#
+        #expect(try StandByWire.makeDecoder().decode(SessionState.self, from: Data(old.utf8)).macAway == nil)
     }
 
     @Test func leavesTheMacPlayingWhenAppleMusicDoesntStart() async {

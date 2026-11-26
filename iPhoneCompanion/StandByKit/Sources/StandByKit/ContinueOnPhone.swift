@@ -61,15 +61,24 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// the song plays. False when the library here hasn't the song.
     func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval) async -> Bool
     /// Plays the song from the Apple Music playlist or album that Apple
-    /// Music's recently played lists and that has it, or, with
-    /// `allowStation`, the song followed by the station listed last. For a
-    /// Mac playing from outside its library (`fromAppleMusic`). Returns what
-    /// it played; nil when recently played has nothing with the song yet
-    /// (it lags about a minute) or Music didn't start it.
-    /// `following` is what the Mac queues after the song: a playlist or
-    /// album only counts when its songs match (`ContainerMatch`).
-    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource?
+    /// Music's recently played lists and that has it, or else from the
+    /// song's own album in the catalogue, or, with `allowStation`, the song
+    /// followed by the station listed last. For a Mac playing from outside
+    /// its library (`fromAppleMusic`). Returns what it played; nil when
+    /// nothing has the song yet (recently played lags about a minute) or
+    /// Music didn't start it, and then nothing is left playing.
+    /// `title` and `artist` are the Mac's song's, found by them when the
+    /// playlist lists it under another catalogue ID; `following` is what the
+    /// Mac queues after the song: a playlist or album only counts when its
+    /// songs match (`ContainerMatch`). `note` hears why nothing counted, for
+    /// the log (26 November 2026).
+    func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                            note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource?
+    /// Adds these catalogue songs, in this order, after everything queued
+    /// here: the Mac's next songs once a list started here runs out, such as
+    /// Autoplay's after an album's last song. Returns how many it added.
+    func appendSongs(_ catalogIDs: [String]) async -> Int
     /// Where Apple Music here plays its current song from when it's not a
     /// library playlist or album: an Apple Music playlist or album that
     /// recently played lists and has the song, or the station listed last.
@@ -98,8 +107,10 @@ extension PhoneMusicPlaying {
                      timeout: TimeInterval) async -> AlbumPlace? { nil }
     public func playShuffledLibrary(from catalogID: String, position: @escaping @MainActor () -> TimeInterval,
                                     timeout: TimeInterval) async -> Bool { false }
-    public func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                                   shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? { nil }
+    public func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
+                                   timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                                   note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource? { nil }
+    public func appendSongs(_ catalogIDs: [String]) async -> Int { 0 }
     public func appleMusicSource() async -> AppleMusicSource? { nil }
     public func addToLibrary(_ source: AppleMusicSource) async -> Bool { false }
     public func isShufflingLibrary() async -> Bool { false }
@@ -130,7 +141,7 @@ public struct CatalogCandidate: Equatable, Sendable {
     /// are known. Covers by other artists and other versions don't count.
     public static func best(title: String, artist: String, duration: TimeInterval, in candidates: [CatalogCandidate]) -> CatalogCandidate? {
         let wanted = fold(title)
-        let lead = fold(artist.components(separatedBy: CharacterSet(charactersIn: ",&")).first ?? artist)
+        let lead = Self.lead(artist)
         func gap(_ c: CatalogCandidate) -> TimeInterval {
             guard let length = c.duration, duration > 0 else { return 0 }
             return abs(length - duration)
@@ -140,6 +151,11 @@ public struct CatalogCandidate: Equatable, Sendable {
     }
 
     public static let durationTolerance: TimeInterval = 5
+
+    /// The song's first artist, folded: "A, B & C" is "a".
+    public static func lead(_ artist: String) -> String {
+        fold(artist.components(separatedBy: CharacterSet(charactersIn: ",&")).first ?? artist)
+    }
 
     public static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
@@ -205,9 +221,23 @@ public enum ContinueOutcome: Equatable, Sendable {
     case resumedHere
     /// As `resumedHere`, but Apple Music here was already playing.
     case alreadyPlayingHere
+    /// The Mac wasn't connected (asleep, closed, or gone), so the Mac's last
+    /// song plays here from where it stopped, and the Mac wasn't asked to
+    /// pause (25 November 2026: a laptop in a bag on the drive to work).
+    case continuedWithoutMac(MacAway)
 }
 
 extension ContinueOutcome {
+    /// What to say when the song plays here without the Mac (25 November 2026).
+    public static func withoutMacMessage(_ away: MacAway, title: String?) -> String {
+        let song = title.map { "“\($0)”" } ?? "your Mac’s song"
+        return switch away {
+        case .asleep: "Your Mac is asleep, so \(song) is playing here from where it stopped."
+        case .quit: "Second Chair isn’t open on your Mac, so \(song) is playing here from where it last was."
+        case .lost: "Your Mac isn’t connected, so \(song) is playing here from where it last was."
+        }
+    }
+
     /// What to say when Apple Music here didn't start the Mac's song, given
     /// what it's playing now. "Couldn't start playback on your iPhone. Music
     /// is still playing on your Mac." read as if the phone were silent when

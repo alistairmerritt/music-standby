@@ -22,6 +22,10 @@ struct ContinueOnIPhoneIntent: AppIntent {
         }
     }
 
+    /// The hand-over's own limit, in seconds, after reading the relay (at most
+    /// 10 s). Shortcuts gives an action about half a minute; Apple doesn't say.
+    static let timeLimit: TimeInterval = 15
+
     /// Each step to the device log, as in the car there's nothing else to read.
     @MainActor static func log(_ text: String) { shortcutLog.log("\(text, privacy: .public)") }
 
@@ -37,15 +41,21 @@ struct ContinueOnIPhoneIntent: AppIntent {
         // offline Mac can leave no song to continue, which is not the song's
         // fault (20 November 2026, a CarPlay automation with the Mac asleep).
         var macConnected = true
+        var title: String?
+        // Within Shortcuts' time: before 25 November 2026 a run in the car took
+        // 18 minutes and Shortcuts said "an unknown error occurred".
         var outcome = try await ShortcutRemote.run { remote in
-            macConnected = try await remote.read().macConnected
-            return await remote.handover(record: Self.log).continueOnPhone(with: player, timeout: canOpen ? 6 : 10, from: .shortcuts)
+            let state = try await remote.read()
+            macConnected = state.macConnected
+            title = state.playback?.track?.title
+            return await remote.handover(record: Self.log)
+                .continueOnPhone(with: player, timeout: canOpen ? 6 : 10, within: Self.timeLimit, from: .shortcuts)
         }
         if outcome == .didNotStart, canOpen {
             try await continueInForeground("Open Second Chair to start the song on your iPhone?", alwaysConfirm: false)
             outcome = try await ShortcutRemote.run { remote in
                 try await remote.read()
-                return await remote.handover(record: Self.log).continueOnPhone(with: player, from: .shortcuts)
+                return await remote.handover(record: Self.log).continueOnPhone(with: player, within: Self.timeLimit, from: .shortcuts)
             }
         }
         let dialog: IntentDialog
@@ -56,6 +66,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
         // with a CarPlay automation: carry on with what the phone has.
         case .resumedHere: dialog = "Continuing where your iPhone left off."
         case .alreadyPlayingHere: dialog = "Already playing on your iPhone."
+        case .continuedWithoutMac(let away): dialog = IntentDialog(stringLiteral: ContinueOutcome.withoutMacMessage(away, title: title))
         case .unavailable where !macConnected: throw ShortcutError(ShortcutError.notConnected)
         case .unavailable: throw ShortcutError("Nothing on your Mac can be continued here. The song has to be in Apple Music.")
         case .notAllowed: throw ShortcutError("Allow access to Apple Music in Settings to continue listening on your iPhone.")

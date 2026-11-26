@@ -215,9 +215,110 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(phone.appleMusicAsked.count == 1)
         #expect(phone.appleMusicAsked.first?.shuffled == true)
         #expect(phone.appleMusicAsked.first?.allowStation == false, "four songs ahead on the Mac: not a station")
-        #expect(phone.appleMusicAsked.first?.following == m.upNext?.compactMap(\.catalogID),
+        #expect(phone.appleMusicAsked.first?.following == m.upNext,
                 "the Mac's next songs go along, so an album that merely has the song isn't taken for the playlist")
+        #expect(phone.appleMusicAsked.first?.title == "Song", "and the song's title, for a playlist that lists it under another ID")
         #expect(phone.asked.isEmpty)
+    }
+
+    /// 26 November 2026: the Mac two songs from the end of an Apple Music
+    /// album, with Autoplay's songs after them. The album plays here, then
+    /// the Mac's next songs, in its order, as they would have on the Mac.
+    private func nearTheEndOfAnAppleMusicAlbum(shuffled: Bool = false) -> PlaybackMessage {
+        var m = playingFromAA()
+        m.playlist = nil
+        m.fromAppleMusic = true
+        m.shuffled = shuffled
+        m.upNext = [QueuedTrack(catalogID: "2000000011", title: "Album Eleven", artist: "Made-Up Band", duration: 312),
+                    QueuedTrack(catalogID: "2000000012", title: "Album Twelve", artist: "Made-Up Band", duration: 277),
+                    QueuedTrack(catalogID: nil, title: "Autoplay One", artist: "Band", duration: 200),
+                    QueuedTrack(catalogID: "2000000102", title: "Autoplay Two", artist: "Artist", duration: 200)]
+        return m
+    }
+
+    private let albumNearItsEnd = AppleMusicSource.album(AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 12, index: 9),
+                                                         id: "1440000001")
+
+    @Test func theMacsSongsAfterAnAppleMusicAlbumFollowItHere() async {
+        let (h, task) = await ready(nearTheEndOfAnAppleMusicAlbum())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.catalog = [CatalogCandidate(id: "901", title: "Autoplay One", artist: "Band", duration: 200)]
+        phone.playsFromAppleMusic = albumNearItsEnd
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.asked.isEmpty, "the album itself, not a list of the Mac's songs")
+        #expect(phone.appended == [["901", "2000000102"]],
+                "after the album's last two songs, the Mac's next ones, found here where the Mac has no ID")
+        #expect(phone.stationSeeds.isEmpty, "four songs to come")
+        #expect(h.model.log.contains { $0.message == "Continue on iPhone: then the Mac's next 2 songs, after the album" })
+    }
+
+    @Test func withoutTheMacsLaterSongsAStationFollowsTheAlbum() async {
+        let (h, task) = await ready(nearTheEndOfAnAppleMusicAlbum())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.playsFromAppleMusic = albumNearItsEnd
+        phone.appends = 0
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.appended.count == 1)
+        #expect(phone.stationSeeds == ["1102360418"], "two songs left, then the song's station")
+        #expect(h.model.log.contains { $0.message == "Continue on iPhone: couldn't add the Mac's songs after the album" })
+    }
+
+    @Test func aShuffledOrRoomyListHasNothingAddedAfterIt() async {
+        // Shuffled, the Mac's next songs are the album's own, in no order.
+        let (h, task) = await ready(nearTheEndOfAnAppleMusicAlbum(shuffled: true))
+        defer { task.cancel() }
+        let shuffled = FakePhoneMusic()
+        shuffled.playsFromAppleMusic = .album(AlbumPlace(title: "Made-Up Album", artist: "Made-Up Band", count: 12, index: 9, shuffled: true),
+                                              id: "1440000001")
+        #expect(await h.model.continueOnPhone(with: shuffled) == .continued)
+        #expect(shuffled.appended.isEmpty)
+        // A playlist with more songs left than the Mac sent.
+        let (h2, task2) = await ready(nearTheEndOfAnAppleMusicAlbum())
+        defer { task2.cancel() }
+        let roomy = FakePhoneMusic()
+        roomy.playsFromAppleMusic = .playlist(PlaylistPlace(name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5))
+        #expect(await h2.model.continueOnPhone(with: roomy) == .continued)
+        #expect(roomy.appended.isEmpty)
+    }
+
+    /// The log says why recently played didn't do: before 26 November 2026
+    /// it said only that Apple Music didn't list what the Mac plays from,
+    /// even when it had, and the album hadn't started.
+    @Test func whyAppleMusicDidntPlayTheMacsListGoesInTheLog() async {
+        let (h, task) = await ready(nearTheEndOfAnAppleMusicAlbum())
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.appleMusicNotes = ["recently played has a library album whose next songs aren't the Mac's", "the album didn't start here"]
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        let log = h.model.log.map(\.message)
+        #expect(log.contains("Continue on iPhone: recently played has a library album whose next songs aren't the Mac's"))
+        #expect(log.contains("Continue on iPhone: the album didn't start here"))
+        #expect(phone.asked.count == 1, "then the Mac's next songs")
+    }
+
+    /// 25 November 2026: a Mac playing an Apple Music playlist had catalogue
+    /// IDs for only the songs in its library, 9 of its 18 next songs, and the
+    /// phone queued just those 9 when recently played didn't list the playlist.
+    @Test func theMacsNextSongsWithoutCatalogueIDsAreFoundHere() async {
+        var m = message(state: .playing)   // "Song" by "Artist", 200 s, no catalogue ID: outside the Mac's library
+        m.fromAppleMusic = true
+        m.upNext = [QueuedTrack(catalogID: nil, title: "Outside One", artist: "Band", duration: 200),
+                    QueuedTrack(catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312),
+                    QueuedTrack(catalogID: nil, title: "Outside Two", artist: "Band & Friend", duration: 180),
+                    QueuedTrack(catalogID: nil, title: "Nowhere", artist: "Band", duration: 150)]
+        let (h, task) = await ready(m)
+        defer { task.cancel() }
+        let phone = FakePhoneMusic()
+        phone.catalog = [CatalogCandidate(id: "777", title: "Song", artist: "Artist", duration: 200),
+                         CatalogCandidate(id: "901", title: "Outside One", artist: "Band", duration: 200),
+                         CatalogCandidate(id: "902", title: "Outside Two", artist: "Band & Friend", duration: 181)]
+        #expect(await h.model.continueOnPhone(with: phone) == .continued)
+        #expect(phone.appleMusicAsked.first?.id == "777", "recently played is tried first")
+        #expect(phone.asked.first?.ids == ["777", "901", "1102359994", "902"],
+                "in the Mac's order, with what the phone found; one it can't find is left out")
+        #expect(Set(phone.searches) == ["Song Artist", "Outside One Band", "Outside Two Band & Friend", "Nowhere Band"])
     }
 
     @Test func aStationOnTheMacFollowsTheSongHereAndRecentlyPlayedLaggingFallsBack() async {

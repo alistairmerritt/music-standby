@@ -5,8 +5,9 @@ public enum ConnectionState: Equatable, Sendable {
     case connecting
     case connected(macName: String)
     /// The relay answers but the Mac isn't connected to it. The relay decides
-    /// when that ends the session, and says so.
-    case macOffline(macName: String)
+    /// when that ends the session, and says so. `away` is why, when the relay
+    /// knows: asleep, quit or lost (25 November 2026).
+    case macOffline(macName: String, away: MacAway? = nil)
     /// The link dropped and the transport is retrying. Temporary: a session
     /// survives this for the grace period in `SessionLifecyclePolicy`.
     case reconnecting

@@ -97,7 +97,7 @@ public final class MacRemote {
     /// Continue on iPhone and Continue on Mac from the relay's state. Read
     /// first: with no state, there is nothing to continue.
     public func handover(record: @escaping @MainActor (String) -> Void = { _ in }) -> Handover {
-        Handover(
+        var handover = Handover(
             latest: { [self] in state?.playback },
             refresh: { [self] in _ = try? await read() },
             send: { [self] in try await send($0) },
@@ -106,6 +106,12 @@ public final class MacRemote {
             sleep: sleep,
             memory: memory
         )
+        // Without the Mac (asleep, closed or gone): from the relay's last state.
+        handover.macAway = { [self] in
+            guard let state, !state.macConnected else { return nil }
+            return state.macAway ?? .lost
+        }
+        return handover
     }
 
     /// The session to name: the relay's current one, or none when it has

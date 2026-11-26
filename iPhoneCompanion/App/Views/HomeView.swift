@@ -237,7 +237,10 @@ extension ConnectionState {
         case .disconnected: "Not Connected"
         case .connecting: "Connecting…"
         case .connected: "Connected"
-        case .macOffline: "Offline"
+        // Asleep when the Mac said so as it went to sleep; otherwise it's just
+        // not there (25 November 2026: it said Connected while asleep).
+        case .macOffline(_, away: .asleep): "Asleep"
+        case .macOffline: "Unavailable"
         case .reconnecting: "Reconnecting…"
         case .failed: "Can’t Connect"
         }
@@ -283,7 +286,7 @@ private struct ShowOnLockScreenButton: View {
 }
 
 #if DEBUG
-/// `-screenshotHome offline|nothing|notSetUp|access|disconnected`: Home in a
+/// `-screenshotHome offline|asleep|nothing|notSetUp|access|disconnected`: Home in a
 /// state the simulated Mac can't reach by itself, for screenshots.
 @MainActor
 enum HomeScreenshot {
@@ -296,6 +299,7 @@ enum HomeScreenshot {
     static var connection: ConnectionState? {
         switch state {
         case "offline": .macOffline(macName: "MacBook Pro")
+        case "asleep": .macOffline(macName: "MacBook Pro", away: .asleep)
         case "disconnected": .disconnected
         case "reconnecting": .reconnecting
         default: nil

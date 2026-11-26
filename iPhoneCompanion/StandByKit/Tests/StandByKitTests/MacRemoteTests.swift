@@ -302,6 +302,44 @@ private let handoverStart = Date(timeIntervalSince1970: 1_000_000)
         #expect(await relay.sent.map(\.command.kind) == [.pause], "the Mac pauses as before")
     }
 
+    /// The Shortcuts action in the car, with the Mac asleep in a bag (25
+    /// November 2026): the relay's last state plays here, nothing is sent.
+    @Test func aSleepingMacsLastSongPlaysHereWithoutAskingIt() async throws {
+        var song = track()
+        song.catalogID = "1102360418"
+        let playback = message(state: .paused, track: song)
+        let relay = FakeRelay(SessionState(sessionID: "s1", mac: PairedMac(id: "a", name: "Studio Mac"), macConnected: false,
+                                           macAway: .asleep, playback: playback, attributes: nil))
+        let phone = FakePhoneMusic()
+        let remote = MacRemote(client: relay, sleep: { _ in })
+        try await remote.read()
+        #expect(await remote.handover().continueOnPhone(with: phone, within: 15) == .continuedWithoutMac(.asleep))
+        #expect(phone.asked.first?.ids.first == "1102360418")
+        #expect(await relay.sent.isEmpty)
+    }
+
+    /// The car again, with an Apple Music playlist on the Mac: it has
+    /// catalogue IDs only for the songs in its library, and recently played
+    /// isn't asked without the Mac, so the phone finds the rest itself.
+    @Test func aSleepingMacsNextSongsAreFoundHereToo() async throws {
+        var song = track()
+        song.catalogID = "1102360418"
+        var playback = message(state: .paused, track: song)
+        playback.fromAppleMusic = true
+        playback.upNext = [QueuedTrack(catalogID: nil, title: "Outside One", artist: "Band", duration: 200),
+                           QueuedTrack(catalogID: "1102359994", title: "Lady Divine", artist: "Alela Diane", duration: 312)]
+        let relay = FakeRelay(SessionState(sessionID: "s1", mac: PairedMac(id: "a", name: "Studio Mac"), macConnected: false,
+                                           macAway: .asleep, playback: playback, attributes: nil))
+        let phone = FakePhoneMusic()
+        phone.catalog = [CatalogCandidate(id: "901", title: "Outside One", artist: "Band", duration: 200)]
+        let remote = MacRemote(client: relay, sleep: { _ in })
+        try await remote.read()
+        #expect(await remote.handover().continueOnPhone(with: phone, within: 15) == .continuedWithoutMac(.asleep))
+        #expect(phone.appleMusicAsked.isEmpty)
+        #expect(phone.asked.first?.ids == ["1102360418", "901", "1102359994"])
+        #expect(await relay.sent.isEmpty)
+    }
+
     @Test func songsWithoutACatalogueIDDontCountAsToCome() async throws {
         let phone = FakePhoneMusic()
         _ = try await continueHere(mac(upNext: ["1102359994", nil, nil, nil]), phone)

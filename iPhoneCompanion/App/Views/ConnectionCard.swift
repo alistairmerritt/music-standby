@@ -75,6 +75,8 @@ struct ConnectionCard: View {
         return switch connection {
         case .connected: .good
         case .connecting, .reconnecting: .working
+        // A sleeping Mac isn't a fault: grey, with nothing to reconnect.
+        case .macOffline(_, away: .asleep): .neutral
         case .macOffline, .disconnected, .failed: .problem
         }
     }
@@ -89,6 +91,8 @@ struct ConnectionCard: View {
     private var detail: String? {
         if isDemo { return "A simulated Mac" }
         return switch connection {
+        case .macOffline(_, away: .asleep): "Second Chair will reconnect when your Mac wakes."
+        case .macOffline(_, away: .quit): "Open Second Chair on your Mac."
         case .macOffline: "Wake your Mac and check Second Chair is open on it."
         case .disconnected: "Check this iPhone is online."
         case .failed(let reason): reason

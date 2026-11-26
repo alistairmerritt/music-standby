@@ -10,10 +10,10 @@ extension WidgetActions {
             var macConnected = true
             let outcome = try await ShortcutRemote.run { remote in
                 macConnected = try await remote.read().macConnected
-                return await remote.handover().continueOnPhone(with: player, from: .widget)
+                return await remote.handover().continueOnPhone(with: player, within: ContinueOnIPhoneIntent.timeLimit, from: .widget)
             }
             switch outcome {
-            case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere: return
+            case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere, .continuedWithoutMac: return
             case .unavailable where !macConnected: throw WidgetActionError(message: ShortcutError.notConnected)
             case .unavailable: throw WidgetActionError(message: "Nothing on your Mac can be continued here. The song has to be in Apple Music.")
             case .notAllowed: throw WidgetActionError(message: "Allow access to Apple Music in Settings to continue listening on your iPhone.")

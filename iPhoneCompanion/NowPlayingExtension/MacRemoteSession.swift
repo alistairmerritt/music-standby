@@ -25,6 +25,8 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
     /// makes the system read the session again and pick the image up.
     private var fetchedArtwork: String?
     @ObservationIgnored private var fetchingArtwork: String?
+    /// For the whole process: iOS may ask through more than one session.
+    nonisolated static let handovers = ArtworkHandoverGate()
 
     init(attributes: MacPlaybackAttributes) {
         id = attributes.id
@@ -120,6 +122,7 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
         let store = services.artwork
         let artworkURL = track.artworkURL
         let logger = logger
+        let handovers = Self.handovers
         // iOS asks for an item's artwork when the item first appears, not when
         // artwork is added to it later: with the song's id alone, art that
         // followed the title (the Mac waits for Music to settle, or the
@@ -146,13 +149,20 @@ final class MacRemoteSession: RemoteMediaSessionRepresentable {
                     // below is the only copy (16 November 2026).
                     let cached = store.isCached(id: artworkID)
                     logger.log("Artwork \(artworkID.prefix(12), privacy: .public) asked for at \(Int(size.width))x\(Int(size.height)), cached: \(cached); memory \(Self.footprint(), privacy: .public)")
+                    // One cover at a time: StandBy asks at two sizes at once,
+                    // and two handed over together got the extension killed
+                    // (26 November 2026, `ArtworkHandoverGate`).
+                    let waited = await handovers.enter()
                     do {
-                        let representation = try ArtworkRepresentation(data: try await store.resolve(id: artworkID, remoteURL: artworkURL))
+                        let data = try await store.resolve(id: artworkID, remoteURL: artworkURL)
                         MacRemoteSession.relieveMemory()
-                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over; memory \(Self.footprint(), privacy: .public)")
+                        let representation = try ArtworkRepresentation(data: data)
+                        logger.log("Artwork \(artworkID.prefix(12), privacy: .public) handed over at \(Int(size.width))x\(Int(size.height))\(waited ? ", after the one before" : ""); memory \(Self.footprint(), privacy: .public)")
+                        await handovers.leave()
                         return representation
                     } catch {
                         logger.error("Artwork \(artworkID.prefix(12), privacy: .public) not handed over: \(error.localizedDescription, privacy: .public)")
+                        await handovers.leave()
                         throw error
                     }
                 }

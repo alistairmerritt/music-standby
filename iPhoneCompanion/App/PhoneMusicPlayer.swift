@@ -214,7 +214,7 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     /// here shows after about a minute. Apple's servers answer it, so a
     /// hand-over waits at most `recentlyPlayedWait` for them.
     private func recentlyPlayed(considering limit: Int) async -> [RecentlyPlayed] {
-        await recentContainers(limit).map { item -> RecentlyPlayed in
+        (await recentContainers(limit) ?? []).map { item -> RecentlyPlayed in
             switch item {
             case .playlist(let playlist): RecentlyPlayed(kind: .playlist, name: playlist.name, id: playlist.id.rawValue)
             case .album(let album): RecentlyPlayed(kind: .album, name: album.title, id: album.id.rawValue)
@@ -376,30 +376,32 @@ extension SystemMusicPhonePlayer {
     // MARK: Apple Music outside the library
 
     /// The newest `limit` things Apple Music lists as recently played, as
-    /// MusicKit gives them, within `recentlyPlayedWait`.
+    /// MusicKit gives them, within `recentlyPlayedWait`; nil when Apple's
+    /// servers didn't answer in that time.
     ///
     /// One request serves a whole hand-over: the newest three are kept for
     /// `recentCacheLife`, and each caller takes what it needs. Before
     /// 19 November 2026 each caller asked Apple's servers itself, up to 3 s
-    /// apiece, and a hand-over asked three times.
-    private func recentContainers(_ limit: Int) async -> [RecentlyPlayedMusicItem] {
+    /// apiece, and a hand-over asked three times. No answer isn't kept, so
+    /// the next caller asks again (26 November 2026).
+    private func recentContainers(_ limit: Int) async -> [RecentlyPlayedMusicItem]? {
         guard MusicAuthorization.currentStatus == .authorized else { return [] }
         if let cached = recentCache, Date().timeIntervalSince(cached.at) < Self.recentCacheLife {
             return Array(cached.items.prefix(limit))
         }
-        let items = await Self.fetchRecentContainers(3)
+        guard let items = await Self.fetchRecentContainers(3) else { return nil }
         recentCache = (Date(), items)
         return Array(items.prefix(limit))
     }
 
     nonisolated static let recentCacheLife: TimeInterval = 15
 
-    private nonisolated static func fetchRecentContainers(_ limit: Int) async -> [RecentlyPlayedMusicItem] {
+    private nonisolated static func fetchRecentContainers(_ limit: Int) async -> [RecentlyPlayedMusicItem]? {
         await withTaskGroup(of: [RecentlyPlayedMusicItem]?.self) { group in
             group.addTask {
                 var request = MusicRecentlyPlayedContainerRequest()
                 request.limit = limit
-                guard let items = try? await request.response().items else { return [] }
+                guard let items = try? await request.response().items else { return nil }
                 return Array(items.prefix(limit))
             }
             group.addTask {
@@ -408,7 +410,7 @@ extension SystemMusicPhonePlayer {
             }
             let first = await group.next() ?? nil
             group.cancelAll()
-            return first ?? []
+            return first
         }
     }
 
@@ -454,7 +456,7 @@ extension SystemMusicPhonePlayer {
         let shuffled = player.shuffleMode != .off
         let queueIndex = player.indexOfNowPlayingItem
         // Shuffling, Music's queue can't confirm a list, so only the latest is trusted.
-        for (n, container) in await recentContainers(shuffled ? 1 : 2).enumerated() {
+        for (n, container) in (await recentContainers(shuffled ? 1 : 2) ?? []).enumerated() {
             switch container {
             case .playlist(let playlist):
                 guard let (loaded, entries) = await Self.withEntries(playlist) else { continue }
@@ -531,53 +533,159 @@ extension SystemMusicPhonePlayer {
 
     /// `following` is what the Mac queues after the song. A playlist or album
     /// that has the song only counts when its songs match (`ContainerMatch`):
-    /// a song's own album always has it (seen 19 November 2026).
-    func findInRecentlyPlayed(_ catalogID: String, allowStation: Bool, following: [String] = [], shuffled: Bool = false) async -> RecentFind? {
+    /// a song's own album always has it (seen 19 November 2026). With
+    /// `title`, the song also counts under another catalogue ID, and in a
+    /// list in the library, whose songs have library IDs. The newest three
+    /// are looked at; `note` hears why none counted.
+    func findInRecentlyPlayed(_ catalogID: String, title: String? = nil, artist: String? = nil, allowStation: Bool,
+                              following: [QueuedTrack] = [], shuffled: Bool = false,
+                              note: @MainActor (String) -> Void = { _ in }) async -> RecentFind? {
         guard access == .allowed else { return nil }
-        for (n, container) in await recentContainers(2).enumerated() {
+        guard let recent = await recentContainers(3) else {
+            note("recently played didn't answer")
+            return nil
+        }
+        var seen: [String] = []
+        func place(in songs: [ContainerMatch.Song], _ kind: String) -> Int? {
+            if let index = ContainerMatch.place(of: catalogID, title: title, artist: artist, in: songs, following: following,
+                                                inOrder: !shuffled) { return index }
+            let has = ContainerMatch.place(of: catalogID, title: title, artist: artist, in: songs, following: [], inOrder: true) != nil
+            seen.append(has ? "\(kind) whose next songs aren't the Mac's" : "\(kind) without the song")
+            return nil
+        }
+        for (n, container) in recent.enumerated() {
             switch container {
             case .playlist(let playlist):
-                guard let (loaded, entries) = await Self.withEntries(playlist),
-                      let index = entries.firstIndex(where: { Self.songID($0) == catalogID }),
-                      ContainerMatch.accepts(entries.map(Self.songID), at: index, following: following, inOrder: !shuffled) else { continue }
+                guard let (loaded, entries) = await Self.withEntries(playlist) else {
+                    seen.append("a playlist that didn't load")
+                    continue
+                }
+                guard let index = place(in: entries.map(Self.listed), "a playlist") else { continue }
                 return .playlist(loaded, entries, index: index)
             case .album(let album):
-                guard let (loaded, tracks) = await Self.withTracks(album),
-                      let index = tracks.firstIndex(where: { $0.id.rawValue == catalogID }),
-                      ContainerMatch.accepts(tracks.map { $0.id.rawValue }, at: index, following: following, inOrder: !shuffled) else { continue }
+                guard let (loaded, tracks) = await Self.withTracks(album) else {
+                    seen.append("an album that didn't load")
+                    continue
+                }
+                guard let index = place(in: tracks.map(Self.listed), Self.isCatalogID(loaded.id.rawValue) ? "an album" : "a library album")
+                else { continue }
                 return .album(loaded, tracks, index: index)
             case .station(let station):
-                guard n == 0, allowStation else { continue }
+                guard n == 0, allowStation else {
+                    seen.append("a station")
+                    continue
+                }
                 return .station(station)
             @unknown default:
                 continue
             }
         }
+        note(seen.isEmpty ? "recently played lists nothing" : "recently played has \(seen.joined(separator: ", "))")
         return nil
     }
 
-    func playFromAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                            shuffled: Bool, allowStation: Bool, following: [String]) async -> AppleMusicSource? {
+    private static func listed(_ entry: Playlist.Entry) -> ContainerMatch.Song {
+        .init(id: songID(entry), title: entry.title, artist: entry.artistName)
+    }
+
+    private static func listed(_ track: Track) -> ContainerMatch.Song {
+        .init(id: track.id.rawValue, title: track.title, artist: track.artistName)
+    }
+
+    /// A catalogue ID is digits; the library's are `l.…`, `i.…`, `p.…`.
+    private static func isCatalogID(_ id: String) -> Bool {
+        !id.isEmpty && id.allSatisfy(\.isNumber)
+    }
+
+    /// The song's own album in the catalogue, when the Mac's next songs
+    /// follow it there: for an album recently played doesn't list (yet), or
+    /// lists as the library's copy, which has only the songs in the library
+    /// (26 November 2026). At least one of the Mac's next songs must agree,
+    /// so a playlist that merely has the song isn't taken for its album.
+    private func catalogAlbum(of catalogID: String, title: String, artist: String, following: [QueuedTrack],
+                              shuffled: Bool) async -> (album: Album, tracks: [Track], index: Int)? {
+        var request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: MusicItemID(catalogID))
+        request.properties = [.albums]
+        guard let albums = try? await request.response().items.first?.albums else { return nil }
+        for album in albums.prefix(2) {
+            guard let (loaded, tracks) = await Self.withTracks(album),
+                  let index = ContainerMatch.place(of: catalogID, title: title, artist: artist, in: tracks.map(Self.listed),
+                                                   following: following, inOrder: !shuffled, atLeast: 1) else { continue }
+            return (loaded, tracks, index)
+        }
+        return nil
+    }
+
+    /// `task`'s value, or nil once `seconds` pass; the task carries on.
+    private static func value<T: Sendable>(of task: Task<T?, Never>, within seconds: TimeInterval) async -> T? {
+        guard seconds > 0 else { return nil }
+        return await withTaskGroup(of: T?.self) { group in
+            group.addTask { await task.value }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(seconds))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// How long a hand-over keeps for the list to start once it's found.
+    private static let startReserve: TimeInterval = 3
+
+    func playFromAppleMusic(_ catalogID: String, title: String, artist: String, position: @escaping @MainActor () -> TimeInterval,
+                            timeout: TimeInterval, shuffled: Bool, allowStation: Bool, following: [QueuedTrack],
+                            note: @escaping @MainActor (String) -> Void) async -> AppleMusicSource? {
         let started = Date()
-        guard let found = await findInRecentlyPlayed(catalogID, allowStation: allowStation, following: following, shuffled: shuffled) else { return nil }
-        let left = max(1, timeout - Date().timeIntervalSince(started))
+        func left(keeping reserve: TimeInterval = 0) -> TimeInterval { max(1, timeout - Date().timeIntervalSince(started) - reserve) }
+        // Alongside recently played: the song's own album in the catalogue.
+        let ownAlbum = Task { await self.catalogAlbum(of: catalogID, title: title, artist: artist, following: following, shuffled: shuffled) }
+        defer { ownAlbum.cancel() }
+        var found = await findInRecentlyPlayed(catalogID, title: title, artist: artist, allowStation: allowStation,
+                                               following: following, shuffled: shuffled, note: note)
+        // The library's copy of an album has only the songs in the library;
+        // the catalogue's has them all.
+        var libraryAlbum = false
+        if case .album(let album, _, _)? = found { libraryAlbum = !Self.isCatalogID(album.id.rawValue) }
+        if found == nil || libraryAlbum {
+            if let own = await Self.value(of: ownAlbum, within: left(keeping: Self.startReserve)) {
+                if found == nil { note("found the Mac's album through the song, as recently played doesn't list it") }
+                found = .album(own.album, own.tracks, index: own.index)
+            } else if found == nil {
+                note("the song's own album doesn't match the Mac's next songs, or didn't answer in time")
+            }
+        }
+        guard let found else { return nil }
         switch found {
         case .playlist(let playlist, let entries, let index):
             player.shuffleMode = .off
             SystemMusicPlayer.shared.queue = SystemMusicPlayer.Queue(playlist: playlist, startingAt: entries[index])
-            guard await startAppleMusic(catalogID, position: position, timeout: left, shuffle: shuffled) else { return nil }
+            // The playlist's own ID for the song (found by title if the search
+            // here found another release), the Mac's, or its name.
+            let song = ContainerMatch.Expected(catalogIDs: Set([catalogID, Self.songID(entries[index])].compactMap { $0 }),
+                                               title: entries[index].title, artist: entries[index].artistName)
+            guard await startAppleMusic(song, position: position, timeout: left(), shuffle: shuffled) else {
+                note("the playlist didn't start here")
+                return nil
+            }
             return .playlist(PlaylistPlace(name: playlist.name, cloudID: playlist.id.rawValue, count: entries.count, index: index,
                                            shuffled: shuffled ? true : nil))
         case .album(let album, let tracks, let index):
             player.shuffleMode = .off
             SystemMusicPlayer.shared.queue = SystemMusicPlayer.Queue(album: album, startingAt: tracks[index])
-            guard await startAppleMusic(catalogID, position: position, timeout: left, shuffle: shuffled) else { return nil }
+            let song = ContainerMatch.Expected(catalogIDs: [catalogID, tracks[index].id.rawValue],
+                                               title: tracks[index].title, artist: tracks[index].artistName)
+            guard await startAppleMusic(song, position: position, timeout: left(), shuffle: shuffled) else {
+                note("the album didn't start here")
+                return nil
+            }
             return .album(AlbumPlace(title: album.title, artist: album.artistName, count: tracks.count, index: index,
                                      shuffled: shuffled ? true : nil), id: album.id.rawValue)
         case .station(let station):
             // The song first, then the station: a station started here
             // would begin on a song of its own.
-            guard await play(catalogIDs: [catalogID], position: position, timeout: left) else { return nil }
+            guard await play(catalogIDs: [catalogID], position: position, timeout: left()) else { return nil }
             do {
                 try await SystemMusicPlayer.shared.queue.insert(station, position: .tail)
             } catch {
@@ -587,9 +695,13 @@ extension SystemMusicPhonePlayer {
         }
     }
 
-    /// Plays the MusicKit queue just set and waits for the song, at `position()`.
-    private func startAppleMusic(_ catalogID: String, position: @escaping @MainActor () -> TimeInterval, timeout: TimeInterval,
-                                 shuffle: Bool) async -> Bool {
+    /// Plays the MusicKit queue just set and waits for its first song, at
+    /// `position()`. It counts as playing by any of its catalogue IDs, or
+    /// else by title and artist (`ContainerMatch.Expected`). If it doesn't
+    /// start, the queue stops, so the Mac's next songs can take its place
+    /// cleanly.
+    private func startAppleMusic(_ song: ContainerMatch.Expected, position: @escaping @MainActor () -> TimeInterval,
+                                 timeout: TimeInterval, shuffle: Bool) async -> Bool {
         do {
             try await SystemMusicPlayer.shared.prepareToPlay()
             try await SystemMusicPlayer.shared.play()
@@ -598,14 +710,33 @@ extension SystemMusicPhonePlayer {
         }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if player.playbackState == .playing, player.nowPlayingItem?.playbackStoreID == catalogID {
+            if player.playbackState == .playing, let item = player.nowPlayingItem,
+               song.isPlaying(storeID: item.playbackStoreID, title: item.title, artist: item.artist) {
                 player.currentPlaybackTime = position()
                 if shuffle { player.shuffleMode = .songs }
                 return true
             }
             try? await Task.sleep(for: .milliseconds(150))
         }
+        SystemMusicPlayer.shared.stop()
         return false
+    }
+
+    /// In the Mac's order: a catalogue request needn't keep it. Through
+    /// MusicKit's queue, as a station is added (`appendStation`).
+    func appendSongs(_ catalogIDs: [String]) async -> Int {
+        guard !catalogIDs.isEmpty else { return 0 }
+        let request = MusicCatalogResourceRequest<Song>(matching: \.id, memberOf: catalogIDs.map { MusicItemID($0) })
+        guard let found = try? await request.response().items else { return 0 }
+        let byID = Dictionary(found.map { ($0.id.rawValue, $0) }, uniquingKeysWith: { first, _ in first })
+        let songs = catalogIDs.compactMap { byID[$0] }
+        guard !songs.isEmpty else { return 0 }
+        do {
+            try await SystemMusicPlayer.shared.queue.insert(songs, position: .tail)
+            return songs.count
+        } catch {
+            return 0
+        }
     }
 
     // MARK: Repeat

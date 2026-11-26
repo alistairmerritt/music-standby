@@ -30,6 +30,15 @@ public struct Handover {
         }
     }
     private let arrival = Arrival()
+    /// When a hand-over must be done by, so a Shortcuts action finishes inside
+    /// the time iOS gives it. Before 25 November 2026 one ran for 18 minutes in
+    /// the car and Shortcuts said "an unknown error occurred".
+    @MainActor final class Budget { var deadline: Date? }
+    private let budget = Budget()
+    /// Whether the Mac isn't connected to the relay, and why; nil while it is.
+    /// Without it, Continue on iPhone plays the Mac's last song from where it
+    /// stopped and asks the Mac nothing.
+    var macAway: @MainActor () -> MacAway? = { nil }
     /// The Mac's last state, as known now.
     var latest: @MainActor () -> PlaybackMessage?
     /// Reads the Mac's state again, so `latest` has the newest.
@@ -69,11 +78,18 @@ public struct Handover {
     /// When the Mac hasn't moved since the last time (still paused on the
     /// song this phone took, where it stopped), it has nothing new, and
     /// Apple Music here, which has played on since, carries on instead.
+    /// `within` caps the whole hand-over, in seconds: waits shorten to fit,
+    /// and steps that only add something (a station to follow) are dropped.
     public func continueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
+                                within: TimeInterval? = nil,
                                 from source: HandoverSource = .unknown,
                                 arrived: (@MainActor () -> Void)? = nil) async -> ContinueOutcome {
         arrival.call = arrived
-        defer { arrival.call = nil }
+        budget.deadline = within.map { now().addingTimeInterval($0) }
+        defer {
+            arrival.call = nil
+            budget.deadline = nil
+        }
         let started = now()
         let outcome = await performContinueOnPhone(with: player, timeout: timeout)
         // Every hand-over, with where it came from (23 November 2026: six ran in
@@ -82,7 +98,8 @@ public struct Handover {
                              at: now(), in: widgetDefaults)
         // The widget shows the song as on the iPhone, with Continue on Mac.
         switch outcome {
-        case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere: WidgetSnapshot.markOnIPhone(true, in: widgetDefaults)
+        case .continued, .macStillPlaying, .resumedHere, .alreadyPlayingHere, .continuedWithoutMac:
+            WidgetSnapshot.markOnIPhone(true, in: widgetDefaults)
         case .unavailable, .notAllowed, .didNotStart: break
         }
         return outcome
@@ -92,9 +109,104 @@ public struct Handover {
         String(format: "%.1f s", now.timeIntervalSince(start))
     }
 
+    /// `cap`, or less if the hand-over's time is running out. Never below
+    /// `floor`, so a last step still gets a fair try.
+    private func remaining(_ cap: TimeInterval, floor: TimeInterval = 0) -> TimeInterval {
+        guard let deadline = budget.deadline else { return cap }
+        return max(floor, min(cap, deadline.timeIntervalSince(now())))
+    }
+
+    /// Whether the hand-over has a time limit.
+    private var isBudgeted: Bool { budget.deadline != nil }
+
+    /// `work`'s answer, or nil once `seconds` pass. For a step that waits on
+    /// the network and can't be told to stop; it carries on unseen.
+    private static func answer<T: Sendable>(within seconds: TimeInterval, _ work: @escaping @MainActor () async -> T?) async -> T? {
+        guard seconds > 0 else { return nil }
+        return await withCheckedContinuation { continuation in
+            let once = Once()
+            Task { @MainActor in
+                let value = await work()
+                if once.claim() { continuation.resume(returning: value) }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(seconds))
+                if once.claim() { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
+    @MainActor private final class Once {
+        private var claimed = false
+        func claim() -> Bool {
+            defer { claimed = true }
+            return !claimed
+        }
+    }
+
+    /// The Mac's next songs, with catalogue IDs found here for those the Mac
+    /// has none for: it has them only for songs in its library. On 25
+    /// November 2026 a Mac playing an Apple Music playlist had IDs for 9 of
+    /// its 18 next songs, and the phone queued only those 9. The searches
+    /// start with the hand-over and run while the Mac's playlist is tried.
+    @MainActor final class UpNextLookup {
+        private let upNext: [QueuedTrack]
+        private var found: [Int: String] = [:]
+        private var searches: Task<Void, Never>?
+        /// How many songs it looks up.
+        let asked: Int
+        var foundCount: Int { found.count }
+        /// How many next songs the Mac sent.
+        var count: Int { upNext.count }
+
+        init(_ upNext: [QueuedTrack], with player: any PhoneMusicPlaying) {
+            self.upNext = upNext
+            let missing = upNext.indices.filter { upNext[$0].catalogID == nil }
+            asked = missing.count
+            guard !missing.isEmpty else { return }
+            let each = missing.map { index in
+                let song = upNext[index]
+                return Task { @MainActor [weak self] in
+                    let candidates = await player.searchCatalog(title: song.title, artist: song.artist)
+                    guard let id = CatalogCandidate.best(title: song.title, artist: song.artist, duration: song.duration,
+                                                         in: candidates)?.id else { return }
+                    self?.found[index] = id
+                }
+            }
+            searches = Task { for search in each { await search.value } }
+        }
+
+        /// The next songs' catalogue IDs in order, from the one `after` the
+        /// first few on, once the searches end or `seconds` pass. A song not
+        /// found by then is left out.
+        func catalogIDs(within seconds: TimeInterval, after skipped: Int = 0) async -> [String] {
+            if let searches {
+                _ = await Handover.answer(within: seconds) {
+                    await searches.value
+                    return true
+                }
+            }
+            return upNext.indices.dropFirst(skipped).compactMap { upNext[$0].catalogID ?? found[$0] }
+        }
+    }
+
+    /// How long the Mac's queue may wait for the next songs to be found here.
+    /// A search took about a second on 25 November 2026.
+    static let upNextLookupWait: TimeInterval = 3
+    /// What a hand-over with a time limit keeps for the song to start.
+    static let startReserve: TimeInterval = 4
+
     private func performContinueOnPhone(with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> ContinueOutcome {
         guard let message = latest(), let track = message.track else { return .unavailable }
-        guard let catalogID = await catalogID(for: track, with: player) else {
+        let away = macAway()
+        if let away { record("Continue on iPhone: the Mac isn't connected (\(away.rawValue)); its last song from where it stopped") }
+        let found: String?
+        if isBudgeted, track.catalogID == nil {
+            found = await Self.answer(within: remaining(8)) { [self] in await catalogID(for: track, with: player) }
+        } else {
+            found = await catalogID(for: track, with: player)
+        }
+        guard let catalogID = found else {
             record("Continue on iPhone: \(track.title) isn't in the Apple Music catalogue")
             return .unavailable
         }
@@ -111,11 +223,19 @@ public struct Handover {
             record("Continue on iPhone: no access to Apple Music")
             return .notAllowed
         }
+        let upNext = UpNextLookup(Array((message.upNext ?? []).prefix(PlaybackMessage.upNextLimit)), with: player)
         let position: @MainActor () -> TimeInterval = { [latest, now] in
-            guard let current = latest(), current.track?.catalogID == catalogID else { return message.elapsed(at: Date()) }
-            return current.elapsed(at: now())
+            let at: TimeInterval
+            if let current = latest(), current.track?.catalogID == catalogID {
+                at = current.elapsed(at: now())
+            } else {
+                at = message.elapsed(at: Date())
+            }
+            // A Mac that went away while playing has no newer state, and its
+            // position runs on: past the song's end, start it from the top.
+            return track.duration > 0 && at >= track.duration - 2 ? 0 : at
         }
-        let wait = min(timeout, Self.playlistStartWait)
+        let wait = remaining(min(timeout, Self.playlistStartWait), floor: 2)
         // What the Mac plays from, itself, rather than the next 25 of its
         // songs (17 November 2026): a library playlist or album, in order or
         // shuffled; the whole library shuffled; or Apple Music outside the
@@ -147,27 +267,35 @@ public struct Handover {
                                               with: player)
             }
             record("Continue on iPhone: the song isn't in the library here; the Mac's next songs instead")
-        } else if message.fromAppleMusic == true {
+        } else if message.fromAppleMusic == true, away == nil {
+            // Not without the Mac: recently played can take a minute to list
+            // what the Mac played, and the Mac's Up Next is there already.
             // A station on the Mac lists one song ahead; a playlist or album,
             // more. And recently played names the station the Mac played
             // before for a while after it starts another.
             let settled = message.appleMusicSince.map { now().timeIntervalSince($0) >= Self.recentlyPlayedLag } ?? true
             let allowStation = (message.upNext?.count ?? 0) <= 1 && settled
-            switch await player.playFromAppleMusic(catalogID, position: position, timeout: wait + Self.recentlyPlayedAllowance,
+            switch await player.playFromAppleMusic(catalogID, title: track.title, artist: track.artist, position: position,
+                                                   timeout: remaining(wait + Self.recentlyPlayedAllowance, floor: 2),
                                                    shuffled: message.shuffled == true, allowStation: allowStation,
-                                                   following: (message.upNext ?? []).compactMap(\.catalogID)) {
+                                                   following: message.upNext ?? [],
+                                                   note: { [record] in record("Continue on iPhone: \($0)") }) {
             case .playlist(let played)?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's Apple Music playlist plays here, from song \(played.index + 1) of \(played.count)")
-                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
-                                              from: "the playlist", repeatMode: message.repeatMode, with: player)
+                let left = played.count - played.index - 1
+                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : left,
+                                              from: "the playlist", repeatMode: message.repeatMode, with: player,
+                                              then: played.isShuffled ? nil : theMacsSongs(after: left, of: "playlist", upNext, with: player))
             case .album(let played, _)?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
                 record("Continue on iPhone: the Mac's Apple Music album plays here, from song \(played.index + 1) of \(played.count)")
-                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : played.count - played.index - 1,
-                                              from: "the album", repeatMode: message.repeatMode, with: player)
+                let left = played.count - played.index - 1
+                return await finishContinuing(catalogID, songsAfter: played.isShuffled ? played.count - 1 : left,
+                                              from: "the album", repeatMode: message.repeatMode, with: player,
+                                              then: played.isShuffled ? nil : theMacsSongs(after: left, of: "album", upNext, with: player))
             case .station?:
                 memory.savePlaylist(nil)
                 memory.saveAlbum(nil)
@@ -179,8 +307,12 @@ public struct Handover {
         }
         memory.savePlaylist(nil)
         memory.saveAlbum(nil)
-        let queue = [catalogID] + (message.upNext ?? []).compactMap(\.catalogID).prefix(PlaybackMessage.upNextLimit)
-        let started = await player.play(catalogIDs: queue, position: position, timeout: timeout)
+        let next = await upNext.catalogIDs(within: max(0, remaining(Self.upNextLookupWait + Self.startReserve) - Self.startReserve))
+        if upNext.asked > 0 {
+            record("Continue on iPhone: found \(upNext.foundCount) of the \(upNext.asked) next songs the Mac has no catalogue ID for")
+        }
+        let queue = [catalogID] + next
+        let started = await player.play(catalogIDs: queue, position: position, timeout: remaining(timeout, floor: 3))
         guard started else {
             record("Continue on iPhone: Apple Music didn't start \(message.track?.title ?? "the song")")
             return .didNotStart
@@ -195,19 +327,61 @@ public struct Handover {
     /// s for a station on 17 November 2026.
     static let recentlyPlayedLag: TimeInterval = 60
 
-    /// Once the song plays here: repeat as on the Mac, the Mac paused, and a
+    /// Once the song plays here: repeat as on the Mac, the Mac paused, then
+    /// `then` (which says how many songs it added after the queue), and a
     /// station from the song when few songs are left to play.
-    private func finishContinuing(_ catalogID: String, songsAfter: Int, from source: String, repeatMode: RepeatMode?,
-                                  with player: any PhoneMusicPlaying) async -> ContinueOutcome {
+    private func finishContinuing(_ catalogID: String, songsAfter queued: Int, from source: String, repeatMode: RepeatMode?,
+                                  with player: any PhoneMusicPlaying,
+                                  then addMore: (@MainActor () async -> Int)? = nil) async -> ContinueOutcome {
         // The song plays here now: that's the moment the music moved.
         arrival.fire()
         if source != "the Mac" { memory.saveQueued(nil) }
         if let repeatMode { player.setRepeat(repeatMode) }
-        let outcome = await pauseMac(for: catalogID, songsAfter: songsAfter)
+        let outcome = await pauseMac(for: catalogID, songsAfter: queued)
+        var songsAfter = queued
+        if let addMore, repeatMode != .all, repeatMode != .one {
+            if isBudgeted {
+                // Only adds to what plays later: skipped when time is short.
+                let left = remaining(6)
+                if left >= 1, let added = await Self.answer(within: left, { await addMore() }) { songsAfter += added }
+            } else {
+                songsAfter += await addMore()
+            }
+        }
         if songsAfter < Self.stationBelow, repeatMode != .all, repeatMode != .one {
-            await followWithStation(seededBy: catalogID, songsAfter: songsAfter, from: source, with: player)
+            if isBudgeted {
+                // Only adds to what plays later: skipped when time is short.
+                let left = remaining(6)
+                if left >= 1 {
+                    let added: Bool? = await Self.answer(within: left) { [self] in
+                        await followWithStation(seededBy: catalogID, songsAfter: songsAfter, from: source, with: player)
+                        return true
+                    }
+                    if added == nil { record("Continue on iPhone: no time left to add a station") }
+                }
+            } else {
+                await followWithStation(seededBy: catalogID, songsAfter: songsAfter, from: source, with: player)
+            }
         }
         return outcome
+    }
+
+    /// The Mac's next songs that come after an Apple Music playlist or album,
+    /// played here in order, runs out: `inList` of them are in the list, and
+    /// the rest go after it here, in the Mac's order. On 26 November 2026 the
+    /// Mac was two songs from the end of an album, with 20 of Autoplay's
+    /// after them. Nil when the list has all the Mac's next songs.
+    private func theMacsSongs(after inList: Int, of kind: String, _ upNext: UpNextLookup,
+                              with player: any PhoneMusicPlaying) -> (@MainActor () async -> Int)? {
+        guard inList >= 0, upNext.count > inList else { return nil }
+        return { [self] in
+            let more = await upNext.catalogIDs(within: remaining(Self.upNextLookupWait), after: inList)
+            guard !more.isEmpty else { return 0 }
+            let added = await player.appendSongs(more)
+            record(added > 0 ? "Continue on iPhone: then the Mac's next \(added) song\(added == 1 ? "" : "s"), after the \(kind)"
+                             : "Continue on iPhone: couldn't add the Mac's songs after the \(kind)")
+            return added
+        }
     }
 
     /// The Mac's catalogue ID, or, when the Mac has none, the phone's own
@@ -250,6 +424,13 @@ public struct Handover {
     /// Once the song plays here: the Mac pauses, and learns from the
     /// command's reason that the phone has its music.
     private func pauseMac(for catalogID: String, songsAfter: Int) async -> ContinueOutcome {
+        // Nothing to pause: the Mac isn't there. Its music stopped when it
+        // went to sleep, or it's gone; it learns nothing, and plays nothing.
+        if let away = macAway() {
+            remember(catalogID)
+            record("Continue on iPhone: playing here; the Mac isn't connected (\(away.rawValue)), so it wasn't asked to pause")
+            return .continuedWithoutMac(away)
+        }
         // The pause goes to a paused Mac too: its reason is how the Mac learns
         // the phone has its music, to offer Continue from iPhone, and Music
         // ignores a pause while paused. Only a playing Mac is worth a retry.
@@ -275,7 +456,10 @@ public struct Handover {
             } catch {
                 record("Continue on iPhone: couldn't pause the Mac (\(error.localizedDescription)), try \(attempt)")
             }
-            if attempt == 1 { try? await sleep(1) }
+            if attempt == 1 {
+                guard remaining(3) >= 3 else { break }
+                try? await sleep(1)
+            }
         }
         return .macStillPlaying
     }
