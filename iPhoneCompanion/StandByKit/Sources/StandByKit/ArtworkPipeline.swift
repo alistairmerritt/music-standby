@@ -69,8 +69,10 @@ public struct ArtworkPolicy: Equatable, Sendable {
 extension ArtworkPolicy {
     /// For the Now Playing extension, which iOS holds to a hard 6 MB of memory
     /// (seen in the system log on iOS 27.2). A 1200-pixel image is about 5.8 MB
-    /// once decoded, while 800 is about the largest size the system was seen to
-    /// request (807). A judgement from that limit: the real ceiling is unmeasured.
+    /// once decoded, so the image itself stays at most 800 (the Mac sends 600),
+    /// though StandBy asks for 1200 and 903 at once (26 November 2026; see
+    /// `ArtworkHandoverGate`). A judgement from that limit: the real ceiling is
+    /// unmeasured.
     public static let forExtension = ArtworkPolicy(maximumByteCount: 1_000_000, maximumPixelDimension: 800)
 }
 
