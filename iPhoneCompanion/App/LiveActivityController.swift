@@ -255,11 +255,22 @@ final class LiveActivityController {
         }
         Task {
             for await token in card.pushTokenUpdates {
-                do {
-                    try await client()?.registerActivityToken(token.hexString, activityID: id)
+                let relay = client(), hex = token.hexString
+                switch await CardTokenDelivery.deliver({ try await relay?.registerActivityToken(hex, activityID: id) }) {
+                case .sent:
                     LockScreenRecord.add("Live Activity: sent the card’s update token")
-                } catch {
-                    LockScreenRecord.add("Live Activity: couldn’t send the card’s update token (\(error.localizedDescription))")
+                case .notTheRelays where id != "demo":
+                    // The relay never started this card, or has started another
+                    // since, and won't update it: on 26 November 2026 a second
+                    // card for one song stayed up, frozen and without artwork.
+                    following.remove(card.id)
+                    await card.end(nil, dismissalPolicy: .immediate)
+                    LockScreenRecord.add("Live Activity: ended a second card for “\(card.content.state.title)”, which the relay doesn’t update")
+                    return
+                case .notTheRelays:
+                    LockScreenRecord.add("Live Activity: the relay doesn’t know the demo card")
+                case .failed(let reason):
+                    LockScreenRecord.add("Live Activity: couldn’t send the card’s update token (\(reason))")
                 }
             }
         }

@@ -227,4 +227,7 @@ extension ErrorCode {
     public static let pairingCodeInvalid: ErrorCode = "pairing_code_invalid"
     public static let claimExpired: ErrorCode = "claim_expired"
     public static let claimDenied: ErrorCode = "claim_denied"
+    /// A Live Activity card's token named a card the relay didn't start, or
+    /// has since replaced: the relay will never update it.
+    public static let activityMismatch: ErrorCode = "activity_mismatch"
 }

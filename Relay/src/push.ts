@@ -263,24 +263,20 @@ export function tokenIsDead(result: PushResult): boolean {
   return result.status === 410 || (result.status === 400 && (result.reason === "BadDeviceToken" || result.reason === "DeviceTokenNotForTopic"));
 }
 
-/** Records pushes instead of sending them. */
+/** Records pushes instead of sending them. `record` may answer for APNs, as tests do for a dead token; otherwise 200. */
 export class MockPushSender implements PushSender {
-  constructor(private readonly record: (push: Push | AlertPush | BackgroundPush | ActivityPush) => Promise<void>) {}
+  constructor(private readonly record: (push: Push | AlertPush | BackgroundPush | ActivityPush) => Promise<PushResult | void>) {}
   async send(push: Push): Promise<PushResult> {
-    await this.record(push);
-    return { status: 200 };
+    return (await this.record(push)) ?? { status: 200 };
   }
   async sendAlert(push: AlertPush): Promise<PushResult> {
-    await this.record(push);
-    return { status: 200 };
+    return (await this.record(push)) ?? { status: 200 };
   }
   async sendBackground(push: BackgroundPush): Promise<PushResult> {
-    await this.record(push);
-    return { status: 200 };
+    return (await this.record(push)) ?? { status: 200 };
   }
   async sendActivity(push: ActivityPush): Promise<PushResult> {
-    await this.record(push);
-    return { status: 200 };
+    return (await this.record(push)) ?? { status: 200 };
   }
 }
 

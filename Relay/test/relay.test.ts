@@ -1390,6 +1390,14 @@ describe("live activity (experiment)", () => {
     expect(sent[0].payload.aps["content-state"].title).toBe("Small Hours");
   });
 
+  /** The card started `minutes` ago, as after a long break. */
+  async function ageCard(pairingID: string, minutes: number) {
+    await editStorage(pairingID, async (storage) => {
+      const card = await storage.get<any>("activity");
+      if (card) await storage.put("activity", { ...card, startedAt: Date.now() - minutes * 60_000 });
+    });
+  }
+
   it("replaces the card after the next break, ending the old one", async () => {
     const { mac, pairingID, phoneToken, activityID } = await cardStarted();
     await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } });
@@ -1397,6 +1405,7 @@ describe("live activity (experiment)", () => {
     mac.send({ type: "state", message: paused });
     await waitForRevision(phoneToken, paused.revision);
     await pauseFor(pairingID, 20);
+    await ageCard(pairingID, 21);
     const again = playback({ track: lowSun });
     mac.send({ type: "state", message: again });
     await waitForRevision(phoneToken, again.revision);
@@ -1473,6 +1482,74 @@ describe("live activity (experiment)", () => {
     expect(sent.map((p) => p.event)).toEqual(["end", "start", "activity-start"]);
     expect(sent[0].sessionID).toBe(sessionID);
     expect(sent[1].sessionID).not.toBe(sessionID);   // the same ID came back on screen (24 November 2026)
+    expect(sent.filter((p) => p.event === "reminder")).toHaveLength(0);
+  });
+
+  // MARK: Two cards for one song (26 November 2026)
+
+  it("keeps a card it started moments ago rather than starting a second", async () => {
+    const { mac, pairingID, phoneToken, activityID } = await cardStarted();
+    const paused = playback({ state: "paused", isPlaying: false, track: lowSun });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 9);
+    const again = playback({ track: lowSun });
+    mac.send({ type: "state", message: again });
+    await waitForRevision(phoneToken, again.revision);
+    const starts = (await activityPushes(phoneToken)).filter((p) => p.event === "activity-start");
+    expect(starts.map((p) => p.sessionID)).toEqual([activityID]);
+    expect((await pushes(phoneToken)).filter((p) => p.event === "reminder")).toHaveLength(0);
+  });
+
+  it("knows a card before its start push goes, so a token that beats APNs' answer is accepted", async () => {
+    const { phoneToken, start, activityID } = await cardStarted();
+    expect(start.knownToRelay).toBe(true);
+    expect((await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID, token: activityToken } })).status).toBe(204);
+  });
+
+  it("forgets a card whose start push is refused, and sends the reminder", async () => {
+    const { mac, pairingID, phoneToken } = await playingSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
+    const paused = playback({ state: "paused", isPlaying: false, track: lowSun });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 9);
+    await editStorage(pairingID, async (storage) => storage.put("mockDeadTokens", [startToken]));
+    const resumed = playback({ track: lowSun });
+    mac.send({ type: "state", message: resumed });
+    await waitForRevision(phoneToken, resumed.revision);
+    const start = (await activityPushes(phoneToken)).find((p) => p.event === "activity-start");
+    expect(start.status).toBe(410);
+    expect((await call("PUT", "/v1/tokens/activity", { token: phoneToken, body: { activityID: start.sessionID, token: activityToken } })).status).toBe(409);
+    expect((await pushes(phoneToken)).filter((p) => p.event === "reminder")).toHaveLength(1);
+  });
+
+  it("starts one new session with one card when the player's token has died over a long pause", async () => {
+    const { mac, pairingID, phoneToken, sessionID } = await playingSetup();
+    await call("PUT", "/v1/tokens/alert", { token: phoneToken, body: { token: alertToken } });
+    await call("PUT", "/v1/tokens/activity-start", { token: phoneToken, body: { token: startToken } });
+    const paused = playback({ state: "paused", isPlaying: false, track: lowSun });
+    mac.send({ type: "state", message: paused });
+    await waitForRevision(phoneToken, paused.revision);
+    await pauseFor(pairingID, 9);
+    // Hours of Apple Music on the phone: iOS has dropped the player, and APNs calls its token dead.
+    await editStorage(pairingID, async (storage) => storage.put("mockDeadTokens", ["cd".repeat(32)]));
+    const before = (await pushes(phoneToken)).length;
+    // The Mac plays again, and a moment later sends the song again with its artwork.
+    const resumed = playback({ track: { ...lowSun, artworkID: undefined } });
+    mac.send({ type: "state", message: resumed });
+    await waitForRevision(phoneToken, resumed.revision);
+    const withArtwork = playback({ track: lowSun });
+    mac.send({ type: "state", message: withArtwork });
+    await waitForRevision(phoneToken, withArtwork.revision);
+
+    const sent = (await pushes(phoneToken)).slice(before);
+    expect(sent.filter((p) => p.event === "activity-start")).toHaveLength(1);
+    const started = sent.filter((p) => p.event === "start");
+    expect(started).toHaveLength(1);
+    expect(started[0].sessionID).not.toBe(sessionID);
+    expect((await session(phoneToken)).sessionID).toBe(started[0].sessionID);
     expect(sent.filter((p) => p.event === "reminder")).toHaveLength(0);
   });
 
