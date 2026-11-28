@@ -79,6 +79,10 @@ struct LibraryChoiceSheet: View {
         .padding(.bottom, 12)
         .presentationDetents([.height(failed ? 360 : 400)])
         .presentationDragIndicator(.visible)
+        // Swiped away: Cancel. Here rather than in the sheet's onDismiss, where
+        // SwiftUI has already cleared the binding (device test 3, 28 November
+        // 2026: the hand-over waited for ever). After a button, it does nothing.
+        .onDisappear { prompt.answer(.cancel) }
     }
 
     private func finish(_ answer: LibraryAnswer) {

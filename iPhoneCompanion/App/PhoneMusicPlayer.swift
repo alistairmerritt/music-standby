@@ -514,10 +514,16 @@ extension SystemMusicPhonePlayer {
                     try await MusicLibrary.shared.add(catalog)
                 }
             default:
+                #if DEBUG
+                print("PPROBE addToLibrary: no matching lastFound (\(String(describing: lastFound).prefix(120)))")
+                #endif
                 return false
             }
             return true
         } catch {
+            #if DEBUG
+            print("PPROBE addToLibrary failed: \(error) [\(type(of: error))]")
+            #endif
             return false
         }
     }

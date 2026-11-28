@@ -255,6 +255,8 @@ struct ContinueListeningArea: View {
         return answer
     }
 
+    /// The sheet answers Cancel itself when it goes (`LibraryChoiceSheet`):
+    /// by now SwiftUI has cleared `libraryPrompt`, so there's nothing to answer here.
     private func libraryPromptClosed() {
         libraryPrompt?.answer(.cancel)
         libraryPrompt = nil
