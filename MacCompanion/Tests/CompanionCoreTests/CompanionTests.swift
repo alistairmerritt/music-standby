@@ -188,11 +188,13 @@ import StandByProtocol
     @MainActor final class Asked {
         var answers: [LibraryDialogAnswer?]
         var asked: [Bool] = []
+        var items: [HandBackLibraryItem?] = []
         var open: CheckedContinuation<Void, Never>?
         var holds = false
         init(_ answers: LibraryDialogAnswer?...) { self.answers = answers }
-        func ask(_ addFailed: Bool) async -> LibraryDialogAnswer? {
+        func ask(_ addFailed: Bool, _ item: HandBackLibraryItem? = nil) async -> LibraryDialogAnswer? {
             asked.append(addFailed)
+            items.append(item)
             if holds { await withCheckedContinuation { open = $0 } }
             return answers.isEmpty ? nil : answers.removeFirst()
         }
@@ -208,16 +210,21 @@ import StandByProtocol
     @Test func continueFromIPhoneAsksAboutTheLibraryAndSendsTheAnswer() async throws {
         let r = await rig(state: "paused")
         let person = Asked(LibraryDialogAnswer(choice: .add, remember: true))
-        r.companion.askLibrary = { await person.ask($0) }
+        r.companion.askLibrary = { await person.ask($0, $1) }
         r.companion.continueFromPhone()
         let first = try #require(r.companion.handBack)
         await eventually { await requests(r).count == 1 }
         #expect(await requests(r).first?.library == .ask, "the menu can ask")
-        await r.relay.simulate(.handBackStatus(id: first.id, status: .needsLibraryChoice))
+        let today = HandBackLibraryItem(kind: HandBackLibraryItem.playlist, name: "Today")
+        await r.relay.simulate(.handBackStatus(id: first.id, status: .needsLibraryChoice, item: today))
         await eventually { await requests(r).count == 2 }
+        #expect(person.items == [today], "the dialog names what the phone plays")
         let second = try #require(await requests(r).last)
         #expect(second.library == .add && second.remember == true)
         #expect(second.id != first.id && r.companion.handBack?.id == second.id)
+        #expect(r.companion.handBack?.isWaiting == true && r.companion.handBack?.askingYou == false)
+        await r.relay.simulate(.handBackStatus(id: second.id, status: .working))
+        await eventually { r.companion.handBack?.message == "Adding it to your library…" }
         #expect(person.asked == [false])
         // Adding fails on the phone: asked again, with Try Again.
         person.answers = [LibraryDialogAnswer(choice: .station, remember: false)]
@@ -230,7 +237,7 @@ import StandByProtocol
     @Test func cancelAtTheMacMovesNothing() async throws {
         let r = await rig(state: "paused")
         let person = Asked(nil)
-        r.companion.askLibrary = { await person.ask($0) }
+        r.companion.askLibrary = { await person.ask($0, $1) }
         r.companion.continueFromPhone()
         let id = try #require(r.companion.handBack?.id)
         await eventually { await requests(r).count == 1 }
@@ -246,12 +253,14 @@ import StandByProtocol
         let r = await rig(state: "paused")
         let person = Asked(LibraryDialogAnswer(choice: .station, remember: false))
         person.holds = true
-        r.companion.askLibrary = { await person.ask($0) }
+        r.companion.askLibrary = { await person.ask($0, $1) }
         r.companion.continueFromPhone()
         let id = try #require(r.companion.handBack?.id)
         await eventually { await requests(r).count == 1 }
         await r.relay.simulate(.handBackStatus(id: id, status: .needsLibraryChoice))
         await eventually { person.open != nil }
+        // The menu keeps its spinner while the dialog is open.
+        #expect(r.companion.handBack?.isWaiting == true && r.companion.handBack?.message == "Waiting for your choice…")
         // Clicked again while the dialog is open: the new request's question shares it.
         r.companion.continueFromPhone()
         let again = try #require(r.companion.handBack?.id)
@@ -267,7 +276,7 @@ import StandByProtocol
     @Test func theShortcutsActionNeverAsks() async throws {
         let r = await rig(state: "paused")
         let person = Asked()
-        r.companion.askLibrary = { await person.ask($0) }
+        r.companion.askLibrary = { await person.ask($0, $1) }
         r.companion.continueFromPhone(canAsk: false)
         await eventually { await requests(r).count == 1 }
         #expect(await requests(r).first?.library == nil, "the phone follows its setting; Ask Every Time is the station")

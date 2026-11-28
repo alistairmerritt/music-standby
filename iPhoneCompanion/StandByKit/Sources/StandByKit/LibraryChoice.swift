@@ -53,17 +53,6 @@ public enum LibraryAnswer: Equatable, Sendable {
 public typealias LibraryAsker = @MainActor (LibraryQuestion) async -> LibraryAnswer
 
 extension AppleMusicSource {
-    /// Apple Music already lists it as the library's own (`addToLibrary`
-    /// adds nothing for these): a library album (`l.…`, as recently played
-    /// gives it) or a library playlist's `pl.u-…`. Nothing to ask.
-    var isAlreadyInLibrary: Bool {
-        switch self {
-        case .album(_, let id): id.hasPrefix("l.")
-        case .playlist(let place): place.cloudID?.hasPrefix("pl.u-") == true
-        case .station: false
-        }
-    }
-
     /// Which playlist or album an answer was for, so it isn't used for another.
     var libraryKey: String {
         switch self {

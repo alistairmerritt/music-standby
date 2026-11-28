@@ -44,7 +44,7 @@ struct MusicStandByApp: App {
         }
         companion.remote = reader(musicRemote.client)
         musicRemote.onClientChange = { [weak companion] client in companion?.remote = reader(client) }
-        companion.askLibrary = { addFailed in await LibraryDialog.ask(addFailed: addFailed) }
+        companion.askLibrary = { addFailed, item in await LibraryDialog.ask(addFailed: addFailed, item: item) }
         companion.start()
         AppDelegate.companion = companion
         // The Continue from iPhone Shortcuts action works on this companion.
@@ -58,7 +58,11 @@ struct MusicStandByApp: App {
         MenuBarExtra {
             MenuContent(companion: companion, relay: relay, musicRemote: musicRemote, launchAtLogin: launchAtLogin)
         } label: {
-            Image(systemName: companion.snapshot?.state == .automationDenied ? "exclamationmark.triangle" : "music.note")
+            // While Continue from iPhone is under way, including while its
+            // library dialog is open, so it doesn't look stuck once the
+            // panel has closed (28 November 2026).
+            Image(systemName: companion.snapshot?.state == .automationDenied ? "exclamationmark.triangle"
+                  : companion.handBack?.isWaiting == true ? "iphone.and.arrow.forward" : "music.note")
                 .accessibilityLabel("Second Chair")
         }
         .menuBarExtraStyle(.window)

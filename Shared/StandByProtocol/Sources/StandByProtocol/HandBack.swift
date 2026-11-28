@@ -65,11 +65,31 @@ public struct HandBackStatus: RawRepresentable, Codable, Hashable, Sendable, Exp
 public struct HandBackStatusReport: Codable, Equatable, Sendable {
     public var requestID: UUID
     public var status: HandBackStatus
+    /// With `needs_library_choice` or `library_add_failed`: the playlist or
+    /// album asked about, so the Mac's dialog can name it (28 November 2026).
+    public var item: HandBackLibraryItem?
 
-    public init(requestID: UUID, status: HandBackStatus) {
+    public init(requestID: UUID, status: HandBackStatus, item: HandBackLibraryItem? = nil) {
         self.requestID = requestID
         self.status = status
+        self.item = item
     }
+}
+
+/// The playlist or album a library question is about.
+public struct HandBackLibraryItem: Codable, Equatable, Sendable {
+    /// "playlist" or "album"; an open set, shown only when known.
+    public var kind: String
+    /// As Apple Music shows it; at most `PlaylistPlace.maximumNameLength`.
+    public var name: String
+
+    public init(kind: String, name: String) {
+        self.kind = kind
+        self.name = String(name.prefix(PlaylistPlace.maximumNameLength))
+    }
+
+    public static let playlist = "playlist"
+    public static let album = "album"
 }
 
 /// What a hand-back push carries for the app, under the payload's

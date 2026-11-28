@@ -21,6 +21,7 @@ import {
   type TrackMetadata,
   type HandBackRequest,
   isHandBackStatus,
+  isHandBackLibraryItem,
   isLibraryChoice,
   isUUID,
 } from "./protocol";
@@ -1340,7 +1341,7 @@ export class Pairing extends DurableObject<Env> {
 
   /** The phone's progress. Any status means it's awake: no notification needed. */
   private async handBackStatus(request: Request): Promise<Response> {
-    const body = await readJSON<{ requestID?: string; status?: string }>(request);
+    const body = await readJSON<{ requestID?: string; status?: string; item?: unknown }>(request);
     if (!isUUID(body?.requestID) || !isHandBackStatus(body?.status)) {
       throw new HttpError(400, "invalid_request", "requestID must be a UUID and status a short word");
     }
@@ -1352,7 +1353,9 @@ export class Pairing extends DurableObject<Env> {
       await this.scheduleAlarm();
     }
     console.log(`hand-back ${short(handBack.requestID)}: phone says ${body.status}`);
-    this.sendToMac({ type: "hand-back-status", requestID: handBack.requestID, status: body.status });
+    // The playlist or album the phone asks about, for the Mac's dialog; a malformed one is dropped.
+    const item = isHandBackLibraryItem(body.item) ? { kind: body.item.kind, name: body.item.name } : undefined;
+    this.sendToMac({ type: "hand-back-status", requestID: handBack.requestID, status: body.status, ...(item ? { item } : {}) });
     return empty();
   }
 

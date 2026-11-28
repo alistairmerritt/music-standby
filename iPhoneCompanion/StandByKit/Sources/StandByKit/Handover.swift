@@ -636,8 +636,11 @@ public struct Handover {
     private func libraryStep(_ source: AppleMusicSource, _ question: LibraryQuestion, player: any PhoneMusicPlaying,
                              ask: LibraryAsker?, decided: LibraryDecided?, asks: Int) async -> LibraryStep {
         let what = question.kind == .playlist ? "playlist" : "album"
-        // Already the library's own: nothing to add, so nothing to ask.
-        if source.isAlreadyInLibrary { return await player.addToLibrary(source) ? .added : .station }
+        // Every Apple Music source goes through the setting, even one whose
+        // ID looks like the library's (`l.…`, `pl.u-…`): it came from
+        // recently played, which isn't proof it's in the library (another
+        // person's shared playlist is `pl.u-…` too). As before 28 November
+        // 2026, when the switch decided for these the same way.
         let wantsAdd: Bool
         if let decided, decided.key == source.libraryKey {
             wantsAdd = decided.add

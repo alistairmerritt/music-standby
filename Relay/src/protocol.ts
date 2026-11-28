@@ -200,7 +200,7 @@ export type RelayFrame =
   | { type: "pair-request"; request: PairRequest }
   | { type: "paired"; phone: DeviceIdentity }
   | { type: "revoked"; reason: string }
-  | { type: "hand-back-status"; requestID: string; status: string }
+  | { type: "hand-back-status"; requestID: string; status: string; item?: HandBackLibraryItem }
   | { type: "error"; error: ProtocolError };
 
 
@@ -258,6 +258,17 @@ export interface HandBackRequest {
   library?: string;
   /** With library "add" or "station": the phone saves it as its setting. */
   remember?: boolean;
+}
+
+/** The playlist or album a library question is about (from the phone, for the Mac's dialog). */
+export interface HandBackLibraryItem {
+  kind: string;
+  name: string;
+}
+
+export function isHandBackLibraryItem(v: unknown): v is HandBackLibraryItem {
+  const i = v as HandBackLibraryItem;
+  return !!i && typeof i.kind === "string" && /^[a-z_]{1,16}$/.test(i.kind) && text(i.name, 256);
 }
 
 /** A `HandBackLibraryChoice` from the Mac: an open set of short snake_case words. */

@@ -11,7 +11,7 @@ import CompanionCore
 /// (ITMS-90626, seen on the iPhone app), so this one avoids them too.
 struct ContinueFromPhoneIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue from iPhone"
-    static let description: IntentDescription? = IntentDescription("Brings the music playing on your phone to this computer, from the same point, and pauses it on the phone. The phone has to be playing a song from this computer’s queue, as it is after continuing on the phone.")
+    static let description: IntentDescription? = IntentDescription("Brings the music playing on your phone to this computer, from the same point, and pauses it on the phone. The phone has to be playing a song from this computer’s queue, as it is after continuing on the phone. An action can’t ask, so a playlist or album that isn’t in your library goes as the phone’s settings say, and with Ask Every Time it plays the song’s station and adds nothing.")
 
     @Dependency private var companion: Companion
 

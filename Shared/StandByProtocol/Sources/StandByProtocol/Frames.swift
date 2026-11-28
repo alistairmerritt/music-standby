@@ -52,7 +52,8 @@ public enum RelayFrame: Equatable, Sendable {
     case paired(phone: DeviceIdentity)
     case revoked(reason: String)
     /// Progress on a `hand-back-request`, from the relay or the phone.
-    case handBackStatus(id: UUID, status: HandBackStatus)
+    /// `item`: the playlist or album a library question is about (HandBack.swift).
+    case handBackStatus(id: UUID, status: HandBackStatus, item: HandBackLibraryItem? = nil)
     case error(ProtocolError)
     case unknown(type: String)
 }
@@ -61,7 +62,7 @@ public enum RelayFrame: Equatable, Sendable {
 
 private enum FrameKeys: String, CodingKey {
     case type, protocolVersion, device, message, ack, artwork, reason, error, command, artworkID, phone, claimID, approved, request
-    case requestID, status, library, remember
+    case requestID, status, library, remember, item
 }
 
 private struct RawCommand: Decodable {
@@ -148,7 +149,8 @@ extension RelayFrame: Codable {
         case "paired": self = .paired(phone: try c.decode(DeviceIdentity.self, forKey: .phone))
         case "revoked": self = .revoked(reason: try c.decode(String.self, forKey: .reason))
         case "hand-back-status":
-            self = .handBackStatus(id: try c.decode(UUID.self, forKey: .requestID), status: try c.decode(HandBackStatus.self, forKey: .status))
+            self = .handBackStatus(id: try c.decode(UUID.self, forKey: .requestID), status: try c.decode(HandBackStatus.self, forKey: .status),
+                                   item: try? c.decodeIfPresent(HandBackLibraryItem.self, forKey: .item))
         case "error": self = .error(try c.decode(ProtocolError.self, forKey: .error))
         default: self = .unknown(type: type)
         }
@@ -180,10 +182,11 @@ extension RelayFrame: Codable {
         case .revoked(let reason):
             try c.encode("revoked", forKey: .type)
             try c.encode(reason, forKey: .reason)
-        case .handBackStatus(let id, let status):
+        case .handBackStatus(let id, let status, let item):
             try c.encode("hand-back-status", forKey: .type)
             try c.encode(id, forKey: .requestID)
             try c.encode(status, forKey: .status)
+            try c.encodeIfPresent(item, forKey: .item)
         case .error(let error):
             try c.encode("error", forKey: .type)
             try c.encode(error, forKey: .error)

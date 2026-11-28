@@ -81,7 +81,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
 /// the Mac from the same point, when it's in the Mac's queue.
 struct ContinueOnMacIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on Mac"
-    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it.")
+    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it. A playlist or album that isn’t in your library goes as Second Chair’s settings say. An action can’t ask, so with Ask Every Time it plays the song’s station and adds nothing.")
     static let supportedModes: IntentModes = .background
 
     @MainActor

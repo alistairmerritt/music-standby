@@ -155,7 +155,7 @@ struct SettingsView: View {
         } header: {
             Text("When a playlist or album isn’t in your library")
         } footer: {
-            Text("To keep a playlist or album going on your Mac, Second Chair may need to add it to your Apple Music library. Otherwise, it can continue with a station based on the current song.")
+            Text("To keep a playlist or album going on your Mac, Second Chair may need to add it to your Apple Music library. Otherwise, it can continue with a station based on the current song.\n\nShortcuts and widgets can’t ask, so with Ask Every Time they continue with the station and add nothing.")
         }
     }
 

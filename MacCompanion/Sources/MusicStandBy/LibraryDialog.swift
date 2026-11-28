@@ -1,5 +1,6 @@
 import AppKit
 import CompanionCore
+import StandByProtocol
 
 /// Continue from iPhone's question about the phone's Apple Music playlist or
 /// album that isn't in the library (28 November 2026): the same words and
@@ -8,16 +9,30 @@ import CompanionCore
 /// while it's open. Remember my choice is the alert's own check box, off
 /// until ticked.
 @MainActor enum LibraryDialog {
+    /// "“Today” · Playlist", as the iPhone's sheet says it.
+    static func named(_ item: HandBackLibraryItem) -> String? {
+        let kind = switch item.kind {
+        case HandBackLibraryItem.playlist: "Playlist"
+        case HandBackLibraryItem.album: "Album"
+        default: ""
+        }
+        guard !item.name.isEmpty else { return nil }
+        return kind.isEmpty ? "“\(item.name)”" : "“\(item.name)” · \(kind)"
+    }
+
     static let title = "Add to your library?"
     static let message = "To continue this playlist or album on your Mac, Second Chair needs to add it to your Apple Music library. It’ll stay there until you remove it."
     static let failedTitle = "Couldn’t add it to your library"
     static let failedMessage = "Second Chair couldn’t add this playlist or album to your Apple Music library. Try again, or continue with a station based on the current song."
 
     /// Nil for Cancel (or Escape).
-    static func ask(addFailed: Bool) async -> LibraryDialogAnswer? {
+    /// `item`: the playlist or album, named as on the iPhone's sheet (a
+    /// phone that doesn't say leaves the words as they are).
+    static func ask(addFailed: Bool, item: HandBackLibraryItem?) async -> LibraryDialogAnswer? {
         let alert = NSAlert()
         alert.messageText = addFailed ? failedTitle : title
-        alert.informativeText = addFailed ? failedMessage : message
+        let words = addFailed ? failedMessage : message
+        alert.informativeText = item.flatMap(named).map { "\($0)\n\n\(words)" } ?? words
         alert.addButton(withTitle: addFailed ? "Try Again" : "Add & Continue")
         alert.addButton(withTitle: "Play Song Station")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"

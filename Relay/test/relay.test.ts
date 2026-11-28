@@ -1113,6 +1113,19 @@ describe("continue from iPhone (hand-back)", () => {
     expect(third.payload.handBack).not.toHaveProperty("remember");
   });
 
+  it("passes the playlist or album the phone asks about on to the Mac, and drops a malformed one", async () => {
+    const { mac, phoneToken } = await withDevice();
+    const id = requestID();
+    mac.send({ type: "hand-back-request", requestID: id, library: "ask" });
+    expect((await mac.next("hand-back-status")).status).toBe("asked");
+    const item = { kind: "playlist", name: "Today" };
+    expect((await call("POST", "/v1/hand-back/status", { token: phoneToken, body: { requestID: id, status: "needs_library_choice", item } })).status).toBe(204);
+    expect(await mac.next("hand-back-status")).toEqual({ type: "hand-back-status", requestID: id, status: "needs_library_choice", item });
+    const bad = { kind: "Playlist!", name: "x".repeat(300) };
+    expect((await call("POST", "/v1/hand-back/status", { token: phoneToken, body: { requestID: id, status: "library_add_failed", item: bad } })).status).toBe(204);
+    expect(await mac.next("hand-back-status")).toEqual({ type: "hand-back-status", requestID: id, status: "library_add_failed" });
+  });
+
   it("shows a notification when the background push gets no answer in time", async () => {
     const { mac, pairingID, phoneToken } = await withDevice();
     const id = requestID();

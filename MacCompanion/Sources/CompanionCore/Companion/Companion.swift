@@ -68,7 +68,8 @@ public final class Companion {
     /// library (28 November 2026), with Try Again in place of Add & Continue
     /// when `addFailed`, and returns the answer; nil is Cancel. Set by the
     /// app; without it the phone is told nobody can be asked.
-    @ObservationIgnored public var askLibrary: (@MainActor (_ addFailed: Bool) async -> LibraryDialogAnswer?)?
+    /// `item` names the playlist or album when the phone said which.
+    @ObservationIgnored public var askLibrary: (@MainActor (_ addFailed: Bool, _ item: HandBackLibraryItem?) async -> LibraryDialogAnswer?)?
     @ObservationIgnored private var askingLibrary = false
     @ObservationIgnored private var libraryAsks = 0
     /// Questions for one click at most, should the phone's music keep
@@ -352,7 +353,7 @@ public final class Companion {
             recordHandBack("continue from iPhone: not connected to the relay")
             return
         }
-        handBack = HandBackProgress(id: id)
+        handBack = HandBackProgress(id: id, library: library)
         recordHandBack("continue from iPhone: asking")
         enqueue { [weak self] in await self?.send(.handBackRequest(id: id, library: library, remember: remember)) }
         Task { [weak self, handBackTimeout] in
@@ -365,7 +366,7 @@ public final class Companion {
     /// the answer goes in a new request, so the phone starts from where it
     /// is by then. One dialog at a time; its answer is for the request
     /// waiting on it when it closes.
-    private func askAboutLibrary(addFailed: Bool) {
+    private func askAboutLibrary(addFailed: Bool, item: HandBackLibraryItem?) {
         guard let askLibrary, !askingLibrary else { return }
         guard libraryAsks < Self.libraryAsksAtMost else {
             recordHandBack("continue from iPhone: the iPhone's music kept changing while asked about the library; stopped")
@@ -373,11 +374,13 @@ public final class Companion {
         }
         askingLibrary = true
         libraryAsks += 1
+        handBack?.askingYou = true
         recordHandBack("continue from iPhone: asking about the library\(addFailed ? " after adding failed" : "")")
         Task { [weak self] in
-            let answer = await askLibrary(addFailed)
+            let answer = await askLibrary(addFailed, item)
             guard let self else { return }
             askingLibrary = false
+            handBack?.askingYou = false
             // Music started here meanwhile, or the question was answered elsewhere.
             guard let waiting = handBack, waiting.status == .needsLibraryChoice || waiting.status == .libraryAddFailed else {
                 recordHandBack("continue from iPhone: nothing waits on the library answer any more")
@@ -438,14 +441,16 @@ public final class Companion {
             phoneHasMusic = false
             handBack = nil
             record("pairing revoked: \(reason)")
-        case .handBackStatus(let id, let status):
+        case .handBackStatus(let id, let status, let item):
             guard var progress = handBack, progress.id == id else { return }
             progress.status = status
+            progress.item = item
+            progress.askingYou = askingLibrary && (status == .needsLibraryChoice || status == .libraryAddFailed)
             progress.timedOut = false
             handBack = progress
             recordHandBack("continue from iPhone: \(status)")
             if status == .needsLibraryChoice || status == .libraryAddFailed {
-                askAboutLibrary(addFailed: status == .libraryAddFailed)
+                askAboutLibrary(addFailed: status == .libraryAddFailed, item: item)
             }
         case .error(let error):
             record("relay error \(error.code): \(error.message ?? "")")
@@ -1350,12 +1355,27 @@ public struct HandBackProgress: Equatable, Sendable {
     public var status: HandBackStatus?
     /// Nothing final came within `Companion.handBackTimeout`.
     public var timedOut = false
+    /// The playlist or album the phone asks about, with its library statuses.
+    public var item: HandBackLibraryItem?
+    /// What the request told the phone about the library: `add` or
+    /// `station` once the person has answered the dialog.
+    public var library: HandBackLibraryChoice?
+    /// The library dialog is open for this request: the request has its
+    /// answer from the phone, but the hand-over waits on the person.
+    public var askingYou = false
 
-    public init(id: UUID, status: HandBackStatus? = nil, timedOut: Bool = false) {
+    public init(id: UUID, status: HandBackStatus? = nil, timedOut: Bool = false, library: HandBackLibraryChoice? = nil,
+                item: HandBackLibraryItem? = nil, askingYou: Bool = false) {
         self.id = id
         self.status = status
         self.timedOut = timedOut
+        self.library = library
+        self.item = item
+        self.askingYou = askingYou
     }
+
+    /// Still under way, for the menu: no answer yet, or the dialog is open.
+    public var isWaiting: Bool { !isFinished || askingYou }
 
     /// No more is coming: an answer, or the wait ran out.
     public var isFinished: Bool { timedOut || (status?.isFinal ?? false) }
@@ -1364,6 +1384,8 @@ public struct HandBackProgress: Equatable, Sendable {
     /// build doesn't know.
     public var message: String? {
         if timedOut { return "Your iPhone didn’t answer. Try again." }
+        if askingYou { return "Waiting for your choice…" }
+        if library == .add, status == .working { return "Adding it to your library…" }
         switch status {
         case nil, .asked?: return "Asking your iPhone…"
         case .notified?: return "Answer the notification on your iPhone or Apple Watch."
@@ -1373,7 +1395,7 @@ public struct HandBackProgress: Equatable, Sendable {
         case .notInQueue?: return "The song on your iPhone isn’t in this Mac’s queue."
         case .failed?: return "Couldn’t continue here. Try again."
         case .unreachable?: return "Couldn’t reach your iPhone."
-        case .needsLibraryChoice?: return "Choose whether to add it to your library."
+        case .needsLibraryChoice?: return "Choose whether to add it to your library, then try again."
         case .libraryAddFailed?: return "Couldn’t add it to your library."
         case .cancelled?: return "Cancelled. Nothing was moved."
         default: return nil

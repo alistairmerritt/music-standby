@@ -652,10 +652,6 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         let album = phone("270246724", playlist: nil)
         album.albumHere = Self.album
         try await neverAsked(album, await pausedMacThatPlays())
-        // Recently played's copy of a library album: already the library's own.
-        let libraryCopy = phone("270246724", playlist: nil)
-        libraryCopy.appleMusicHere = .album(AlbumPlace(title: "Album", count: 10, index: 2), id: "l.AbCdEf")
-        try await neverAsked(libraryCopy, await pausedMacThatPlays())
         let station = phone("270246724", playlist: nil)
         station.appleMusicHere = .station(StationPlace(id: "ra.985484166", name: "Made-Up Radio"))
         let stationRelay = FakeRelay(mac(playingFromAA(state: .paused)))
@@ -666,6 +662,36 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         try await neverAsked(shuffled, await pausedMacThatPlays())
         let plain = phone("270246724", playlist: nil)
         try await neverAsked(plain, await pausedMacThatPlays())
+    }
+
+    /// Recently played isn't proof of the library, even with a library-like
+    /// ID: these go as the setting says, exactly as the switch did them.
+    @Test func recentlyPlayedIsNotTakenAsProofOfTheLibrary() async throws {
+        let sources: [AppleMusicSource] = [
+            .album(AlbumPlace(title: "Album", count: 10, index: 2), id: "l.AbCdEf"),
+            .playlist(PlaylistPlace(name: "Shared", cloudID: "pl.u-Someone", count: 30, index: 4)),
+        ]
+        for source in sources {
+            let asked = phone("270246724", playlist: nil)
+            asked.appleMusicHere = source
+            let person = Person(.cancel)
+            #expect(try await library(await pausedMacThatPlays(), asked, ask: person.asker).outcome == .cancelled)
+            #expect(person.questions.count == 1, "Ask Every Time asks")
+            // Play Song Station (the switch off): the station, nothing added.
+            let station = phone("270246724", playlist: nil)
+            station.appleMusicHere = source
+            let relay = await pausedMacThatPlays()
+            #expect(try await library(relay, station, preference: .station).outcome == .sentBack)
+            let sent = await relay.sent.map(\.command).first
+            #expect(sent?.playlist == nil && sent?.album == nil && station.added.isEmpty)
+            // Add to Library (the switch on): as before, the album or playlist.
+            let added = phone("270246724", playlist: nil)
+            added.appleMusicHere = source
+            let addRelay = await pausedMacThatPlays()
+            #expect(try await library(addRelay, added, preference: .add).outcome == .sentBack)
+            let addSent = await addRelay.sent.map(\.command).first
+            #expect(addSent?.playlist != nil || addSent?.album != nil)
+        }
     }
 
     @Test func aSlowAnswerSendsWhereThePhoneIsWhenItCame() async throws {
