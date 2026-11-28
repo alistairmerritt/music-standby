@@ -144,18 +144,20 @@ struct SettingsView: View {
         // on Mac, only an Apple Music playlist or album not in the library.
         // 28 November 2026: a choice of three, asking by default, in place of
         // the switch (which was "Automatically Add to Library" before that).
+        // Headed "When Continuing on Mac" the same day, so it can't be read as
+        // covering Mac to iPhone, or Apple Music on its own.
         Section {
-            Picker("When a playlist or album isn’t in your library", selection: $libraryPreference) {
+            Picker("When Continuing on Mac", selection: $libraryPreference) {
                 Text("Ask Every Time").tag(LibraryPreference.ask)
                 Text("Add to Library").tag(LibraryPreference.add)
-                Text("Play Song Station Instead").tag(LibraryPreference.station)
+                Text("Play Song Station").tag(LibraryPreference.station)
             }
             .pickerStyle(.inline)
             .labelsHidden()
         } header: {
-            Text("When a playlist or album isn’t in your library")
+            Text("When Continuing on Mac")
         } footer: {
-            Text("To keep a playlist or album going on your Mac, Second Chair may need to add it to your Apple Music library. Otherwise, it can continue with a station based on the current song.\n\nShortcuts and widgets use the song’s station when Ask Every Time is selected.")
+            Text("If you’re listening to a playlist or album on your iPhone that isn’t in your Apple Music library, choose whether to add it to your library or play a station based on the current song when continuing on your Mac.\n\nShortcuts and widgets play a song station when Ask Every Time is selected.")
         }
     }
 
