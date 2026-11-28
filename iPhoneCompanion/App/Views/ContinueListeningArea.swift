@@ -247,9 +247,10 @@ struct ContinueListeningArea: View {
         HandoffMoment.shared.fail()
         // A sheet from an earlier question that's somehow still open is that question's Cancel.
         libraryPrompt?.answer(.cancel)
-        let answer = await withCheckedContinuation { reply in
-            libraryPrompt = LibraryPrompt(question, reply: reply)
-        }
+        // A second question (adding failed) comes just after the first sheet
+        // went: give its dismissal time to finish, so the new one shows.
+        if question.addFailed { try? await Task.sleep(for: .milliseconds(450)) }
+        let answer = await LibraryPrompt.ask(question) { libraryPrompt = $0 }
         libraryPrompt = nil
         if answer != .cancel { HandoffMoment.shared.begin(.toMac) }
         return answer

@@ -92,7 +92,7 @@ public struct HandoverMemory {
     /// The setting, migrated from the old switch the first time it's read.
     /// The switch was stored only once someone flipped it (`@AppStorage`
     /// writes nothing for its default), so a stored value is a choice:
-    /// on → Add to Library; on and then off again → Play Song Station, as
+    /// on → Add to Library; on and then off again → Play Song Station Instead, as
     /// that's what they had. Never touched → Ask Every Time, the new default,
     /// since nobody chose the station; they just never saw the switch.
     @discardableResult

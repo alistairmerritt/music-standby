@@ -81,7 +81,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
 /// the Mac from the same point, when it's in the Mac's queue.
 struct ContinueOnMacIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on Mac"
-    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it. A playlist or album that isn’t in your library goes as Second Chair’s settings say. An action can’t ask, so with Ask Every Time it plays the song’s station and adds nothing.")
+    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it. When a playlist or album isn’t in your library, automated handoffs use the song’s station unless you’ve chosen Add to Library in Settings.")
     static let supportedModes: IntentModes = .background
 
     @MainActor
@@ -98,7 +98,7 @@ struct ContinueOnMacIntent: AppIntent {
         // outside the library went as its song's station: say why, once, in
         // the action's own answer rather than a notification (28 November 2026).
         if outcome.outcome == .sentBack || outcome.outcome == .sentAsStation, outcome.keptOut {
-            return .result(dialog: "Continuing on your Mac with a station from this song. To keep playlists and albums that aren’t in your library, choose Add to Library in Second Chair’s Settings.")
+            return .result(dialog: "Continuing on your Mac with a station from this song. When a playlist or album isn’t in your library, automated handoffs use the song’s station unless you’ve chosen Add to Library in Settings.")
         }
         switch outcome.outcome {
         case .sentBack: return .result(dialog: "Continuing on your Mac.")

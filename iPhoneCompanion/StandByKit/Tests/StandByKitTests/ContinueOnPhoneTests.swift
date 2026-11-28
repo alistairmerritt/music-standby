@@ -104,6 +104,15 @@ final class FakePhoneMusic: PhoneMusicPlaying {
         added.append(source)
         return adds
     }
+    var addFailureReason: String?
+    func libraryAddFailure() -> String? { adds ? nil : addFailureReason }
+    /// What `isInLibrary` answers, and how often it was asked.
+    var inLibrary = false
+    private(set) var inLibraryChecks: [(AppleMusicSource, String)] = []
+    func isInLibrary(_ source: AppleMusicSource, song catalogID: String) async -> Bool {
+        inLibraryChecks.append((source, catalogID))
+        return inLibrary
+    }
     var shufflingLibrary = false
     func isShufflingLibrary() async -> Bool { shufflingLibrary }
     var repeatHere: RepeatMode?

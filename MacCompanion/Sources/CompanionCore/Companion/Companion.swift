@@ -73,7 +73,9 @@ public final class Companion {
     @ObservationIgnored private var askingLibrary = false
     @ObservationIgnored private var libraryAsks = 0
     /// Questions for one click at most, should the phone's music keep
-    /// moving to another playlist or album while each is open.
+    /// moving to another playlist or album while each is open. Try Again
+    /// after a failed add isn't counted: each needs the person, who can
+    /// always cancel (28 November 2026).
     static let libraryAsksAtMost = 3
     /// How long after a track change Music's artwork isn't trusted. Music can
     /// report the previous track's image in that time, then none at all. Was
@@ -368,12 +370,12 @@ public final class Companion {
     /// waiting on it when it closes.
     private func askAboutLibrary(addFailed: Bool, item: HandBackLibraryItem?) {
         guard let askLibrary, !askingLibrary else { return }
-        guard libraryAsks < Self.libraryAsksAtMost else {
+        guard addFailed || libraryAsks < Self.libraryAsksAtMost else {
             recordHandBack("continue from iPhone: the iPhone's music kept changing while asked about the library; stopped")
             return
         }
         askingLibrary = true
-        libraryAsks += 1
+        if !addFailed { libraryAsks += 1 }
         handBack?.askingYou = true
         recordHandBack("continue from iPhone: asking about the library\(addFailed ? " after adding failed" : "")")
         Task { [weak self] in

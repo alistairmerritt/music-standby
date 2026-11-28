@@ -14,7 +14,7 @@ public enum LibraryPreference: String, CaseIterable, Sendable {
     case ask
     /// Add to Library.
     case add
-    /// Play Song Station.
+    /// Play Song Station Instead.
     case station
 }
 
@@ -38,7 +38,7 @@ public struct LibraryQuestion: Equatable, Sendable {
 public enum LibraryAnswer: Equatable, Sendable {
     /// Add & Continue (or Try Again after a failure).
     case add(remember: Bool)
-    /// Play Song Station.
+    /// Play Song Station Instead.
     case station(remember: Bool)
     /// Cancel, or the dialog closed without a choice: nothing moves, nothing is added.
     case cancel
@@ -51,6 +51,36 @@ public enum LibraryAnswer: Equatable, Sendable {
 /// asked (Shortcuts, widgets, a Mac that can't show the dialog): there, a
 /// setting of Ask Every Time plays the song's station and adds nothing.
 public typealias LibraryAsker = @MainActor (LibraryQuestion) async -> LibraryAnswer
+
+/// One question on screen and its one answer (28 November 2026). The first
+/// answer counts; a later one, such as the Cancel a sheet gives as it goes
+/// after a button, does nothing. A sheet must answer when it goes however it
+/// goes: device test 3 found one swiped away that never answered, which left
+/// Continue on Mac waiting for ever.
+@MainActor public final class LibraryPrompt: Identifiable {
+    public let id = UUID()
+    public let question: LibraryQuestion
+    private var reply: CheckedContinuation<LibraryAnswer, Never>?
+
+    init(_ question: LibraryQuestion, reply: CheckedContinuation<LibraryAnswer, Never>) {
+        self.question = question
+        self.reply = reply
+    }
+
+    /// Whether the question still waits for its answer.
+    public var isOpen: Bool { reply != nil }
+
+    /// Answers once; later calls do nothing.
+    public func answer(_ answer: LibraryAnswer) {
+        reply?.resume(returning: answer)
+        reply = nil
+    }
+
+    /// Shows the question through `present` and waits for its answer.
+    public static func ask(_ question: LibraryQuestion, present: @MainActor (LibraryPrompt) -> Void) async -> LibraryAnswer {
+        await withCheckedContinuation { reply in present(LibraryPrompt(question, reply: reply)) }
+    }
+}
 
 extension AppleMusicSource {
     /// Which playlist or album an answer was for, so it isn't used for another.

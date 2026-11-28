@@ -234,6 +234,25 @@ import StandByProtocol
         #expect(await requests(r).last?.library == .station)
     }
 
+    /// Try Again after a failed add isn't counted against the limit on
+    /// questions: each needs the person, who can always cancel (28 November 2026).
+    @Test func tryAgainAtTheMacIsNeverCutShort() async throws {
+        let r = await rig(state: "paused")
+        let again = LibraryDialogAnswer(choice: .add, remember: false)
+        let person = Asked(again, again, again, again, again)
+        r.companion.askLibrary = { await person.ask($0, $1) }
+        r.companion.continueFromPhone()
+        await eventually { await requests(r).count == 1 }
+        await r.relay.simulate(.handBackStatus(id: try #require(r.companion.handBack?.id), status: .needsLibraryChoice))
+        for sent in 2...5 {
+            await eventually { await requests(r).count == sent }
+            await r.relay.simulate(.handBackStatus(id: try #require(await requests(r).last?.id), status: .libraryAddFailed))
+        }
+        await eventually { await requests(r).count == 6 }
+        #expect(person.asked == [false, true, true, true, true], "four Try Agains, all asked")
+        #expect(await requests(r).dropFirst().allSatisfy { $0.library == .add })
+    }
+
     @Test func cancelAtTheMacMovesNothing() async throws {
         let r = await rig(state: "paused")
         let person = Asked(nil)

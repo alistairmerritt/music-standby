@@ -21,6 +21,8 @@ final class SystemMusicPhonePlayer: PhoneMusicPlaying {
     /// The Apple Music playlist or album `appleMusicSource()` found last,
     /// for `addToLibrary`.
     private var lastFound: FoundContainer?
+    /// Why the last add failed (`libraryAddFailure`), for the Diagnostics Log.
+    private var addFailure: String?
     /// Apple Music's newest recently played, kept for one hand-over.
     private var recentCache: (at: Date, items: [RecentlyPlayedMusicItem])?
     private enum FoundContainer { case playlist(Playlist), album(Album) }
@@ -492,6 +494,7 @@ extension SystemMusicPhonePlayer {
     /// Music playlist added in 5.4 s, and on the Mac 4.3 s later. A library
     /// list (`pl.u-…`, `l.…`) is there already.
     func addToLibrary(_ source: AppleMusicSource) async -> Bool {
+        addFailure = nil
         do {
             switch (source, lastFound) {
             case (.playlist(let place), .playlist(let playlist)?) where playlist.id.rawValue == place.cloudID:
@@ -514,17 +517,39 @@ extension SystemMusicPhonePlayer {
                     try await MusicLibrary.shared.add(catalog)
                 }
             default:
-                #if DEBUG
-                print("PPROBE addToLibrary: no matching lastFound (\(String(describing: lastFound).prefix(120)))")
-                #endif
+                addFailure = "it wasn't found again in Apple Music"
                 return false
             }
             return true
         } catch {
-            #if DEBUG
-            print("PPROBE addToLibrary failed: \(error) [\(type(of: error))]")
-            #endif
+            addFailure = Self.describe(addError: error)
             return false
+        }
+    }
+
+    func libraryAddFailure() -> String? { addFailure }
+
+    /// The error and the reason beneath it. On 28 November 2026 an iPhone with
+    /// Sync Library off said "The requested operation is not enabled for this
+    /// device", beneath it "Missing add to library capabilities".
+    static func describe(addError error: Error) -> String {
+        let error = error as NSError
+        var text = error.localizedDescription
+        if let under = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            text += "; " + (under.userInfo[NSDebugDescriptionErrorKey] as? String ?? under.localizedDescription)
+        }
+        if text.localizedCaseInsensitiveContains("capabilit") { text += "; is Sync Library on in Settings › Apps › Music?" }
+        return text
+    }
+
+    /// See `PhoneMusicPlaying.isInLibrary`. A playlist only: the library has
+    /// one with Apple Music's very ID (`cloudGlobalID`, as an Apple Music
+    /// playlist added to the library has), holding this song. An album has
+    /// no such ID here, so it's asked about as before.
+    func isInLibrary(_ source: AppleMusicSource, song catalogID: String) async -> Bool {
+        guard access == .allowed, case .playlist(let place) = source, let cloudID = place.cloudID else { return false }
+        return Self.libraryPlaylists().contains { playlist in
+            playlist.cloudGlobalID == cloudID && playlist.items.contains { Self.catalogID(of: $0) == catalogID }
         }
     }
 

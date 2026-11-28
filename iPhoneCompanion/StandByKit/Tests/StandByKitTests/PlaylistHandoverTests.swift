@@ -519,14 +519,15 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
     /// Continue on Mac with the library setting, and someone to ask when given.
     private func library(_ relay: FakeRelay, _ phone: FakePhoneMusic, preference: LibraryPreference = .ask,
                          setting: Setting? = nil, from source: HandoverSource = .app,
-                         ask: LibraryAsker? = nil) async throws -> (outcome: SendBackOutcome, handover: Handover) {
+                         ask: LibraryAsker? = nil, record: UserDefaults? = nil) async throws -> (outcome: SendBackOutcome, handover: Handover) {
         let clock = MutableClock()
         let setting = setting ?? Setting(preference)
         let memory = HandoverMemory(load: { nil }, save: { _ in }, libraryPreference: { setting.preference },
                                     saveLibraryPreference: { setting.preference = $0; setting.saved.append($0) })
         let remote = MacRemote(client: relay, now: { clock.now }, sleep: { clock.advance($0) }, memory: memory)
         try await remote.read()
-        let handover = remote.handover()
+        var handover = remote.handover()
+        if let record { handover.widgetDefaults = record }
         return (await handover.sendBackToMac(with: phone, from: source, askLibrary: ask), handover)
     }
 
@@ -677,7 +678,7 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
             let person = Person(.cancel)
             #expect(try await library(await pausedMacThatPlays(), asked, ask: person.asker).outcome == .cancelled)
             #expect(person.questions.count == 1, "Ask Every Time asks")
-            // Play Song Station (the switch off): the station, nothing added.
+            // Play Song Station Instead (the switch off): the station, nothing added.
             let station = phone("270246724", playlist: nil)
             station.appleMusicHere = source
             let relay = await pausedMacThatPlays()
@@ -762,12 +763,99 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(person.questions.map(\.addFailed) == [true])
     }
 
+    /// Device test 9 (28 November 2026): played from Apple Music, a playlist
+    /// the library already has looked like any other, and was asked about.
+    @Test func aPlaylistTheLibraryHasIsSentWithNothingAskedOrAdded() async throws {
+        for preference in LibraryPreference.allCases {
+            let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+            phone.inLibrary = true
+            let person = Person(.cancel)
+            #expect(try await library(relay, phone, preference: preference, ask: person.asker).outcome == .sentBack, "\(preference)")
+            #expect(person.questions.isEmpty && phone.added.isEmpty, "\(preference): nothing asked, nothing added")
+            let sent = await relay.sent.map(\.command).first
+            #expect(sent?.playlist == Self.online, "\(preference): the playlist, not marked as just added, so the Mac doesn't wait for it")
+            #expect(phone.inLibraryChecks.map(\.1) == ["270246724"], "checked for this song")
+        }
+    }
+
+    /// The check costs ordinary hand-overs nothing: it runs only for an
+    /// Apple Music playlist or album the phone would otherwise ask about.
+    @Test func ordinaryHandOversNeverCheckTheLibrary() async throws {
+        let libraryPlaylist = phone("270246724", playlist: aaHere)
+        _ = try await library(await pausedMacThatPlays(), libraryPlaylist)
+        let station = phone("270246724", playlist: nil)
+        station.appleMusicHere = .station(StationPlace(id: "ra.985484166", name: "Made-Up Radio"))
+        let stationRelay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await stationRelay.setNext(macPlays("555", title: "Another Song"))
+        _ = try await library(stationRelay, station)
+        let plain = phone("270246724", playlist: nil)
+        _ = try await library(await pausedMacThatPlays(), plain)
+        #expect(libraryPlaylist.inLibraryChecks.isEmpty && station.inLibraryChecks.isEmpty && plain.inLibraryChecks.isEmpty)
+    }
+
+    /// Try Again isn't capped: each needs the person, who can always cancel,
+    /// and nothing reaches the Mac until an add works.
+    @Test func tryAgainIsNeverCutShort() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        phone.adds = false
+        phone.addFailureReason = "not enabled for this device"
+        let person = Person(.add(remember: false), .add(remember: false), .add(remember: false), .add(remember: false), .add(remember: false))
+        person.meanwhile = { asked in if asked == 5 { phone.adds = true } }
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(person.questions.map(\.addFailed) == [false, true, true, true, true])
+        #expect(phone.added.count == 5)
+        #expect(await relay.sent.first?.command.kind == .playStation, "the Mac heard nothing until the add worked")
+    }
+
+    /// Device test 3 (28 November 2026): a sheet swiped away must answer
+    /// Cancel, and the next hand-over must work straight after.
+    @Test func aQuestionClosedWithoutAChoiceCancelsAndTheNextHandOverWorks() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        var shown: LibraryPrompt?
+        let swipedAway: LibraryAsker = { question in
+            await LibraryPrompt.ask(question) { prompt in
+                shown = prompt
+                prompt.answer(.cancel)   // the sheet's onDisappear, after a swipe
+            }
+        }
+        #expect(try await library(relay, phone, ask: swipedAway).outcome == .cancelled)
+        #expect(shown?.isOpen == false, "nothing left waiting")
+        #expect(await relay.sent.isEmpty && phone.pauses == 0 && phone.added.isEmpty)
+        // Straight after, Continue on Mac again, answered this time.
+        let answered: LibraryAsker = { question in
+            await LibraryPrompt.ask(question) { prompt in
+                prompt.answer(.station(remember: false))   // a button…
+                prompt.answer(.cancel)                      // …then the sheet goes
+            }
+        }
+        #expect(try await library(relay, phone, ask: answered).outcome == .sentBack, "the button's answer, not the Cancel after it")
+        #expect(await relay.sent.map(\.command.kind) == [.playStation])
+    }
+
+    @Test func aPromptAnswersOnce() async {
+        var prompt: LibraryPrompt?
+        let answer = await LibraryPrompt.ask(LibraryQuestion(kind: .album, name: "Album")) {
+            prompt = $0
+            #expect($0.isOpen)
+            $0.answer(.add(remember: true))
+            $0.answer(.station(remember: false))
+            $0.answer(.cancel)
+        }
+        #expect(answer == .add(remember: true))
+        #expect(prompt?.isOpen == false && prompt?.question.name == "Album")
+    }
+
     @Test func nobodyToAskPlaysTheStationAddsNothingAndSaysSo() async throws {
         let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
-        let (outcome, handover) = try await library(relay, phone, preference: .ask, from: .shortcuts)
+        let record = UserDefaults(suiteName: "record-\(UUID().uuidString)")!
+        let (outcome, handover) = try await library(relay, phone, preference: .ask, from: .shortcuts, record: record)
         #expect(outcome == .sentBack && phone.added.isEmpty)
         #expect(await relay.sent.map(\.command).first?.playlist == nil)
         #expect(handover.playedStationInsteadOfAdding)
+        // Shortcuts shows nothing in its own app: the record says why.
+        let line = try #require(LockScreenRecord.entries(in: record).first?.message)
+        #expect(line.hasPrefix("Continue on Mac from Shortcuts: sentBack in "))
+        #expect(line.hasSuffix("the song’s station, as the playlist or album isn’t in the library and nobody could be asked (Ask Every Time)"))
         // A saved Add to Library still adds, unattended.
         let saved = onlinePlaylistPhone()
         let added = try await library(await pausedMacThatPlays(), saved, preference: .add, from: .shortcuts)

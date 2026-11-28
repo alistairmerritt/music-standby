@@ -59,44 +59,7 @@ enum HandoverProbe {
                 let outcome = await model.continueOnPhone(with: player)
                 say("continueOnPhone: \(outcome) in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
             } else {
-                // `-libraryAnswer add|station|cancel[-remember] [seconds]` (28 November
-                // 2026): answers the library question after a wait, for device tests
-                // without a tap. Each question gets the same answer; without the flag
-                // nobody is asked, as for Shortcuts.
-                var asker: LibraryAsker?
-                if let at = arguments.firstIndex(of: "-libraryAnswer"), arguments.count > at + 1 {
-                    let word = arguments[at + 1]
-                    let wait = arguments.count > at + 2 ? Double(arguments[at + 2]) ?? 0 : 0
-                    let remember = word.hasSuffix("-remember")
-                    // `-whileAsked skip|library:NAME`: the music changes while the
-                    // first question is open (the next song, or a library playlist).
-                    let meanwhile = arguments.firstIndex(of: "-whileAsked").flatMap { arguments.count > $0 + 1 ? arguments[$0 + 1] : nil }
-                    var acted = false
-                    asker = { question in
-                        say("asked +\(Int(Date().timeIntervalSince(t0) * 1000)) ms: \(question.kind) “\(question.name)”\(question.addFailed ? " (add failed)" : ""); answering \(word) in \(wait) s")
-                        if let meanwhile, !acted {
-                            acted = true
-                            let mp = MPMusicPlayerController.systemMusicPlayer
-                            if meanwhile == "skip" {
-                                mp.skipToNextItem()
-                            } else if meanwhile.hasPrefix("library:"),
-                                      let list = MPMediaQuery.playlists().collections?.first(where: {
-                                          ($0.value(forProperty: MPMediaPlaylistPropertyName) as? String) == String(meanwhile.dropFirst(8))
-                                      }) {
-                                mp.setQueue(with: list)
-                                mp.play()
-                            }
-                            try? await Task.sleep(for: .seconds(1.5))
-                            say("meanwhile (\(meanwhile)): now \(describe(mp.nowPlayingItem))")
-                        }
-                        try? await Task.sleep(for: .seconds(wait))
-                        say("position here when answered: \(Int(MPMusicPlayerController.systemMusicPlayer.currentPlaybackTime * 10)) ds")
-                        // `-onFail cancel|station`: the answer once adding has failed.
-                        let reply = question.addFailed ? (arguments.firstIndex(of: "-onFail").flatMap { arguments.count > $0 + 1 ? arguments[$0 + 1] : nil } ?? word) : word
-                        return reply.hasPrefix("add") ? .add(remember: remember) : reply.hasPrefix("station") ? .station(remember: remember) : .cancel
-                    }
-                }
-                let outcome = await model.sendBackToMac(with: player, askLibrary: asker)
+                let outcome = await model.sendBackToMac(with: player)
                 say("sendBackToMac: \(outcome) in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
             }
             // Newest first: everything above the entry that was first before.
@@ -254,16 +217,6 @@ enum HandoverProbe {
 
     static func runIfAsked() {
         let arguments = ProcessInfo.processInfo.arguments
-        if let at = arguments.firstIndex(of: "-setLibraryPreference"), arguments.count > at + 1,
-           let preference = LibraryPreference(rawValue: arguments[at + 1]) {
-            // Device tests (28 November 2026): Settings' library choice, without the screen.
-            let defaults = UserDefaults(suiteName: AppGroup.identifier) ?? .standard
-            let was = HandoverMemory.migrateLibraryPreference(in: defaults)
-            HandoverMemory.defaults(defaults).saveLibraryPreference(preference)
-            say("library preference was \(was.rawValue), now \(HandoverMemory.defaults(defaults).libraryPreference().rawValue)")
-            finish()
-            return
-        }
         if let at = arguments.firstIndex(of: "-timingProbe"), arguments.count > at + 1 {
             // Times the library steps Continue on iPhone takes for an album.
             let id = arguments[at + 1]

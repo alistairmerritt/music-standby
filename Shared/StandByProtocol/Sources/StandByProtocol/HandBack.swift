@@ -146,7 +146,7 @@ public struct HandBackLibraryChoice: RawRepresentable, Codable, Hashable, Sendab
     public static let ask: HandBackLibraryChoice = "ask"
     /// Add & Continue.
     public static let add: HandBackLibraryChoice = "add"
-    /// Play Song Station.
+    /// Play Song Station Instead.
     public static let station: HandBackLibraryChoice = "station"
 }
 

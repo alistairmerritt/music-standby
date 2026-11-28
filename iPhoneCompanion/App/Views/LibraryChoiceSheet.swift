@@ -5,31 +5,14 @@ import SwiftUI
 /// isn't in the library (28 November 2026; StandByKit's `LibraryChoice.swift`).
 /// The same words and choices as the Mac's dialog. A sheet rather than an
 /// alert, which can't hold Remember my choice. Music here plays on while it's
-/// open; closing it without a choice is Cancel.
-@MainActor final class LibraryPrompt: Identifiable {
-    let id = UUID()
-    let question: LibraryQuestion
-    private var reply: CheckedContinuation<LibraryAnswer, Never>?
-
-    init(_ question: LibraryQuestion, reply: CheckedContinuation<LibraryAnswer, Never>) {
-        self.question = question
-        self.reply = reply
-    }
-
-    /// Answers once; later calls (the sheet closing after a button) do nothing.
-    func answer(_ answer: LibraryAnswer) {
-        reply?.resume(returning: answer)
-        reply = nil
-    }
-}
-
+/// open; closing it without a choice is Cancel (`LibraryPrompt`).
 struct LibraryChoiceSheet: View {
     let prompt: LibraryPrompt
     @Environment(\.dismiss) private var dismiss
     @State private var remember = false
 
     static let title = "Add to your library?"
-    static let message = "To continue this playlist or album on your Mac, Second Chair needs to add it to your Apple Music library. It’ll stay there until you remove it."
+    static let message = "To continue this playlist or album on your Mac, Second Chair may need to add it to your Apple Music library. Anything added stays there until you remove it."
     static let failedTitle = "Couldn’t add it to your library"
     static let failedMessage = "Second Chair couldn’t add this playlist or album to your Apple Music library. Try again, or continue with a station based on the current song."
 
@@ -66,7 +49,7 @@ struct LibraryChoiceSheet: View {
                 Button {
                     finish(.station(remember: remember && !failed))
                 } label: {
-                    Text("Play Song Station").frame(maxWidth: .infinity, minHeight: 34)
+                    Text("Play Song Station Instead").frame(maxWidth: .infinity, minHeight: 34)
                 }
                 .buttonStyle(.bordered)
                 Button("Cancel", role: .cancel) { finish(.cancel) }

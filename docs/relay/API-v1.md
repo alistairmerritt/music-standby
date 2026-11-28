@@ -452,7 +452,7 @@ phone → relay  POST /v1/hand-back/status done       relay → Mac  hand-back-s
   - `add` / `station`: the person's answer, for this hand-over. With `remember: true` the
     phone saves it as its setting (Settings › When a playlist or album isn't in your library).
     If adding fails, the phone answers `library_add_failed` (nothing moved) and the Mac offers
-    Try Again, Play Song Station or Cancel.
+    Try Again, Play Song Station Instead or Cancel.
   - absent (the Mac's Shortcuts action, or a Mac or relay from before this): nobody can be
     asked, so Ask Every Time plays the song's station and adds nothing.
 
