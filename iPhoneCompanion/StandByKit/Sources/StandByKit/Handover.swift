@@ -664,8 +664,8 @@ public struct Handover {
         record("Send back to Mac: couldn't add the \(what) to the library")
         guard let ask else {
             // A saved Add to Library, with nobody to ask (Shortcuts, a widget):
-            // carrying on matters more than the playlist, as before.
-            libraryNote.keptOut = true
+            // carrying on matters more than the playlist, as before. Not a
+            // `LibraryNote`: the setting is already Add to Library.
             record("Send back to Mac: nobody to ask; the song's station instead")
             return .station
         }

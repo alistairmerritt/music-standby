@@ -750,7 +750,8 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         let failing = onlinePlaylistPhone()
         failing.adds = false
         let fell = try await library(await pausedMacThatPlays(), failing, preference: .add, from: .shortcuts)
-        #expect(fell.outcome == .sentBack && fell.handover.playedStationInsteadOfAdding)
+        #expect(fell.outcome == .sentBack && failing.added.count == 1)
+        #expect(!fell.handover.playedStationInsteadOfAdding, "the setting is already Add to Library; nothing to suggest")
     }
 
     @Test func theMacsContinueFromIPhoneAsksAtTheMac() async throws {
