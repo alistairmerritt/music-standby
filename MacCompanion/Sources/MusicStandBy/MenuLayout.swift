@@ -334,7 +334,7 @@ private struct ContinueFromPhoneArea: View {
     let action: () -> Void
 
     var body: some View {
-        let waiting = progress.map { !$0.isFinished } ?? false
+        let waiting = progress?.isWaiting ?? false
         VStack(spacing: 8) {
             Button(action: action) {
                 HStack(spacing: 6) {
@@ -404,10 +404,12 @@ extension HandBackProgress {
 
     var kind: Kind {
         if timedOut { return .failed }
+        // The library dialog is open: a spinner, not a result (28 November 2026).
+        if askingYou { return .progress }
         switch status {
         case nil, .asked?, .working?, .done?: return .progress
         case .notified?: return .waitingOnYou
-        case .nothingPlaying?, .notInQueue?: return .info
+        case .nothingPlaying?, .notInQueue?, .needsLibraryChoice?, .cancelled?: return .info
         default: return .failed
         }
     }

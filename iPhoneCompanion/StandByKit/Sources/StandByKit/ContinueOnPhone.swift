@@ -86,6 +86,15 @@ public protocol PhoneMusicPlaying: AnyObject {
     /// Adds an Apple Music playlist or album to the library, so a Mac can
     /// play it. True once added.
     func addToLibrary(_ source: AppleMusicSource) async -> Bool
+    /// Why the last `addToLibrary` failed, for the Diagnostics Log; nil when
+    /// it didn't or can't be told.
+    func libraryAddFailure() -> String?
+    /// True only when this phone's library has this very playlist or album,
+    /// by Apple Music's ID, with this song in it (28 November 2026): played
+    /// from Apple Music, a playlist already in the library looks like any
+    /// other. Never from recently played, never by name. False when it can't
+    /// be told, so the question is asked as before.
+    func isInLibrary(_ source: AppleMusicSource, song catalogID: String) async -> Bool
     /// A guess, as iOS doesn't say: Apple Music here shuffles a song from the
     /// library, and it isn't from a playlist or album found already.
     func isShufflingLibrary() async -> Bool
@@ -113,6 +122,8 @@ extension PhoneMusicPlaying {
     public func appendSongs(_ catalogIDs: [String]) async -> Int { 0 }
     public func appleMusicSource() async -> AppleMusicSource? { nil }
     public func addToLibrary(_ source: AppleMusicSource) async -> Bool { false }
+    public func libraryAddFailure() -> String? { nil }
+    public func isInLibrary(_ source: AppleMusicSource, song catalogID: String) async -> Bool { false }
     public func isShufflingLibrary() async -> Bool { false }
     public func repeatMode() -> RepeatMode? { nil }
     public func setRepeat(_ mode: RepeatMode) {}
@@ -201,6 +212,15 @@ public enum SendBackOutcome: Equatable, Sendable {
     case macRefused
     /// The Mac didn't get to the song in time. Apple Music here carries on.
     case macDidNotStart
+    /// The person cancelled when asked about adding a playlist or album to
+    /// the library (28 November 2026). Nothing moved and nothing was added.
+    case cancelled
+    /// The Mac's Continue from iPhone has to ask the person about adding a
+    /// playlist or album to the library. Nothing moved; Apple Music here plays on.
+    case needsLibraryChoice
+    /// Adding the playlist or album to the library failed, and the Mac's
+    /// Continue from iPhone has to ask what next. Nothing moved.
+    case libraryAddFailed
 }
 
 public enum ContinueOutcome: Equatable, Sendable {

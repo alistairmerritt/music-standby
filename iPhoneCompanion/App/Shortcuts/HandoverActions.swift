@@ -81,7 +81,7 @@ struct ContinueOnIPhoneIntent: AppIntent {
 /// the Mac from the same point, when it's in the Mac's queue.
 struct ContinueOnMacIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue on Mac"
-    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it.")
+    static let description: IntentDescription? = IntentDescription("Plays the song from this phone on your computer from the same point, then pauses Music here. A song your computer’s queue doesn’t have plays there as its station, from the same point when the station starts with it. When a playlist or album isn’t in your library, automated handoffs use the song’s station unless you’ve chosen Add to Library in Settings.")
     static let supportedModes: IntentModes = .background
 
     @MainActor
@@ -89,15 +89,25 @@ struct ContinueOnMacIntent: AppIntent {
         let player = SystemMusicPhonePlayer()
         let outcome = try await ShortcutRemote.run { remote in
             try await remote.read()
-            return await remote.handover().sendBackToMac(with: player, from: .shortcuts)
+            let handover = remote.handover()
+            let outcome = await handover.sendBackToMac(with: player, from: .shortcuts)
+            return (outcome: outcome, keptOut: handover.playedStationInsteadOfAdding)
         }
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
-        switch outcome {
+        // Set to Ask Every Time, an action can't ask, so a playlist or album
+        // outside the library went as its song's station: say why, once, in
+        // the action's own answer rather than a notification (28 November 2026).
+        if outcome.outcome == .sentBack || outcome.outcome == .sentAsStation, outcome.keptOut {
+            return .result(dialog: "Continuing on your Mac with a station from this song. When a playlist or album isn’t in your library, automated handoffs use the song’s station unless you’ve chosen Add to Library in Settings.")
+        }
+        switch outcome.outcome {
         case .sentBack: return .result(dialog: "Continuing on your Mac.")
         case .sentAsStation: return .result(dialog: "Continuing on your Mac with a station from this song.")
         case .nothingPlayingHere: throw ShortcutError("Nothing is playing in Apple Music on your iPhone.")
         case .macRefused: throw ShortcutError("Couldn’t start playback on your Mac." + stillHere)
         case .macDidNotStart: throw ShortcutError("Your Mac didn’t respond. Try again." + stillHere)
+        // Only where someone is asked, which an action never is.
+        case .cancelled, .needsLibraryChoice, .libraryAddFailed: throw ShortcutError("Nothing was moved.")
         }
     }
 }

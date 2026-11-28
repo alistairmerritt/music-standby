@@ -16,7 +16,8 @@ struct SettingsView: View {
     @State private var canPlayCatalog: Bool?
     /// Off unless turned on (17 November 2026), as adding changes the
     /// library: the Mac can only play a playlist or album that's in it.
-    @AppStorage(HandoverMemory.addsToLibraryKey, store: UserDefaults(suiteName: AppGroup.identifier)) private var addsToLibrary = false
+    @AppStorage(HandoverMemory.libraryPreferenceKey, store: UserDefaults(suiteName: AppGroup.identifier))
+    private var libraryPreference: LibraryPreference = .ask
     /// Player Display (24 November 2026), kept by `LiveActivityController.setDisplay`.
     @AppStorage(PlayerDisplay.key, store: LiveActivityController.defaults) private var displayRaw = ""
     private var display: PlayerDisplay { PlayerDisplay(rawValue: displayRaw) ?? LiveActivityController.display }
@@ -140,14 +141,21 @@ struct SettingsView: View {
             if let detail = continueListening?.detail { Text(detail) }
         }
         // Its own section, so the heading says when it applies: only Continue
-        // on Mac, only an Apple Music playlist or album not in the library
-        // (21 November 2026; was "Automatically Add to Library").
+        // on Mac, only an Apple Music playlist or album not in the library.
+        // 28 November 2026: a choice of three, asking by default, in place of
+        // the switch (which was "Automatically Add to Library" before that).
         Section {
-            Toggle("Add Playlists and Albums to Library", isOn: $addsToLibrary)
+            Picker("When a playlist or album isn’t in your library", selection: $libraryPreference) {
+                Text("Ask Every Time").tag(LibraryPreference.ask)
+                Text("Add to Library").tag(LibraryPreference.add)
+                Text("Play Song Station Instead").tag(LibraryPreference.station)
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
         } header: {
-            Text("When Continuing on Mac")
+            Text("When a playlist or album isn’t in your library")
         } footer: {
-            Text("Your Mac can only continue a playlist or album that’s in your library. With this on, Second Chair adds it when needed, and it stays in your library. With this off, your Mac plays the song’s station instead.")
+            Text("To keep a playlist or album going on your Mac, Second Chair may need to add it to your Apple Music library. Otherwise, it can continue with a station based on the current song.\n\nShortcuts and widgets use the song’s station when Ask Every Time is selected.")
         }
     }
 

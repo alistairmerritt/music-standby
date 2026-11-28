@@ -44,10 +44,20 @@ public struct HandBackStatus: RawRepresentable, Codable, Hashable, Sendable, Exp
     public static let notInQueue: HandBackStatus = "not_in_queue"
     /// The Mac refused a step or didn't start the song in time.
     public static let failed: HandBackStatus = "failed"
+    /// The phone plays an Apple Music playlist or album that isn't in the
+    /// library, and nothing says whether to add it (28 November 2026). The
+    /// phone changed nothing and plays on; the Mac asks the person and sends
+    /// a new request with `HandBackRequest.library` set.
+    public static let needsLibraryChoice: HandBackStatus = "needs_library_choice"
+    /// The person chose to add the playlist or album, and adding it failed.
+    /// Nothing moved; the Mac offers to try again, the song's station, or cancel.
+    public static let libraryAddFailed: HandBackStatus = "library_add_failed"
+    /// The person cancelled. Nothing moved and nothing was added.
+    public static let cancelled: HandBackStatus = "cancelled"
 
     /// Nothing more will come for this request.
     public var isFinal: Bool {
-        [.done, .nothingPlaying, .notInQueue, .failed, .unreachable].contains(self)
+        [.done, .nothingPlaying, .notInQueue, .failed, .unreachable, .needsLibraryChoice, .libraryAddFailed, .cancelled].contains(self)
     }
 }
 
@@ -55,11 +65,31 @@ public struct HandBackStatus: RawRepresentable, Codable, Hashable, Sendable, Exp
 public struct HandBackStatusReport: Codable, Equatable, Sendable {
     public var requestID: UUID
     public var status: HandBackStatus
+    /// With `needs_library_choice` or `library_add_failed`: the playlist or
+    /// album asked about, so the Mac's dialog can name it (28 November 2026).
+    public var item: HandBackLibraryItem?
 
-    public init(requestID: UUID, status: HandBackStatus) {
+    public init(requestID: UUID, status: HandBackStatus, item: HandBackLibraryItem? = nil) {
         self.requestID = requestID
         self.status = status
+        self.item = item
     }
+}
+
+/// The playlist or album a library question is about.
+public struct HandBackLibraryItem: Codable, Equatable, Sendable {
+    /// "playlist" or "album"; an open set, shown only when known.
+    public var kind: String
+    /// As Apple Music shows it; at most `PlaylistPlace.maximumNameLength`.
+    public var name: String
+
+    public init(kind: String, name: String) {
+        self.kind = kind
+        self.name = String(name.prefix(PlaylistPlace.maximumNameLength))
+    }
+
+    public static let playlist = "playlist"
+    public static let album = "album"
 }
 
 /// What a hand-back push carries for the app, under the payload's
@@ -70,10 +100,20 @@ public struct HandBackRequest: Codable, Equatable, Sendable {
     /// moving minutes after the click would be a surprise. A tap on the
     /// notification is acted on whenever it comes; the tap is the request.
     public var expiresAt: Date
+    /// What to do with an Apple Music playlist or album that isn't in the
+    /// library (28 November 2026). Nil from a Mac or relay older than that,
+    /// or from the Mac's Shortcuts action: nobody can be asked, so the phone
+    /// follows its setting and, set to ask, plays the song's station.
+    public var library: HandBackLibraryChoice?
+    /// With `library` add or station: the person ticked Remember my choice,
+    /// so the phone saves it as its setting.
+    public var remember: Bool?
 
-    public init(requestID: UUID, expiresAt: Date) {
+    public init(requestID: UUID, expiresAt: Date, library: HandBackLibraryChoice? = nil, remember: Bool? = nil) {
         self.requestID = requestID
         self.expiresAt = expiresAt
+        self.library = library
+        self.remember = remember
     }
 
     /// The payload key.
@@ -85,6 +125,29 @@ public struct HandBackRequest: Codable, Equatable, Sendable {
     /// button too, which matters in StandBy: a phone there is locked, so its
     /// notifications go to a watch on the wrist (added 13 November 2026).
     public static let categoryID = "hand-back"
+}
+
+/// Continue from iPhone and a playlist or album that isn't in the library
+/// (28 November 2026). An open set: a phone that doesn't know a value
+/// treats it as nil.
+public struct HandBackLibraryChoice: RawRepresentable, Codable, Hashable, Sendable, ExpressibleByStringLiteral, CustomStringConvertible {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(stringLiteral value: String) { rawValue = value }
+    public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+    public var description: String { rawValue }
+
+    /// The Mac can show a dialog: when the phone's setting is to ask, the
+    /// phone answers `needs_library_choice` and changes nothing.
+    public static let ask: HandBackLibraryChoice = "ask"
+    /// Add & Continue.
+    public static let add: HandBackLibraryChoice = "add"
+    /// Play Song Station Instead.
+    public static let station: HandBackLibraryChoice = "station"
 }
 
 /// `PUT /v1/tokens/device`: the app's own APNs device token, for hand-back

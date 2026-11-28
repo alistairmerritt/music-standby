@@ -42,6 +42,19 @@ import Testing
         #expect(phone.pauses == 1)
     }
 
+    /// 28 November 2026: the Mac's dialog names what the phone plays.
+    @Test func aLibraryQuestionGoesToTheMacWithItsName() async {
+        let (responder, relay, reports, phone) = setup(phone: PhoneNowPlaying(catalogID: "555", position: 61, isPlaying: true, title: "Song"))
+        phone.appleMusicHere = .playlist(PlaylistPlace(name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5))
+        let request = HandBackRequest(requestID: UUID(), expiresAt: base.addingTimeInterval(120), library: .ask)
+        #expect(await responder.respond(to: request, via: .wake, player: phone) == .needsLibraryChoice)
+        let last = await reports.all.last
+        #expect(last?.status == .needsLibraryChoice)
+        #expect(last?.item == HandBackLibraryItem(kind: "playlist", name: "Today"))
+        #expect(await relay.sent.isEmpty && phone.pauses == 0 && phone.added.isEmpty)
+        #expect(await reports.all.first?.item == nil, "only the question carries it")
+    }
+
     @Test func aLateWakeIsIgnoredButALateTapIsNot() async {
         let clock = MutableClock(base)
         let (responder, relay, reports, phone) = setup(phone: PhoneNowPlaying(catalogID: "1102359994", position: 61, isPlaying: true), clock: clock)

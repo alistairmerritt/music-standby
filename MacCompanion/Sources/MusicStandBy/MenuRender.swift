@@ -80,6 +80,11 @@ enum MenuRender {
         var justConnected = base(track(.playing)); justConnected.setup = .musicJustConnected
         var launchTip = base(track(.playing)); launchTip.launchAtLogin = false; launchTip.setup = .launchTip
         var nothing = base(.nothing); nothing.offersContinueFromPhone = true
+        var choosing = handed
+        choosing.handBack = HandBackProgress(id: UUID(), status: .needsLibraryChoice, item: HandBackLibraryItem(kind: "playlist", name: "Today"), askingYou: true)
+        var adding = handed; adding.handBack = HandBackProgress(id: UUID(), status: .working, library: .add)
+        var cancelled = handed; cancelled.handBack = HandBackProgress(id: UUID(), status: .cancelled)
+        var addFailed = handed; addFailed.handBack = HandBackProgress(id: UUID(), status: .libraryAddFailed)
         return [
             ("01-playing", base(track(.playing))),
             ("02-paused", paused),
@@ -88,6 +93,10 @@ enum MenuRender {
             ("05-hand-back-notification", notified),
             ("06-hand-back-failed", failed),
             ("07-hand-back-not-in-queue", notInQueue),
+            ("07a-hand-back-choosing", choosing),
+            ("07b-hand-back-adding", adding),
+            ("07c-hand-back-cancelled", cancelled),
+            ("07d-hand-back-add-failed", addFailed),
             ("08-nothing-playing", nothing),
             ("09-music-not-running", base(.notRunning)),
             ("10-automation-denied", base(.automationDenied)),

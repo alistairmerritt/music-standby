@@ -11,7 +11,7 @@ import CompanionCore
 /// (ITMS-90626, seen on the iPhone app), so this one avoids them too.
 struct ContinueFromPhoneIntent: AppIntent {
     static let title: LocalizedStringResource = "Continue from iPhone"
-    static let description: IntentDescription? = IntentDescription("Brings the music playing on your phone to this computer, from the same point, and pauses it on the phone. The phone has to be playing a song from this computer’s queue, as it is after continuing on the phone.")
+    static let description: IntentDescription? = IntentDescription("Brings the music playing on your phone to this computer, from the same point, and pauses it on the phone. The phone has to be playing a song from this computer’s queue, as it is after continuing on the phone. When a playlist or album isn’t in your library, automated handoffs use the song’s station unless you’ve chosen Add to Library in Settings.")
 
     @Dependency private var companion: Companion
 
@@ -21,7 +21,10 @@ struct ContinueFromPhoneIntent: AppIntent {
         for _ in 0..<50 where companion.connection.phase != .connected {
             try await Task.sleep(for: .milliseconds(100))
         }
-        companion.continueFromPhone()
+        // An action can run unattended, so it shows no dialog: a playlist or
+        // album that isn't in the library goes as the phone's setting says,
+        // and Ask Every Time plays the song's station (28 November 2026).
+        companion.continueFromPhone(canAsk: false)
         guard let id = companion.handBack?.id else { return .result(dialog: "Continuing here.") }
         // The companion gives up after its own timeout, so this ends.
         while let progress = companion.handBack, progress.id == id, !progress.isFinished {

@@ -29,6 +29,8 @@ enum AppEnvironment {
         #endif
         let container = SharedContainer.appGroup()
         let defaults = UserDefaults(suiteName: AppGroup.identifier) ?? .standard
+        // The old library switch becomes the new setting before Settings reads it.
+        HandoverMemory.migrateLibraryPreference(in: defaults)
         let inDemo = DemoMode.resumes(defaults)
         let transport: any PlaybackTransport
         let registrar: any PushTokenRegistrar

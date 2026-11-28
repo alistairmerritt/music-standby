@@ -57,14 +57,23 @@ public final class HandBackResponder {
         remember(id)
         await send(.working, for: id)
         let status: HandBackStatus
+        // The question last passed to the Mac, so its dialog can name the playlist or album.
+        var asked: LibraryQuestion?
+        let asker = request.libraryAsker().map { answer -> LibraryAsker in
+            { question in
+                asked = question
+                return await answer(question)
+            }
+        }
         do {
             let remote = try makeRemote()
             try await remote.read()
-            status = Self.status(for: await remote.handover().sendBackToMac(with: player, from: .macRequest))
+            status = Self.status(for: await remote.handover().sendBackToMac(with: player, from: .macRequest, askLibrary: asker))
         } catch {
             status = .failed
         }
-        await send(status, for: id)
+        let item = [.needsLibraryChoice, .libraryAddFailed].contains(status) ? asked.map(Self.item(for:)) : nil
+        await send(status, for: id, item: item)
         return status
     }
 
@@ -73,13 +82,20 @@ public final class HandBackResponder {
         case .sentBack, .sentAsStation: .done
         case .nothingPlayingHere: .nothingPlaying
         case .macRefused, .macDidNotStart: .failed
+        case .cancelled: .cancelled
+        case .needsLibraryChoice: .needsLibraryChoice
+        case .libraryAddFailed: .libraryAddFailed
         }
     }
 
     /// A report that doesn't arrive costs only the Mac's progress line; the
     /// Mac's own state still shows the music arriving.
-    private func send(_ status: HandBackStatus, for id: UUID) async {
-        try? await report(HandBackStatusReport(requestID: id, status: status))
+    private func send(_ status: HandBackStatus, for id: UUID, item: HandBackLibraryItem? = nil) async {
+        try? await report(HandBackStatusReport(requestID: id, status: status, item: item))
+    }
+
+    static func item(for question: LibraryQuestion) -> HandBackLibraryItem {
+        HandBackLibraryItem(kind: question.kind == .playlist ? HandBackLibraryItem.playlist : HandBackLibraryItem.album, name: question.name)
     }
 
     private var handled: [UUID] {

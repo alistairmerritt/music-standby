@@ -164,10 +164,16 @@ actor FakeRelay: MacRemote.Client {
     /// What every read after the first returns.
     func setNext(_ state: SessionState) { next = state }
 
+    /// What every read returns once a command has been sent: a Mac that
+    /// does what it's told, however often it's read before.
+    private var afterCommand: SessionState?
+    func setAfterCommand(_ state: SessionState) { afterCommand = state }
+
     func refuse(with code: ErrorCode) { refusal = code }
 
     func fetchSession(timeout: TimeInterval) async throws -> SessionState {
         reads += 1
+        if !sent.isEmpty, let afterCommand { return afterCommand }
         if reads > 1, let next { return next }
         return state
     }
