@@ -190,7 +190,7 @@ export type MacFrame =
   | { type: "artwork"; artwork: ArtworkDescriptor }
   | { type: "goodbye"; reason: string }
   | { type: "pair-decision"; claimID: string; approved: boolean }
-  | { type: "hand-back-request"; requestID: string }
+  | { type: "hand-back-request"; requestID: string; library?: string; remember?: boolean }
   | { type: "error"; error: ProtocolError };
 
 export type RelayFrame =
@@ -250,6 +250,19 @@ export interface HandBackRequest {
   requestID: string;
   /** ISO-8601. A background push that wakes the app later than this is ignored. */
   expiresAt: string;
+  /**
+   * What to do with an Apple Music playlist or album that isn't in the
+   * library: "ask", "add" or "station" (28 November 2026). Passed on from the
+   * Mac's request; absent when the Mac sent none.
+   */
+  library?: string;
+  /** With library "add" or "station": the phone saves it as its setting. */
+  remember?: boolean;
+}
+
+/** A `HandBackLibraryChoice` from the Mac: an open set of short snake_case words. */
+export function isLibraryChoice(v: unknown): v is string {
+  return typeof v === "string" && /^[a-z_]{1,16}$/.test(v);
 }
 
 /** A `HandBackStatus` from the phone: an open set of short snake_case words. */

@@ -60,7 +60,8 @@ public final class HandBackResponder {
         do {
             let remote = try makeRemote()
             try await remote.read()
-            status = Self.status(for: await remote.handover().sendBackToMac(with: player, from: .macRequest))
+            status = Self.status(for: await remote.handover().sendBackToMac(with: player, from: .macRequest,
+                                                                           askLibrary: request.libraryAsker()))
         } catch {
             status = .failed
         }
@@ -73,6 +74,9 @@ public final class HandBackResponder {
         case .sentBack, .sentAsStation: .done
         case .nothingPlayingHere: .nothingPlaying
         case .macRefused, .macDidNotStart: .failed
+        case .cancelled: .cancelled
+        case .needsLibraryChoice: .needsLibraryChoice
+        case .libraryAddFailed: .libraryAddFailed
         }
     }
 

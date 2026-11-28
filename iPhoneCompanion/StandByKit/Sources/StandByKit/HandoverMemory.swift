@@ -48,11 +48,12 @@ public struct HandoverMemory {
     /// recently played list, and the way back sent the library shuffled.
     public var loadAlbum: @MainActor () -> AlbumPlace?
     public var saveAlbum: @MainActor (AlbumPlace?) -> Void
-    /// The setting "Automatically Add to Library", under Continue Listening (17 November 2026):
-    /// Continue on Mac adds an Apple Music playlist or album that isn't in
-    /// the library, so the Mac can play it. Off unless turned on: adding
-    /// changes the person's library.
-    public var addsToLibrary: @MainActor () -> Bool
+    /// Settings › When a playlist or album isn't in your library (28
+    /// November 2026; was the switch "Add Playlists and Albums to Library").
+    /// Continue on Mac asks, adds, or plays the song's station.
+    public var libraryPreference: @MainActor () -> LibraryPreference
+    /// Remember my choice.
+    public var saveLibraryPreference: @MainActor (LibraryPreference) -> Void
     /// The catalogue IDs Continue on iPhone last queued here from the Mac's
     /// Up Next (17 November 2026). A song from them isn't from any playlist,
     /// album or station Apple Music lists as recently played, which is
@@ -65,7 +66,8 @@ public struct HandoverMemory {
                 savePlaylist: @escaping @MainActor (PlaylistPlace?) -> Void = { _ in },
                 loadAlbum: @escaping @MainActor () -> AlbumPlace? = { nil },
                 saveAlbum: @escaping @MainActor (AlbumPlace?) -> Void = { _ in },
-                addsToLibrary: @escaping @MainActor () -> Bool = { false },
+                libraryPreference: @escaping @MainActor () -> LibraryPreference = { .ask },
+                saveLibraryPreference: @escaping @MainActor (LibraryPreference) -> Void = { _ in },
                 loadQueued: @escaping @MainActor () -> [String]? = { nil },
                 saveQueued: @escaping @MainActor ([String]?) -> Void = { _ in }) {
         self.load = load
@@ -74,13 +76,38 @@ public struct HandoverMemory {
         self.savePlaylist = savePlaylist
         self.loadAlbum = loadAlbum
         self.saveAlbum = saveAlbum
-        self.addsToLibrary = addsToLibrary
+        self.libraryPreference = libraryPreference
+        self.saveLibraryPreference = saveLibraryPreference
         self.loadQueued = loadQueued
         self.saveQueued = saveQueued
     }
 
-    /// The App Group key for `addsToLibrary`; missing means off.
+    /// The App Group key for `libraryPreference`: a `LibraryPreference` raw value.
+    public static let libraryPreferenceKey = "continueOnMacLibraryChoice"
+    /// The old switch's key (17–27 November 2026), read once by
+    /// `migrateLibraryPreference` and otherwise left alone, so an older build
+    /// installed over this one still finds its setting.
     public static let addsToLibraryKey = "continueOnMacAddsToLibrary"
+
+    /// The setting, migrated from the old switch the first time it's read.
+    /// The switch was stored only once someone flipped it (`@AppStorage`
+    /// writes nothing for its default), so a stored value is a choice:
+    /// on → Add to Library; on and then off again → Play Song Station, as
+    /// that's what they had. Never touched → Ask Every Time, the new default,
+    /// since nobody chose the station; they just never saw the switch.
+    @discardableResult
+    public static func migrateLibraryPreference(in defaults: UserDefaults) -> LibraryPreference {
+        if let raw = defaults.string(forKey: libraryPreferenceKey), let preference = LibraryPreference(rawValue: raw) {
+            return preference
+        }
+        let preference: LibraryPreference = switch defaults.object(forKey: addsToLibraryKey) as? Bool {
+        case true?: .add
+        case false?: .station
+        case nil: .ask
+        }
+        defaults.set(preference.rawValue, forKey: libraryPreferenceKey)
+        return preference
+    }
 
     /// Remembers nothing: every Continue on iPhone takes the Mac's song.
     public static var none: HandoverMemory {
@@ -106,7 +133,8 @@ public struct HandoverMemory {
         return HandoverMemory(load: { load(HandoverMark.self, key) }, save: { save($0, key) },
                               loadPlaylist: { load(PlaylistPlace.self, playlistKey) }, savePlaylist: { save($0, playlistKey) },
                               loadAlbum: { load(AlbumPlace.self, albumKey) }, saveAlbum: { save($0, albumKey) },
-                              addsToLibrary: { defaults.object(forKey: addsToLibraryKey) as? Bool ?? false },
+                              libraryPreference: { migrateLibraryPreference(in: defaults) },
+                              saveLibraryPreference: { defaults.set($0.rawValue, forKey: libraryPreferenceKey) },
                               loadQueued: { load([String].self, queuedKey) }, saveQueued: { save($0, queuedKey) })
     }
 

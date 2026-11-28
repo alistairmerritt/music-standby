@@ -89,15 +89,25 @@ struct ContinueOnMacIntent: AppIntent {
         let player = SystemMusicPhonePlayer()
         let outcome = try await ShortcutRemote.run { remote in
             try await remote.read()
-            return await remote.handover().sendBackToMac(with: player, from: .shortcuts)
+            let handover = remote.handover()
+            let outcome = await handover.sendBackToMac(with: player, from: .shortcuts)
+            return (outcome: outcome, keptOut: handover.playedStationInsteadOfAdding)
         }
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
-        switch outcome {
+        // Set to Ask Every Time, an action can't ask, so a playlist or album
+        // outside the library went as its song's station: say why, once, in
+        // the action's own answer rather than a notification (28 November 2026).
+        if outcome.outcome == .sentBack || outcome.outcome == .sentAsStation, outcome.keptOut {
+            return .result(dialog: "Continuing on your Mac with a station from this song. To keep playlists and albums that aren’t in your library, choose Add to Library in Second Chair’s Settings.")
+        }
+        switch outcome.outcome {
         case .sentBack: return .result(dialog: "Continuing on your Mac.")
         case .sentAsStation: return .result(dialog: "Continuing on your Mac with a station from this song.")
         case .nothingPlayingHere: throw ShortcutError("Nothing is playing in Apple Music on your iPhone.")
         case .macRefused: throw ShortcutError("Couldn’t start playback on your Mac." + stillHere)
         case .macDidNotStart: throw ShortcutError("Your Mac didn’t respond. Try again." + stillHere)
+        // Only where someone is asked, which an action never is.
+        case .cancelled, .needsLibraryChoice, .libraryAddFailed: throw ShortcutError("Nothing was moved.")
         }
     }
 }

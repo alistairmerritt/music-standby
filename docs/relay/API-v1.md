@@ -407,7 +407,7 @@ Continue on Mac (skip the Mac to the phone's song in the Mac's queue, seek to th
 position, play, then pause the phone). Types in `StandByProtocol/HandBack.swift`.
 
 ```
-Mac   → relay  hand-back-request {requestID}
+Mac   → relay  hand-back-request {requestID, library?, remember?}
 relay → phone  background push                     relay → Mac  hand-back-status asked
         …no phone status within 5 s…
 relay → phone  Time Sensitive notification          relay → Mac  hand-back-status notified
@@ -435,10 +435,29 @@ phone → relay  POST /v1/hand-back/status done       relay → Mac  hand-back-s
   watch, not the phone. It needs the app's notification permission.
 - **Statuses.** `POST /v1/hand-back/status` with `HandBackStatusReport`; the relay forwards each
   to the Mac as `hand-back-status`, and any phone status stops the notification. The phone sends
-  `working` as it starts, then one of `done`, `nothing_playing`, `not_in_queue`, `failed`. The
+  `working` as it starts, then one of `done`, `nothing_playing`, `not_in_queue`, `failed`,
+  `needs_library_choice`, `library_add_failed` (see below). The
   relay's own are `asked`, `notified` and `unreachable`. A request is forgotten 2 minutes
   after it was made; a status for any other request id is accepted and dropped.
 - **Only one at a time.** A new request replaces the one before.
+- **A playlist or album that isn't in the library (28 November 2026).** The Mac can only play a
+  playlist or album from the library, and it can't see what the phone plays, so the phone
+  decides. `hand-back-request` may carry `library`, which the relay checks (a short snake_case
+  word, else dropped) and copies with `remember` (a boolean, kept only beside `library`) into
+  both pushes' `HandBackRequest`:
+  - `ask` (the menu: the Mac can show a dialog). If the phone plays an Apple Music playlist or
+    album that isn't in the library and its setting is Ask Every Time, it changes nothing,
+    plays on, and answers `needs_library_choice`. The Mac asks the person and sends a **new**
+    request with `add` or `station`, so the phone starts from where it is by then.
+  - `add` / `station`: the person's answer, for this hand-over. With `remember: true` the
+    phone saves it as its setting (Settings › When a playlist or album isn't in your library).
+    If adding fails, the phone answers `library_add_failed` (nothing moved) and the Mac offers
+    Try Again, Play Song Station or Cancel.
+  - absent (the Mac's Shortcuts action, or a Mac or relay from before this): nobody can be
+    asked, so Ask Every Time plays the song's station and adds nothing.
+
+  `cancelled` is the Mac's own status after Cancel in its dialog; nothing is sent for it.
+  `needs_library_choice`, `library_add_failed` and `cancelled` are final for their request.
 
 ## 15. The Live Activity card (experiment, 23 November 2026)
 

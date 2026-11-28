@@ -24,6 +24,10 @@ struct ContinueListeningArea: View {
     private typealias Direction = HandoffDirection
     @State private var working: Direction?
     @State private var result: (text: String, isFailure: Bool)?
+    /// Continue on Mac's question about the library, while it's open.
+    @State private var libraryPrompt: LibraryPrompt?
+    /// The last hand-over stopped with nothing moved (Cancel): no ripple, no words.
+    @State private var stoppedQuietly = false
 
     // Just after a hand-over lands, where the music went (HandoffMoment).
     private var assumed: Bool? { HandoffMoment.shared.assumesPhonePlays }
@@ -114,6 +118,8 @@ struct ContinueListeningArea: View {
         .animation(.smooth(duration: 0.45), value: working)
         .animation(.smooth(duration: 0.45), value: result?.text)
         .onChange(of: [macPlaying, phonePlaying]) { result = nil }
+        // Swiped away without a choice: Cancel.
+        .sheet(item: $libraryPrompt, onDismiss: { libraryPromptClosed() }) { LibraryChoiceSheet(prompt: $0) }
         #if DEBUG
         .onChange(of: DemoHandover.shared.autoRuns) {
             Task { await run(DemoHandover.shared.autoDirection) }
@@ -206,7 +212,10 @@ struct ContinueListeningArea: View {
         outcome = direction == .toPhone ? await continueHere(arrived) : await sendBack(arrived)
         #endif
         result = outcome
-        if outcome == nil || outcome?.isFailure == false {
+        if stoppedQuietly {
+            stoppedQuietly = false
+            HandoffMoment.shared.fail()
+        } else if outcome == nil || outcome?.isFailure == false {
             arrived()
         } else if !landed {
             HandoffMoment.shared.fail()
@@ -231,15 +240,38 @@ struct ContinueListeningArea: View {
         }
     }
 
+    /// Asks about adding a playlist or album to the library, before anything
+    /// moves. The build-up stops while the sheet is open and starts again
+    /// with the answer.
+    private func askLibrary(_ question: LibraryQuestion) async -> LibraryAnswer {
+        HandoffMoment.shared.fail()
+        // A sheet from an earlier question that's somehow still open is that question's Cancel.
+        libraryPrompt?.answer(.cancel)
+        let answer = await withCheckedContinuation { reply in
+            libraryPrompt = LibraryPrompt(question, reply: reply)
+        }
+        libraryPrompt = nil
+        if answer != .cancel { HandoffMoment.shared.begin(.toMac) }
+        return answer
+    }
+
+    private func libraryPromptClosed() {
+        libraryPrompt?.answer(.cancel)
+        libraryPrompt = nil
+    }
+
     private func sendBack(_ arrived: @escaping @MainActor () -> Void) async -> (text: String, isFailure: Bool)? {
-        let outcome = await model.sendBackToMac(with: player, arrived: arrived)
+        let outcome = await model.sendBackToMac(with: player, askLibrary: { await askLibrary($0) }, arrived: arrived)
         // Say only what's true now: headphones moving over can pause Apple Music here by themselves.
         let stillHere = player.nowPlaying()?.isPlaying == true ? " Music is still playing on your iPhone." : ""
+        if [.cancelled, .needsLibraryChoice, .libraryAddFailed].contains(outcome) { stoppedQuietly = true }
         return switch outcome {
         case .sentAsStation: ("Your Mac is playing the station, which started with another song.", false)
         case .macRefused: ("Couldn’t start playback on your Mac." + stillHere, true)
         case .macDidNotStart: ("Your Mac didn’t respond. Try again." + stillHere, true)
         case .sentBack, .nothingPlayingHere: nil
+        // Cancel: nothing moved, and the person knows why (marked above).
+        case .cancelled, .needsLibraryChoice, .libraryAddFailed: nil
         }
     }
 

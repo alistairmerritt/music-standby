@@ -201,6 +201,15 @@ public enum SendBackOutcome: Equatable, Sendable {
     case macRefused
     /// The Mac didn't get to the song in time. Apple Music here carries on.
     case macDidNotStart
+    /// The person cancelled when asked about adding a playlist or album to
+    /// the library (28 November 2026). Nothing moved and nothing was added.
+    case cancelled
+    /// The Mac's Continue from iPhone has to ask the person about adding a
+    /// playlist or album to the library. Nothing moved; Apple Music here plays on.
+    case needsLibraryChoice
+    /// Adding the playlist or album to the library failed, and the Mac's
+    /// Continue from iPhone has to ask what next. Nothing moved.
+    case libraryAddFailed
 }
 
 public enum ContinueOutcome: Equatable, Sendable {

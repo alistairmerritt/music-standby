@@ -44,6 +44,7 @@ struct MusicStandByApp: App {
         }
         companion.remote = reader(musicRemote.client)
         musicRemote.onClientChange = { [weak companion] client in companion?.remote = reader(client) }
+        companion.askLibrary = { addFailed in await LibraryDialog.ask(addFailed: addFailed) }
         companion.start()
         AppDelegate.companion = companion
         // The Continue from iPhone Shortcuts action works on this companion.

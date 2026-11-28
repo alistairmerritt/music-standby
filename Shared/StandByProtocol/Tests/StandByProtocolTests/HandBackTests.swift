@@ -23,6 +23,24 @@ import Testing
         #expect(try Fixture.sameJSON(status.encoded(), Fixture.data("relay-hand-back-status")))
     }
 
+    /// 28 November 2026: the Mac's answer to "add it to the library?" rides
+    /// on a new request; a request without it decodes as before.
+    @Test func aRequestCanCarryTheLibraryChoice() throws {
+        let frame = MacFrame.handBackRequest(id: requestID, library: .add, remember: true)
+        let json = try #require(try JSONSerialization.jsonObject(with: frame.encoded()) as? [String: Any])
+        #expect(json["library"] as? String == "add" && json["remember"] as? Bool == true)
+        #expect(try MacFrame.decode(frame.encoded()) == frame)
+        let plain = try #require(try JSONSerialization.jsonObject(with: MacFrame.handBackRequest(id: requestID).encoded()) as? [String: Any])
+        #expect(plain["library"] == nil && plain["remember"] == nil, "nothing new on the wire without a choice")
+
+        let body = #"{"requestID":"3E7A1C5B-9D2F-4A68-B0C4-6E8F1A3B5D7C","expiresAt":"2026-11-12T10:02:00.000Z","library":"station","remember":false}"#
+        let request = try StandByWire.makeDecoder().decode(HandBackRequest.self, from: Data(body.utf8))
+        #expect(request.library == .station && request.remember == false)
+        let old = #"{"requestID":"3E7A1C5B-9D2F-4A68-B0C4-6E8F1A3B5D7C","expiresAt":"2026-11-12T10:02:00.000Z"}"#
+        #expect(try StandByWire.makeDecoder().decode(HandBackRequest.self, from: Data(old.utf8)).library == nil)
+        #expect(HandBackStatus.needsLibraryChoice.rawValue.count <= 32, "the relay takes statuses of up to 32 characters")
+    }
+
     @Test func phoneBodiesRoundTrip() throws {
         #expect(try roundTrip(HandBackStatusReport.self, "http-hand-back-status") == HandBackStatusReport(requestID: requestID, status: .done))
         #expect(try roundTrip(DeviceTokenRegistration.self, "http-token-device").token.allSatisfy(\.isHexDigit))
@@ -44,7 +62,8 @@ import Testing
     @Test func unknownStatusesSurviveAndOnlyAnswersAreFinal() throws {
         let frame = #"{"type":"hand-back-status","requestID":"3E7A1C5B-9D2F-4A68-B0C4-6E8F1A3B5D7C","status":"teleported"}"#
         #expect(try RelayFrame.decode(Data(frame.utf8)) == .handBackStatus(id: requestID, status: "teleported"))
-        let answers: [HandBackStatus] = [.done, .nothingPlaying, .notInQueue, .failed, .unreachable]
+        let answers: [HandBackStatus] = [.done, .nothingPlaying, .notInQueue, .failed, .unreachable,
+                                         .needsLibraryChoice, .libraryAddFailed, .cancelled]
         let interim: [HandBackStatus] = [.asked, .notified, .working, "teleported"]
         let allAnswersFinal = answers.allSatisfy(\.isFinal), anyInterimFinal = interim.contains(where: \.isFinal)
         #expect(allAnswersFinal)

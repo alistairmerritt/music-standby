@@ -1080,6 +1080,39 @@ describe("continue from iPhone (hand-back)", () => {
     expect((await mac.next("hand-back-status")).status).toBe("done");
   });
 
+  it("passes the Mac's library choice on to the phone in both pushes, and drops a malformed one", async () => {
+    const { mac, pairingID, phoneToken } = await withDevice();
+    const id = requestID();
+    mac.send({ type: "hand-back-request", requestID: id, library: "add", remember: true });
+    expect((await mac.next("hand-back-status")).status).toBe("asked");
+    const wake = (await pushes(phoneToken)).filter((p) => p.event === "hand-back");
+    expect(wake[0].payload.handBack).toMatchObject({ requestID: id, library: "add", remember: true });
+    await editStorage(pairingID, async (storage) => {
+      const h = (await storage.get<any>("handBack"))!;
+      await storage.put("handBack", { ...h, notifyAt: Date.now() - 1 });
+    });
+    await runDurableObjectAlarm(pairingStub(pairingID));
+    const alert = (await pushes(phoneToken)).filter((p) => p.event === "hand-back-alert");
+    expect(alert[0].payload.handBack).toMatchObject({ requestID: id, library: "add", remember: true });
+    expect((await mac.next("hand-back-status")).status).toBe("notified");
+
+    const plain = requestID();
+    mac.send({ type: "hand-back-request", requestID: plain });
+    expect((await mac.next("hand-back-status")).status).toBe("asked");
+    const second = (await pushes(phoneToken)).filter((p) => p.event === "hand-back").at(-1)!;
+    expect(second.payload.handBack.requestID).toBe(plain);
+    expect(second.payload.handBack).not.toHaveProperty("library");
+    expect(second.payload.handBack).not.toHaveProperty("remember");
+
+    const bad = requestID();
+    mac.send({ type: "hand-back-request", requestID: bad, library: "Add To Library!", remember: "yes" });
+    expect((await mac.next("hand-back-status")).status).toBe("asked");
+    const third = (await pushes(phoneToken)).filter((p) => p.event === "hand-back").at(-1)!;
+    expect(third.payload.handBack.requestID).toBe(bad);
+    expect(third.payload.handBack).not.toHaveProperty("library");
+    expect(third.payload.handBack).not.toHaveProperty("remember");
+  });
+
   it("shows a notification when the background push gets no answer in time", async () => {
     const { mac, pairingID, phoneToken } = await withDevice();
     const id = requestID();

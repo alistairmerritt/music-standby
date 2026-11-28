@@ -19,7 +19,9 @@ import {
   type RelayFrame,
   type RemoteCommand,
   type TrackMetadata,
+  type HandBackRequest,
   isHandBackStatus,
+  isLibraryChoice,
   isUUID,
 } from "./protocol";
 import {
@@ -125,6 +127,14 @@ interface ActivityRecord {
   delivered: string;
 }
 
+/** What both hand-back pushes carry for the app. */
+function handBackRequestFor(handBack: HandBack): HandBackRequest {
+  const request: HandBackRequest = { requestID: handBack.requestID, expiresAt: iso(handBack.expiresAt) };
+  if (handBack.library) request.library = handBack.library;
+  if (handBack.remember !== undefined) request.remember = handBack.remember;
+  return request;
+}
+
 /** A Continue from iPhone request the relay is working on (API-v1 §14). */
 interface HandBack {
   requestID: string;
@@ -136,6 +146,9 @@ interface HandBack {
   /** The phone has sent a status, so no notification is needed. */
   answered: boolean;
   notified: boolean;
+  /** Passed on to the phone in both pushes (HandBackRequest). */
+  library?: string;
+  remember?: boolean;
 }
 
 interface StoredArtwork {
@@ -480,7 +493,7 @@ export class Pairing extends DurableObject<Env> {
       case "pair-decision":
         return this.decide(String(frame.claimID), frame.approved === true);
       case "hand-back-request":
-        return this.handBackRequested(frame.requestID);
+        return this.handBackRequested(frame.requestID, frame.library, frame.remember);
       case "error":
         // The Mac can't supply artwork it was asked for: stop holding its GETs.
         if (frame.error?.code === "artwork_unavailable" && typeof frame.error.message === "string") {
@@ -1283,7 +1296,7 @@ export class Pairing extends DurableObject<Env> {
    * background push; if it hasn't said anything within HAND_BACK_NOTIFY_MS,
    * the alarm shows a notification instead. A new request replaces the last.
    */
-  private async handBackRequested(requestID: unknown): Promise<void> {
+  private async handBackRequested(requestID: unknown, library?: unknown, remember?: unknown): Promise<void> {
     if (!isUUID(requestID)) {
       this.sendToMac({ type: "error", error: { code: "invalid_frame", message: "hand-back-request needs a UUID requestID" } });
       return;
@@ -1297,6 +1310,9 @@ export class Pairing extends DurableObject<Env> {
       answered: false,
       notified: false,
     };
+    // Anything else is dropped, so the phone treats the request as having no choice.
+    if (isLibraryChoice(library)) handBack.library = library;
+    if (typeof remember === "boolean" && handBack.library) handBack.remember = remember;
     const token = (await this.tokens()).device;
     if (!token) {
       console.log(`hand-back ${short(requestID)}: no device token`);
@@ -1304,7 +1320,7 @@ export class Pairing extends DurableObject<Env> {
       return;
     }
     await this.ctx.storage.put("handBack", handBack);
-    const result = await this.pushSender().sendBackground(makeHandBackWake(token, { requestID, expiresAt: iso(handBack.expiresAt) }));
+    const result = await this.pushSender().sendBackground(makeHandBackWake(token, handBackRequestFor(handBack)));
     console.log(`hand-back ${short(requestID)}: background push → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
     if (await this.dropDeadDeviceToken(token, result)) {
       await this.ctx.storage.delete("handBack");
@@ -1352,8 +1368,7 @@ export class Pairing extends DurableObject<Env> {
       this.sendToMac({ type: "hand-back-status", requestID: handBack.requestID, status: "unreachable" });
       return;
     }
-    const request = { requestID: handBack.requestID, expiresAt: iso(handBack.expiresAt) };
-    const result = await this.pushSender().sendAlert(makeHandBackAlert(token, record.mac.name, request));
+    const result = await this.pushSender().sendAlert(makeHandBackAlert(token, record.mac.name, handBackRequestFor(handBack)));
     console.log(`hand-back ${short(handBack.requestID)}: notification → ${result.status}${result.reason ? ` ${result.reason}` : ""}`);
     const delivered = result.status >= 200 && result.status < 300;
     if (!delivered) await this.dropDeadDeviceToken(token, result);

@@ -35,6 +35,14 @@ public struct Handover {
     /// the car and Shortcuts said "an unknown error occurred".
     @MainActor final class Budget { var deadline: Date? }
     private let budget = Budget()
+    /// Set when Continue on Mac met a playlist or album that isn't in the
+    /// library, nobody could be asked, and the setting is Ask Every Time, so
+    /// the song's station went instead and nothing was added (28 November
+    /// 2026). The Shortcuts action says so in its answer.
+    @MainActor final class LibraryNote { var keptOut = false }
+    private let libraryNote = LibraryNote()
+    /// See `LibraryNote`.
+    public var playedStationInsteadOfAdding: Bool { libraryNote.keptOut }
     /// Whether the Mac isn't connected to the relay, and why; nil while it is.
     /// Without it, Continue on iPhone plays the Mac's last song from where it
     /// stopped and asks the Mac nothing.
@@ -492,20 +500,39 @@ public struct Handover {
     /// `skipsAtMost` songs into the Mac's queue and that queue is the same
     /// playlist: the Mac plays the playlist from the song, which is quicker
     /// than many skips and carries on after the 25 songs it sent.
+    ///
+    /// From 28 November 2026, an Apple Music playlist or album that isn't in
+    /// the library goes as the setting says: added, its song's station, or,
+    /// set to Ask Every Time, as `askLibrary` answers, before anything moves.
+    /// Without `askLibrary` (nobody to ask), Ask Every Time plays the song's
+    /// station and adds nothing.
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
                               from source: HandoverSource = .unknown,
+                              askLibrary: LibraryAsker? = nil,
                               arrived: (@MainActor () -> Void)? = nil) async -> SendBackOutcome {
         arrival.call = arrived
         defer { arrival.call = nil }
+        libraryNote.keptOut = false
         let started = now()
-        let outcome = await performSendBackToMac(with: player, timeout: timeout)
+        let outcome = await performSendBackToMac(with: player, timeout: timeout, ask: askLibrary)
         LockScreenRecord.add("Continue on Mac from \(source.rawValue): \(outcome) in \(Self.seconds(since: started, now: now()))",
                              at: now(), in: widgetDefaults)
         if outcome == .sentBack || outcome == .sentAsStation { WidgetSnapshot.markOnIPhone(false, in: widgetDefaults) }
         return outcome
     }
 
-    private func performSendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval) async -> SendBackOutcome {
+    /// The person's answer, carried into the hand-over started again after
+    /// they gave it, for the same playlist or album only.
+    struct LibraryDecided: Equatable {
+        var key: String
+        var add: Bool
+    }
+    /// Questions in one hand-over at most, should the music keep moving to
+    /// another playlist or album while each is open.
+    static let libraryAsksAtMost = 3
+
+    private func performSendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval, ask: LibraryAsker?,
+                                      decided: LibraryDecided? = nil, asks: Int = 0) async -> SendBackOutcome {
         // Playing or paused here: a paused song is still the phone's to hand on.
         guard let here = player.nowPlaying(), let catalogID = here.catalogID else { return .nothingPlayingHere }
         let ahead = macQueuePosition(of: catalogID)
@@ -544,22 +571,32 @@ public struct Handover {
         var allowance = Self.stationStartAllowance
         switch appleMusic {
         case .playlist(var online)?:
-            if memory.addsToLibrary(), await player.addToLibrary(.playlist(online)) {
+            switch await libraryStep(.playlist(online), .init(kind: .playlist, name: online.name), player: player, ask: ask, decided: decided, asks: asks) {
+            case .added:
                 online.addedToLibrary = true
                 place = online
                 allowance += PlaylistPlace.librarySyncWait
                 record("Send back to Mac: the phone's Apple Music playlist, added to the library, from song \(online.index + 1) of \(online.count)")
-            } else {
+            case .station:
                 record("Send back to Mac: the phone's Apple Music playlist isn't in the library; the song's station instead")
+            case .again(let answer):
+                return await again(answer, with: player, timeout: timeout, ask: ask, asks: asks)
+            case .stop(let outcome):
+                return outcome
             }
         case .album(var online, let id)?:
-            if memory.addsToLibrary(), await player.addToLibrary(.album(online, id: id)) {
+            switch await libraryStep(.album(online, id: id), .init(kind: .album, name: online.title), player: player, ask: ask, decided: decided, asks: asks) {
+            case .added:
                 online.addedToLibrary = true
                 album = online
                 allowance += PlaylistPlace.librarySyncWait
                 record("Send back to Mac: the phone's Apple Music album, added to the library, from song \(online.index + 1) of \(online.count)")
-            } else {
+            case .station:
                 record("Send back to Mac: the phone's Apple Music album isn't in the library; the song's station instead")
+            case .again(let answer):
+                return await again(answer, with: player, timeout: timeout, ask: ask, asks: asks)
+            case .stop(let outcome):
+                return outcome
             }
         case .station(let found)?:
             station = found
@@ -581,6 +618,95 @@ public struct Handover {
     /// Songs the Mac may skip through to reach the phone's song, rather than
     /// start the phone's playlist from it.
     static let skipsAtMost = 2
+
+    enum LibraryStep {
+        /// It's in the library now (or already was): send it.
+        case added
+        /// Send the song's station; nothing was added.
+        case station
+        /// The person answered: start the hand-over again, so it goes from
+        /// where the phone is now, with whatever it plays now.
+        case again(LibraryDecided)
+        case stop(SendBackOutcome)
+    }
+
+    /// Whether an Apple Music playlist or album goes to the Mac (added to the
+    /// library first) or its song's station does. Nothing has moved yet, so
+    /// asking costs nothing but time: the phone plays on meanwhile.
+    private func libraryStep(_ source: AppleMusicSource, _ question: LibraryQuestion, player: any PhoneMusicPlaying,
+                             ask: LibraryAsker?, decided: LibraryDecided?, asks: Int) async -> LibraryStep {
+        let what = question.kind == .playlist ? "playlist" : "album"
+        // Already the library's own: nothing to add, so nothing to ask.
+        if source.isAlreadyInLibrary { return await player.addToLibrary(source) ? .added : .station }
+        let wantsAdd: Bool
+        if let decided, decided.key == source.libraryKey {
+            wantsAdd = decided.add
+        } else {
+            switch memory.libraryPreference() {
+            case .add: wantsAdd = true
+            case .station: wantsAdd = false
+            case .ask:
+                guard let ask else {
+                    libraryNote.keptOut = true
+                    record("Send back to Mac: nobody to ask about adding the \(what) to the library (Ask Every Time); the song's station, nothing added")
+                    return .station
+                }
+                guard asks < Self.libraryAsksAtMost else {
+                    record("Send back to Mac: the music kept changing while asked about the library; stopped")
+                    return .stop(.cancelled)
+                }
+                if decided != nil { record("Send back to Mac: the phone now plays another \(what); asking again") }
+                return answered(await ask(question), for: source, what: what)
+            }
+        }
+        guard wantsAdd else { return .station }
+        if await player.addToLibrary(source) { return .added }
+        record("Send back to Mac: couldn't add the \(what) to the library")
+        guard let ask else {
+            // A saved Add to Library, with nobody to ask (Shortcuts, a widget):
+            // carrying on matters more than the playlist, as before.
+            libraryNote.keptOut = true
+            record("Send back to Mac: nobody to ask; the song's station instead")
+            return .station
+        }
+        var failed = question
+        failed.addFailed = true
+        switch await ask(failed) {
+        case .askTheMac: return .stop(.libraryAddFailed)
+        case let answer: return answered(answer, for: source, what: what)
+        }
+    }
+
+    /// After an answer, which may have taken a while: the Mac may have gone
+    /// meanwhile, and nothing should be added for a Mac that can't play it.
+    private func again(_ answer: LibraryDecided, with player: any PhoneMusicPlaying, timeout: TimeInterval,
+                       ask: LibraryAsker?, asks: Int) async -> SendBackOutcome {
+        await refresh()
+        if let away = macAway() {
+            record("Send back to Mac: the Mac went away (\(away)) while asked about the library; nothing moved")
+            return .macRefused
+        }
+        return await performSendBackToMac(with: player, timeout: timeout, ask: ask, decided: answer, asks: asks + 1)
+    }
+
+    private func answered(_ answer: LibraryAnswer, for source: AppleMusicSource, what: String) -> LibraryStep {
+        switch answer {
+        case .add(let remember):
+            if remember { memory.saveLibraryPreference(.add) }
+            record("Send back to Mac: asked; add the \(what) to the library\(remember ? ", from now on" : "")")
+            return .again(LibraryDecided(key: source.libraryKey, add: true))
+        case .station(let remember):
+            if remember { memory.saveLibraryPreference(.station) }
+            record("Send back to Mac: asked; the song's station\(remember ? ", from now on" : "")")
+            return .again(LibraryDecided(key: source.libraryKey, add: false))
+        case .cancel:
+            record("Send back to Mac: asked about the library; cancelled, nothing moved")
+            return .stop(.cancelled)
+        case .askTheMac:
+            record("Send back to Mac: the \(what) isn't in the library; the Mac asks what to do")
+            return .stop(.needsLibraryChoice)
+        }
+    }
 
     /// The round trip: the Mac skips ahead in its own queue to the phone's song.
     private func skipMacAhead(_ ahead: Int, to catalogID: String, here: PhoneNowPlaying, with player: any PhoneMusicPlaying,

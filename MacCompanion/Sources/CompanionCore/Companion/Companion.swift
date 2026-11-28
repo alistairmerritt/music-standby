@@ -64,6 +64,16 @@ public final class Companion {
     /// How long Continue from iPhone waits for the phone before saying it
     /// didn't answer. The relay forgets a request after 2 minutes.
     @ObservationIgnored public var handBackTimeout: Duration = .seconds(45)
+    /// Shows the question about adding the phone's playlist or album to the
+    /// library (28 November 2026), with Try Again in place of Add & Continue
+    /// when `addFailed`, and returns the answer; nil is Cancel. Set by the
+    /// app; without it the phone is told nobody can be asked.
+    @ObservationIgnored public var askLibrary: (@MainActor (_ addFailed: Bool) async -> LibraryDialogAnswer?)?
+    @ObservationIgnored private var askingLibrary = false
+    @ObservationIgnored private var libraryAsks = 0
+    /// Questions for one click at most, should the phone's music keep
+    /// moving to another playlist or album while each is open.
+    static let libraryAsksAtMost = 3
     /// How long after a track change Music's artwork isn't trusted. Music can
     /// report the previous track's image in that time, then none at all. Was
     /// 1.5 s; 0.75 s since 11 Nov 2026, as the previous track's image from
@@ -323,7 +333,19 @@ public final class Companion {
     /// Asks the phone to hand its music back (docs/relay/API-v1.md §14). The
     /// relay wakes the phone's app, or shows it a notification; the phone
     /// then skips this Mac to its song, seeks to its position and plays.
-    public func continueFromPhone() {
+    ///
+    /// `canAsk` (the menu): when the phone plays an Apple Music playlist or
+    /// album that isn't in the library and its setting is Ask Every Time, it
+    /// answers `needs_library_choice` without moving anything, this Mac asks
+    /// the person, and a new request carries the answer. False (the
+    /// Shortcuts action, which can't show a dialog): the phone plays the
+    /// song's station and adds nothing.
+    public func continueFromPhone(canAsk: Bool = true) {
+        libraryAsks = 0
+        requestHandBack(library: canAsk && askLibrary != nil ? .ask : nil, remember: nil)
+    }
+
+    private func requestHandBack(library: HandBackLibraryChoice?, remember: Bool?) {
         let id = UUID()
         guard connection.phase == .connected else {
             handBack = HandBackProgress(id: id, status: .unreachable)
@@ -332,10 +354,42 @@ public final class Companion {
         }
         handBack = HandBackProgress(id: id)
         recordHandBack("continue from iPhone: asking")
-        enqueue { [weak self] in await self?.send(.handBackRequest(id: id)) }
+        enqueue { [weak self] in await self?.send(.handBackRequest(id: id, library: library, remember: remember)) }
         Task { [weak self, handBackTimeout] in
             try? await Task.sleep(for: handBackTimeout)
             self?.handBackTimedOut(id)
+        }
+    }
+
+    /// The phone's question, asked here. The phone plays on meanwhile, and
+    /// the answer goes in a new request, so the phone starts from where it
+    /// is by then. One dialog at a time; its answer is for the request
+    /// waiting on it when it closes.
+    private func askAboutLibrary(addFailed: Bool) {
+        guard let askLibrary, !askingLibrary else { return }
+        guard libraryAsks < Self.libraryAsksAtMost else {
+            recordHandBack("continue from iPhone: the iPhone's music kept changing while asked about the library; stopped")
+            return
+        }
+        askingLibrary = true
+        libraryAsks += 1
+        recordHandBack("continue from iPhone: asking about the library\(addFailed ? " after adding failed" : "")")
+        Task { [weak self] in
+            let answer = await askLibrary(addFailed)
+            guard let self else { return }
+            askingLibrary = false
+            // Music started here meanwhile, or the question was answered elsewhere.
+            guard let waiting = handBack, waiting.status == .needsLibraryChoice || waiting.status == .libraryAddFailed else {
+                recordHandBack("continue from iPhone: nothing waits on the library answer any more")
+                return
+            }
+            guard let answer else {
+                handBack = HandBackProgress(id: waiting.id, status: .cancelled)
+                recordHandBack("continue from iPhone: cancelled; nothing moved")
+                return
+            }
+            recordHandBack("continue from iPhone: \(answer.choice)\(answer.remember ? ", remembered" : "")")
+            requestHandBack(library: answer.choice, remember: answer.remember)
         }
     }
 
@@ -390,6 +444,9 @@ public final class Companion {
             progress.timedOut = false
             handBack = progress
             recordHandBack("continue from iPhone: \(status)")
+            if status == .needsLibraryChoice || status == .libraryAddFailed {
+                askAboutLibrary(addFailed: status == .libraryAddFailed)
+            }
         case .error(let error):
             record("relay error \(error.code): \(error.message ?? "")")
         case .unknown(let type):
@@ -1275,6 +1332,18 @@ extension RemoteCommand {
 }
 
 /// A Continue from iPhone request, as the menu shows it.
+/// The person's answer to the library question at the Mac.
+public struct LibraryDialogAnswer: Equatable, Sendable {
+    /// `.add` or `.station`.
+    public var choice: HandBackLibraryChoice
+    public var remember: Bool
+
+    public init(choice: HandBackLibraryChoice, remember: Bool) {
+        self.choice = choice
+        self.remember = remember
+    }
+}
+
 public struct HandBackProgress: Equatable, Sendable {
     public var id: UUID
     /// The latest word from the relay or the phone; nil until the first.
@@ -1304,6 +1373,9 @@ public struct HandBackProgress: Equatable, Sendable {
         case .notInQueue?: return "The song on your iPhone isn’t in this Mac’s queue."
         case .failed?: return "Couldn’t continue here. Try again."
         case .unreachable?: return "Couldn’t reach your iPhone."
+        case .needsLibraryChoice?: return "Choose whether to add it to your library."
+        case .libraryAddFailed?: return "Couldn’t add it to your library."
+        case .cancelled?: return "Cancelled. Nothing was moved."
         default: return nil
         }
     }
@@ -1319,7 +1391,7 @@ extension MacFrame {
         case .artwork(let a): "artwork \(a.artworkID.prefix(12))…"
         case .goodbye(let reason): "goodbye \(reason)"
         case .pairDecision(_, let approved): "pair-decision \(approved)"
-        case .handBackRequest(let id): "hand-back-request \(id)"
+        case .handBackRequest(let id, let library, _): "hand-back-request \(id)\(library.map { " library \($0)" } ?? "")"
         case .error(let e): "error \(e.code)"
         case .unknown(let type): "unknown \(type)"
         }

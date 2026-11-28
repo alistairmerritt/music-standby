@@ -506,11 +506,28 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
     // MARK: Apple Music, stations, the library and repeat (17 November 2026)
 
     private func handBack(_ relay: FakeRelay, _ phone: FakePhoneMusic, addsToLibrary: Bool) async throws -> SendBackOutcome {
+        try await library(relay, phone, preference: addsToLibrary ? .add : .station).outcome
+    }
+
+    /// The setting, and what Remember my choice saved.
+    @MainActor final class Setting {
+        var preference: LibraryPreference
+        var saved: [LibraryPreference] = []
+        init(_ preference: LibraryPreference) { self.preference = preference }
+    }
+
+    /// Continue on Mac with the library setting, and someone to ask when given.
+    private func library(_ relay: FakeRelay, _ phone: FakePhoneMusic, preference: LibraryPreference = .ask,
+                         setting: Setting? = nil, from source: HandoverSource = .app,
+                         ask: LibraryAsker? = nil) async throws -> (outcome: SendBackOutcome, handover: Handover) {
         let clock = MutableClock()
-        let memory = HandoverMemory(load: { nil }, save: { _ in }, addsToLibrary: { addsToLibrary })
+        let setting = setting ?? Setting(preference)
+        let memory = HandoverMemory(load: { nil }, save: { _ in }, libraryPreference: { setting.preference },
+                                    saveLibraryPreference: { setting.preference = $0; setting.saved.append($0) })
         let remote = MacRemote(client: relay, now: { clock.now }, sleep: { clock.advance($0) }, memory: memory)
         try await remote.read()
-        return await remote.handover().sendBackToMac(with: phone)
+        let handover = remote.handover()
+        return (await handover.sendBackToMac(with: phone, from: source, askLibrary: ask), handover)
     }
 
     private static let online = PlaylistPlace(name: "Today", cloudID: "pl.f4d106fed2bd", count: 50, index: 5)
@@ -530,12 +547,235 @@ private func playingFromAA(at place: PlaylistPlace = aa, state: PlaybackState = 
         #expect(sent.first?.repeatMode == .one)
     }
 
-    @Test func addToLibraryIsOffUntilTurnedOn() {
-        let defaults = UserDefaults(suiteName: "addsToLibrary-\(UUID().uuidString)")!
-        #expect(HandoverMemory.defaults(defaults).addsToLibrary() == false, "nothing stored: off")
-        defaults.set(true, forKey: HandoverMemory.addsToLibraryKey)
-        #expect(HandoverMemory.defaults(defaults).addsToLibrary() == true)
-        #expect(HandoverMemory.none.addsToLibrary() == false)
+    /// 28 November 2026: the old switch becomes the new setting once, and
+    /// only a switch someone flipped counts as a choice.
+    @Test func theOldSwitchMigratesOnceAndAnUntouchedOneAsks() {
+        func fresh() -> UserDefaults { UserDefaults(suiteName: "library-\(UUID().uuidString)")! }
+        let untouched = fresh()
+        #expect(HandoverMemory.defaults(untouched).libraryPreference() == .ask, "never flipped: Ask Every Time")
+        #expect(untouched.string(forKey: HandoverMemory.libraryPreferenceKey) == "ask", "written once, so it stays put")
+        let on = fresh()
+        on.set(true, forKey: HandoverMemory.addsToLibraryKey)
+        #expect(HandoverMemory.defaults(on).libraryPreference() == .add)
+        let off = fresh()
+        off.set(false, forKey: HandoverMemory.addsToLibraryKey)
+        #expect(HandoverMemory.defaults(off).libraryPreference() == .station, "turned on, then off: they had the station")
+        #expect(off.object(forKey: HandoverMemory.addsToLibraryKey) as? Bool == false, "the old key is left for an older build")
+        // Once migrated, the new setting wins, whatever the old switch says.
+        HandoverMemory.defaults(off).saveLibraryPreference(.add)
+        #expect(HandoverMemory.defaults(off).libraryPreference() == .add)
+        #expect(HandoverMemory.none.libraryPreference() == .ask)
+    }
+
+    // MARK: Asking before adding to the library (28 November 2026)
+
+    /// Answers with each of `answers` in turn and remembers the questions.
+    @MainActor final class Person {
+        var answers: [LibraryAnswer]
+        var questions: [LibraryQuestion] = []
+        var meanwhile: ((Int) async -> Void)?
+        init(_ answers: LibraryAnswer...) { self.answers = answers }
+        var asker: LibraryAsker {
+            { question in
+                self.questions.append(question)
+                await self.meanwhile?(self.questions.count)
+                return self.answers.isEmpty ? .cancel : self.answers.removeFirst()
+            }
+        }
+    }
+
+    private func onlinePlaylistPhone() -> FakePhoneMusic {
+        let phone = phone("270246724", playlist: nil)
+        phone.appleMusicHere = .playlist(Self.online)
+        return phone
+    }
+
+    private func pausedMacThatPlays() async -> FakeRelay {
+        let relay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await relay.setAfterCommand(macPlays("270246724"))
+        return relay
+    }
+
+    @Test func addAndContinueAddsItThenSendsThePlaylist() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let person = Person(.add(remember: false)), setting = Setting(.ask)
+        #expect(try await library(relay, phone, setting: setting, ask: person.asker).outcome == .sentBack)
+        #expect(person.questions == [LibraryQuestion(kind: .playlist, name: "Today")])
+        #expect(phone.added == [.playlist(Self.online)])
+        var expected = Self.online
+        expected.addedToLibrary = true
+        #expect(await relay.sent.map(\.command).first?.playlist == expected)
+        #expect(setting.saved.isEmpty && setting.preference == .ask, "not remembered")
+        #expect(phone.pauses == 1)
+    }
+
+    @Test func playSongStationAddsNothing() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let person = Person(.station(remember: false))
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(person.questions.count == 1 && phone.added.isEmpty)
+        let sent = await relay.sent.map(\.command)
+        #expect(sent.first?.kind == .playStation && sent.first?.playlist == nil && sent.first?.album == nil)
+    }
+
+    @Test func cancelMovesNothingAndAddsNothing() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let person = Person(.cancel), setting = Setting(.ask)
+        #expect(try await library(relay, phone, setting: setting, ask: person.asker).outcome == .cancelled)
+        #expect(await relay.sent.isEmpty, "the Mac was told nothing")
+        #expect(phone.added.isEmpty && phone.pauses == 0, "the phone plays on")
+        #expect(setting.saved.isEmpty, "Cancel is never remembered")
+    }
+
+    @Test func rememberMyChoiceSavesItAndTheNextOneIsOneTap() async throws {
+        for (answer, saved) in [(LibraryAnswer.add(remember: true), LibraryPreference.add), (.station(remember: true), .station)] {
+            let setting = Setting(.ask)
+            let person = Person(answer)
+            _ = try await library(await pausedMacThatPlays(), onlinePlaylistPhone(), setting: setting, ask: person.asker)
+            #expect(setting.saved == [saved] && setting.preference == saved)
+            // The next hand-over asks nothing and does as saved.
+            let again = Person(.cancel), phone = onlinePlaylistPhone()
+            #expect(try await library(await pausedMacThatPlays(), phone, setting: setting, ask: again.asker).outcome == .sentBack)
+            #expect(again.questions.isEmpty)
+            #expect(phone.added.count == (saved == .add ? 1 : 0))
+        }
+    }
+
+    @Test func libraryMusicStationsAndShuffleAskNothing() async throws {
+        func neverAsked(_ phone: FakePhoneMusic, _ relay: FakeRelay) async throws {
+            let person = Person(.cancel)
+            let outcome = try await library(relay, phone, ask: person.asker).outcome
+            #expect(person.questions.isEmpty, "asked for \(outcome)")
+            #expect(outcome == .sentBack || outcome == .sentAsStation)
+        }
+        try await neverAsked(phone("270246724", playlist: aaHere), await pausedMacThatPlays())
+        let album = phone("270246724", playlist: nil)
+        album.albumHere = Self.album
+        try await neverAsked(album, await pausedMacThatPlays())
+        // Recently played's copy of a library album: already the library's own.
+        let libraryCopy = phone("270246724", playlist: nil)
+        libraryCopy.appleMusicHere = .album(AlbumPlace(title: "Album", count: 10, index: 2), id: "l.AbCdEf")
+        try await neverAsked(libraryCopy, await pausedMacThatPlays())
+        let station = phone("270246724", playlist: nil)
+        station.appleMusicHere = .station(StationPlace(id: "ra.985484166", name: "Made-Up Radio"))
+        let stationRelay = FakeRelay(mac(playingFromAA(state: .paused)))
+        await stationRelay.setNext(macPlays("555", title: "Another Song"))
+        try await neverAsked(station, stationRelay)
+        let shuffled = phone("270246724", playlist: nil)
+        shuffled.shufflingLibrary = true
+        try await neverAsked(shuffled, await pausedMacThatPlays())
+        let plain = phone("270246724", playlist: nil)
+        try await neverAsked(plain, await pausedMacThatPlays())
+    }
+
+    @Test func aSlowAnswerSendsWhereThePhoneIsWhenItCame() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let person = Person(.station(remember: false))
+        person.meanwhile = { _ in phone.current?.position = 91 }   // 30 s on
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(await relay.sent.map(\.command).first?.position == 91)
+    }
+
+    @Test func aSongChangeWhileAskedIsCheckedAgainBeforeAnythingIsAdded() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let person = Person(.add(remember: false))
+        // Meanwhile the phone moved on to a library playlist: nothing to add.
+        person.meanwhile = { _ in
+            phone.appleMusicHere = nil
+            phone.playlistHere = aaHere
+        }
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(phone.added.isEmpty, "the answer was for a playlist the phone no longer plays")
+        #expect(await relay.sent.map(\.command).first?.playlist == aaHere)
+    }
+
+    @Test func anotherPlaylistWhileAskedIsAskedAboutItself() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let other = PlaylistPlace(name: "Tomorrow", cloudID: "pl.0000other", count: 20, index: 1)
+        let person = Person(.add(remember: false), .station(remember: false))
+        person.meanwhile = { asked in if asked == 1 { phone.appleMusicHere = .playlist(other) } }
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(person.questions.map(\.name) == ["Today", "Tomorrow"])
+        #expect(phone.added.isEmpty, "yes to Today isn't yes to Tomorrow")
+    }
+
+    @Test func theMacGoingAwayWhileAskedAddsNothing() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        var gone = mac(playingFromAA(state: .paused))
+        gone.macConnected = false
+        let person = Person(.add(remember: false))
+        person.meanwhile = { _ in await relay.setNext(gone) }
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .macRefused)
+        #expect(phone.added.isEmpty && phone.pauses == 0)
+        #expect(await relay.sent.isEmpty)
+    }
+
+    @Test func aFailedAddIsNeverQuietlyTheStation() async throws {
+        // Try Again, then it works.
+        var relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        phone.adds = false
+        var person = Person(.add(remember: false), .add(remember: false))
+        person.meanwhile = { asked in if asked == 2 { phone.adds = true } }
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(person.questions.map(\.addFailed) == [false, true])
+        #expect(phone.added.count == 2)
+        // The station instead.
+        relay = await pausedMacThatPlays(); phone = onlinePlaylistPhone(); phone.adds = false
+        person = Person(.add(remember: false), .station(remember: false))
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .sentBack)
+        #expect(await relay.sent.map(\.command).first?.playlist == nil)
+        // Cancel: nothing moves.
+        relay = await pausedMacThatPlays(); phone = onlinePlaylistPhone(); phone.adds = false
+        person = Person(.add(remember: false), .cancel)
+        #expect(try await library(relay, phone, ask: person.asker).outcome == .cancelled)
+        #expect(await relay.sent.isEmpty && phone.pauses == 0)
+        // A saved Add to Library that fails asks too, when someone can be asked.
+        relay = await pausedMacThatPlays(); phone = onlinePlaylistPhone(); phone.adds = false
+        person = Person(.cancel)
+        #expect(try await library(relay, phone, preference: .add, ask: person.asker).outcome == .cancelled)
+        #expect(person.questions.map(\.addFailed) == [true])
+    }
+
+    @Test func nobodyToAskPlaysTheStationAddsNothingAndSaysSo() async throws {
+        let relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        let (outcome, handover) = try await library(relay, phone, preference: .ask, from: .shortcuts)
+        #expect(outcome == .sentBack && phone.added.isEmpty)
+        #expect(await relay.sent.map(\.command).first?.playlist == nil)
+        #expect(handover.playedStationInsteadOfAdding)
+        // A saved Add to Library still adds, unattended.
+        let saved = onlinePlaylistPhone()
+        let added = try await library(await pausedMacThatPlays(), saved, preference: .add, from: .shortcuts)
+        #expect(added.outcome == .sentBack && saved.added.count == 1 && !added.handover.playedStationInsteadOfAdding)
+        // …and when adding fails there, carrying on matters more, as before.
+        let failing = onlinePlaylistPhone()
+        failing.adds = false
+        let fell = try await library(await pausedMacThatPlays(), failing, preference: .add, from: .shortcuts)
+        #expect(fell.outcome == .sentBack && fell.handover.playedStationInsteadOfAdding)
+    }
+
+    @Test func theMacsContinueFromIPhoneAsksAtTheMac() async throws {
+        let request = { (library: HandBackLibraryChoice?, remember: Bool?) in
+            HandBackRequest(requestID: UUID(), expiresAt: .distantFuture, library: library, remember: remember)
+        }
+        // The Mac can ask: nothing moves, the Mac asks.
+        var relay = await pausedMacThatPlays(), phone = onlinePlaylistPhone()
+        #expect(try await library(relay, phone, from: .macRequest, ask: request(.ask, nil).libraryAsker()).outcome == .needsLibraryChoice)
+        #expect(await relay.sent.isEmpty && phone.pauses == 0 && phone.added.isEmpty)
+        // The Mac's answer, remembered.
+        relay = await pausedMacThatPlays(); phone = onlinePlaylistPhone()
+        let setting = Setting(.ask)
+        #expect(try await library(relay, phone, setting: setting, from: .macRequest, ask: request(.add, true).libraryAsker()).outcome == .sentBack)
+        #expect(phone.added.count == 1 && setting.saved == [.add])
+        // Adding fails: back to the Mac to ask what next.
+        relay = await pausedMacThatPlays(); phone = onlinePlaylistPhone(); phone.adds = false
+        #expect(try await library(relay, phone, from: .macRequest, ask: request(.add, false).libraryAsker()).outcome == .libraryAddFailed)
+        #expect(await relay.sent.isEmpty && phone.pauses == 0)
+        // An older Mac or relay, or the Mac's Shortcuts action: nobody to ask.
+        #expect(request(nil, nil).libraryAsker() == nil)
+        #expect(request("teleport", nil).libraryAsker() == nil)
+        #expect(HandBackResponder.status(for: .needsLibraryChoice) == .needsLibraryChoice)
+        #expect(HandBackResponder.status(for: .libraryAddFailed) == .libraryAddFailed)
+        #expect(HandBackResponder.status(for: .cancelled) == .cancelled)
     }
 
     @Test func withTheSettingOffAnAppleMusicPlaylistIsTheSongsStation() async throws {

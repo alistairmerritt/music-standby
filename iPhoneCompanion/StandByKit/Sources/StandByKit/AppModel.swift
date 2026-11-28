@@ -375,10 +375,13 @@ public final class AppModel {
     /// Continue on Mac, from the Mac's live state. See `Handover`.
     /// `arrived` runs the moment the Mac is seen playing, before the rest of
     /// the hand-over finishes.
+    /// `askLibrary` shows the question about adding a playlist or album to
+    /// the library (`LibraryChoice.swift`).
     public func sendBackToMac(with player: any PhoneMusicPlaying, timeout: TimeInterval = 10,
                               from source: HandoverSource = .app,
+                              askLibrary: LibraryAsker? = nil,
                               arrived: (@MainActor () -> Void)? = nil) async -> SendBackOutcome {
-        await handover.sendBackToMac(with: player, timeout: timeout, from: source, arrived: arrived)
+        await handover.sendBackToMac(with: player, timeout: timeout, from: source, askLibrary: askLibrary, arrived: arrived)
     }
 
     /// The handover steps, reading the Mac through this model's transport.

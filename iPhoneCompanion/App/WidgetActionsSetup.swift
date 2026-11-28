@@ -31,6 +31,8 @@ extension WidgetActions {
             case .nothingPlayingHere: throw WidgetActionError(message: "Nothing is playing in Apple Music on your iPhone.")
             case .macRefused: throw WidgetActionError(message: "Couldn’t start playback on your Mac.")
             case .macDidNotStart: throw WidgetActionError(message: "Your Mac didn’t respond. Try again.")
+            // Only where someone is asked, which a widget never is.
+            case .cancelled, .needsLibraryChoice, .libraryAddFailed: throw WidgetActionError(message: "Nothing was moved.")
             }
         }
         // The Live Activity card's buttons (experiment): straight to the relay,
